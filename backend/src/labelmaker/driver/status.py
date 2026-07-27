@@ -5,7 +5,12 @@ manual for the PT-E550W/P750W/P710BT -- not in-repo; see HANDOFF.md's
 References section for the download link. docs/research/protocol.md is
 driver-landscape research, not a source of field-level byte facts):
 
-- Status request command: ESC i S (`STATUS_REQUEST`).
+- Status request command: ESC i S (`STATUS_REQUEST`). `request_status()`
+  actually writes `FLUSH + ESC_INIT + STATUS_REQUEST` -- the flush/`ESC @`
+  init prefix matches the only sequence ever confirmed against real hardware
+  (HANDOFF.md:49-51's probe). `FLUSH`/`ESC_INIT`/`STATUS_REQUEST` live in
+  protocol.py; `STATUS_REQUEST` is re-exported here for compatibility with
+  existing importers of `labelmaker.driver.status.STATUS_REQUEST`.
 - Reply is exactly 32 bytes (`STATUS_LEN`). Header: byte0=0x80 (print-head
   mark), byte1=0x20 (block size 32), byte2=0x42 ('B'). See PrinterStatus for
   the decoded fields, and HANDOFF.md's real reference block for byte offsets.
@@ -15,10 +20,11 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
+from labelmaker.driver.geometry import MediaFamily
+from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
 from labelmaker.driver.transport import Transport
 
 E720BT_MODEL_CODE = 0x81
-STATUS_REQUEST = b"\x1b\x69\x53"
 STATUS_LEN = 32
 
 _HEADER_BYTE0 = 0x80
@@ -161,17 +167,36 @@ def parse_status(data: bytes) -> PrinterStatus:
     )
 
 
+def media_family_for(media_type: MediaType | None) -> MediaFamily | None:
+    """Bridge a decoded status-block MediaType to the geometry.py MediaFamily
+    used to look up TapeSpec rows (I4). LAMINATED/NON_LAMINATED are both TZe
+    tape; the two heat-shrink media types map to their own families.
+    NO_MEDIA, INCOMPATIBLE, and undecoded/unknown (None) media types have no
+    corresponding geometry family -- callers fall back to a default (see
+    cli.py's `_run_usb_print`).
+    """
+    if media_type in (MediaType.LAMINATED, MediaType.NON_LAMINATED):
+        return MediaFamily.TZE
+    if media_type is MediaType.HEAT_SHRINK_2_1:
+        return MediaFamily.HSE_2_1
+    if media_type is MediaType.HEAT_SHRINK_3_1:
+        return MediaFamily.HSE_3_1
+    return None
+
+
 def request_status(
     transport: Transport, *, retries: int = 10, interval_s: float = 0.1
 ) -> PrinterStatus:
     """Request and parse a status block.
 
-    Sends STATUS_REQUEST exactly once, then polls transport.read(32) up to
-    `retries` times, accumulating partial reads until 32 bytes are collected.
-    Sleeps `interval_s` after each empty read. Raises StatusTimeoutError if
+    Writes `FLUSH + ESC_INIT + STATUS_REQUEST` exactly once (C2 -- matches
+    the only status-request sequence ever confirmed on real hardware,
+    HANDOFF.md:49-51), then polls transport.read(32) up to `retries` times,
+    accumulating partial reads until 32 bytes are collected. Sleeps
+    `interval_s` after each empty read. Raises StatusTimeoutError if
     `retries` is exhausted before 32 bytes arrive.
     """
-    transport.write(STATUS_REQUEST)
+    transport.write(FLUSH + ESC_INIT + STATUS_REQUEST)
 
     buf = bytearray()
     for _ in range(retries):

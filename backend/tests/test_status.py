@@ -7,17 +7,23 @@ copies of it, never by calling parse_status() and trusting the result.
 
 import pytest
 
+from labelmaker.driver.geometry import MediaFamily, find_tape
+from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
 from labelmaker.driver.status import (
     E720BT_MODEL_CODE,
     STATUS_LEN,
-    STATUS_REQUEST,
     MediaType,
     StatusTimeoutError,
     StatusType,
+    media_family_for,
     parse_status,
     request_status,
 )
 from labelmaker.driver.transport import CaptureTransport
+
+# C2: request_status() now writes this exact flush/init/request sequence
+# (matches HANDOFF.md:49-51's confirmed probe sequence), not STATUS_REQUEST alone.
+STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
 # Real probe data (HANDOFF.md): 24mm laminated-family tape, no errors, model 0x81.
 REFERENCE_STATUS_BLOCK = bytes(
@@ -166,7 +172,7 @@ def test_request_status_immediate_full_reply():
     status = request_status(transport, interval_s=0)
 
     assert status.is_e720bt is True
-    assert transport.written == STATUS_REQUEST
+    assert transport.written == STATUS_REQUEST_SEQUENCE
 
 
 def test_request_status_two_empty_reads_then_full_reply():
@@ -196,7 +202,7 @@ def test_request_status_never_replies_raises_timeout():
     with pytest.raises(StatusTimeoutError):
         request_status(transport, retries=3, interval_s=0)
 
-    assert transport.written == STATUS_REQUEST  # request sent exactly once
+    assert transport.written == STATUS_REQUEST_SEQUENCE  # request sent exactly once
 
 
 def test_request_status_split_reply_with_empty_read_between():
@@ -237,3 +243,34 @@ def test_status_type_unknown_raw_decodes_to_none():
 
 def test_e720bt_model_code_constant():
     assert E720BT_MODEL_CODE == 0x81
+
+
+# --- 7. media_family_for (I4) ---
+
+
+def test_media_family_for_laminated_and_non_laminated_map_to_tze():
+    assert media_family_for(MediaType.LAMINATED) is MediaFamily.TZE
+    assert media_family_for(MediaType.NON_LAMINATED) is MediaFamily.TZE
+
+
+def test_media_family_for_heat_shrink_families():
+    assert media_family_for(MediaType.HEAT_SHRINK_2_1) is MediaFamily.HSE_2_1
+    assert media_family_for(MediaType.HEAT_SHRINK_3_1) is MediaFamily.HSE_3_1
+
+
+def test_media_family_for_no_media_incompatible_and_none_map_to_none():
+    assert media_family_for(MediaType.NO_MEDIA) is None
+    assert media_family_for(MediaType.INCOMPATIBLE) is None
+    assert media_family_for(None) is None
+
+
+def test_media_family_for_heat_shrink_2_1_resolves_hse_not_tze_spec():
+    # media_type 0x11 (HEAT_SHRINK_2_1), status width 9 -> the HSe 8.8mm spec
+    # (print_dots=48), not the TZe 9mm spec (print_dots=50) that the same
+    # width byte would resolve to under the default TZE family.
+    family = media_family_for(MediaType.HEAT_SHRINK_2_1)
+    tape = find_tape(9, family)
+    assert tape is not None
+    assert tape.nominal_mm == 8.8
+    assert tape.family is MediaFamily.HSE_2_1
+    assert tape.print_dots == 48

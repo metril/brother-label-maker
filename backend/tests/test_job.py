@@ -2,7 +2,9 @@
 wire-ready byte streams.
 
 Expected full-stream literals are assembled entirely by hand: protocol-byte
-constants (see task-0.5-brief.md) plus frame-byte literals whose PackBits/RAW
+constants (from HANDOFF.md's protocol quick-reference and Brother's family
+raster manual for the PT-E550W/P750W/P710BT -- see HANDOFF.md's References
+section for the download link) plus frame-byte literals whose PackBits/RAW
 derivation is commented at the point of definition below. No frame byte in
 this file is obtained by calling `raster.encode_line`/`packbits.encode` (or
 `strategies.py`/`job.py`, the code under test) -- every expected byte is a

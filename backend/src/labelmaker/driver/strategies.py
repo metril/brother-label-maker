@@ -1,8 +1,14 @@
 """Init/print strategies: the two candidate byte-stream families this printer
 might require. The physical checkpoint A/B-tests these against the real
-device -- each must be byte-perfect against its documented reference. See
-task-0.5-brief.md for the protocol tables and the deliberate ordering
-deviation (E310BT magic placement) resolved here.
+device -- each must be byte-perfect against its documented reference.
+
+Protocol tables: HANDOFF.md's protocol quick-reference (flush/`ESC @`/
+`ESC i a`/`ESC i z`/`ESC i M`/`ESC i d`/`M 02` command bytes) and Brother's
+family raster manual for the PT-E550W/P750W/P710BT (see HANDOFF.md's
+References section for the download link). The e310bt `MAGIC` packet and its
+deliberate ordering deviation (K -> z -> magic, not the naive preamble
+reading) come from docs/research/protocol.md's driver-landscape findings on
+the e-control-systems/ptouch-print fork.
 """
 
 from __future__ import annotations
@@ -12,13 +18,12 @@ from typing import TYPE_CHECKING
 
 from labelmaker.driver.geometry import TapeSpec, clamp_margin_mm, mm_to_dots
 from labelmaker.driver.job import ChainMode
+from labelmaker.driver.protocol import ESC_INIT, FLUSH
 from labelmaker.driver.raster import Compression
 
 if TYPE_CHECKING:
     from labelmaker.driver.job import JobOptions
 
-FLUSH = b"\x00" * 100
-ESC_INIT = b"\x1b\x40"
 ESC_RASTER_MODE = b"\x1b\x69\x61\x01"
 FF = b"\x0c"
 CTRL_Z = b"\x1a"

@@ -1,7 +1,12 @@
 """Tests for labelmaker.driver.raster: 1-bit image -> per-column raster line frames.
 
 All expected byte literals below are hand-computed (see derivation comments), never
-obtained by calling the code under test. See task-0.3-brief.md for the protocol facts.
+obtained by calling the code under test. Protocol facts (raster line framing,
+PackBits/RAW encoding, the 'Z' all-zero shorthand) come from HANDOFF.md's
+protocol quick-reference and Brother's family raster manual for the
+PT-E550W/P750W/P710BT (see HANDOFF.md's References section for the download
+link); tape geometry figures come from docs/research/features.md's tape
+geometry tables.
 """
 
 import packbits

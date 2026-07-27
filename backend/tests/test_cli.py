@@ -12,8 +12,14 @@ import pytest
 from PIL import ImageOps
 
 from labelmaker.driver import cli
-from labelmaker.driver.status import STATUS_REQUEST, StatusTimeoutError
-from labelmaker.driver.transport import CaptureTransport, PrinterNotFoundError
+from labelmaker.driver.geometry import MediaFamily, find_tape
+from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
+from labelmaker.driver.status import StatusTimeoutError, StatusType
+from labelmaker.driver.transport import CaptureTransport, PrinterNotFoundError, TransportError
+
+# C2: request_status() writes this exact flush/init/request sequence, not
+# STATUS_REQUEST alone (matches HANDOFF.md:49-51's confirmed probe sequence).
+STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
 # Real probe data (HANDOFF.md / task-0.4 reference block): 24mm laminated-family
 # tape, no errors, model 0x81. media_type_raw is the still-undecoded 0x14.
@@ -91,6 +97,18 @@ def test_arrow_last_column_has_no_border():
     img = cli.build_pattern("arrow", PRINT_DOTS)[0]
     last_col = [img.getpixel((cli.ARROW_LENGTH_DOTS - 1, y)) for y in range(PRINT_DOTS)]
     assert any(px != 0 for px in last_col)  # not a solid black column
+
+
+def test_arrow_bit_order_comb_rows_1_3_5_black_rows_0_2_4_white():
+    # I5: the bit-order comb -- three full-width 1-dot lines at rows 1/3/5,
+    # sampled away from the marker/border (near x=0) and the arrow tip/shaft
+    # (which lives right at the horizontal center).
+    img = cli.build_pattern("arrow", PRINT_DOTS)[0]
+    sample_x = cli.ARROW_LENGTH_DOTS // 2 + 20  # mid-length, off the tip/shaft column
+    for y in (1, 3, 5):
+        assert img.getpixel((sample_x, y)) == 0, f"comb row {y} not black at x={sample_x}"
+    for y in (0, 2, 4):
+        assert img.getpixel((sample_x, y)) != 0, f"row {y} unexpectedly black at x={sample_x}"
 
 
 # --- checker: density/registration test ---
@@ -283,6 +301,7 @@ def test_capture_prints_summary(tmp_path, capsys):
     assert "classic" in printed
     assert "pages=1" in printed
     assert str(out) in printed
+    assert "tape≈" in printed  # M7: estimated tape length alongside nominal width
 
 
 # --- print-test --capture FILE is an alias of capture --out FILE ---
@@ -321,9 +340,9 @@ def test_print_test_usb_success_writes_status_request_then_job(monkeypatch, caps
     rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
 
     assert rc == 0
-    assert transport.written.startswith(STATUS_REQUEST)
-    assert len(transport.written) > len(STATUS_REQUEST)  # job stream also written
-    assert transport.written[len(STATUS_REQUEST) :].startswith(b"\x00" * 100 + b"\x1b\x40")
+    assert transport.written.startswith(STATUS_REQUEST_SEQUENCE)
+    assert len(transport.written) > len(STATUS_REQUEST_SEQUENCE)  # job stream also written
+    assert transport.written[len(STATUS_REQUEST_SEQUENCE) :].startswith(b"\x00" * 100 + b"\x1b\x40")
     printed = capsys.readouterr().out
     assert "classic" in printed
 
@@ -336,7 +355,7 @@ def test_print_test_usb_refuses_when_status_has_error(monkeypatch):
     rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
 
     assert rc == 1
-    assert transport.written == STATUS_REQUEST  # nothing written after the request
+    assert transport.written == STATUS_REQUEST_SEQUENCE  # nothing written after the request
 
 
 def test_print_test_usb_unknown_media_width_exits_1(monkeypatch):
@@ -348,7 +367,104 @@ def test_print_test_usb_unknown_media_width_exits_1(monkeypatch):
     rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
 
     assert rc == 1
-    assert transport.written == STATUS_REQUEST
+    assert transport.written == STATUS_REQUEST_SEQUENCE
+
+
+def test_print_test_usb_write_transport_error_exits_1_with_permissions_hint(monkeypatch, capsys):
+    # C1: a USB write failure after a clean status must exit 1 with the
+    # permissions hint, not traceback.
+    class _FailingTransport(CaptureTransport):
+        def write(self, data, timeout_ms=10000):
+            if bytes(data) == STATUS_REQUEST_SEQUENCE:
+                super().write(data, timeout_ms)
+                return
+            raise TransportError("USB write error: [Errno 5] Input/output error")
+
+    transport = _FailingTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "permission" in err.lower()
+
+
+# --- I4: media-family bridge (unknown media type falls back to TZe) ---
+
+
+def test_print_test_usb_unknown_media_type_prints_tze_assumption_warning(monkeypatch, capsys):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)  # media_type_raw == 0x14, still undecoded
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "media type unknown (0x14)" in out
+    assert "assuming TZe geometry" in out
+
+
+def test_print_test_usb_heat_shrink_2_1_media_type_resolves_without_warning(monkeypatch, capsys):
+    block = _status_block({10: 9, 11: 0x11})  # HEAT_SHRINK_2_1, status width 9 -> HSe 8.8mm
+    transport = CaptureTransport()
+    transport.queue_read(block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "media type unknown" not in out
+    # sanity: the family really did resolve to the HSe (not TZe) 8.8mm spec.
+    tape = find_tape(9, MediaFamily.HSE_2_1)
+    assert tape is not None and tape.print_dots == 48
+
+
+# --- I1: post-print status drain ---
+
+
+def test_print_test_usb_drains_post_print_status_summary(monkeypatch, capsys):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)  # initial status request reply
+    completed_block = _status_block({18: StatusType.PRINTING_COMPLETED.value})
+    transport.queue_read(completed_block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "PRINTING_COMPLETED" in out
+
+
+def test_print_test_usb_post_print_error_block_mentioned_exit_stays_0(monkeypatch, capsys):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+    error_block = _status_block({18: StatusType.ERROR_OCCURRED.value, 8: 0x01})  # No media
+    transport.queue_read(error_block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0  # the job was already sent -- post-print status never affects exit code
+    out = capsys.readouterr().out
+    assert "ERROR_OCCURRED" in out
+    assert "No media" in out
+
+
+def test_print_test_usb_no_post_print_status_prints_note(monkeypatch, capsys):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)  # nothing else queued -> reads all return b""
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no post-print status received" in out
 
 
 def test_print_test_printer_not_found_exits_1_with_permissions_hint(monkeypatch, capsys):
@@ -412,6 +528,24 @@ def test_probe_printer_not_found_exits_1_with_permissions_hint(monkeypatch, caps
     assert "permission" in err.lower()
 
 
+def test_probe_transport_error_exits_1_with_permissions_hint(monkeypatch, capsys):
+    # C1: probe's USB path must also catch TransportError (not just
+    # PrinterNotFoundError/StatusTimeoutError).
+    transport = CaptureTransport()
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    def _raise_transport_error(_transport, **_kwargs):
+        raise TransportError("USB read error: [Errno 5] Input/output error")
+
+    monkeypatch.setattr(cli, "request_status", _raise_transport_error)
+
+    rc = cli.main(["probe"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "permission" in err.lower()
+
+
 def test_probe_non_e720bt_model_still_exits_0_with_warning(monkeypatch, capsys):
     block = _status_block({4: 0x30})  # some other model code
     transport = CaptureTransport()
@@ -424,6 +558,23 @@ def test_probe_non_e720bt_model_still_exits_0_with_warning(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "0x30" in out
     assert "warning" in out.lower() or "not" in out.lower()
+
+
+def test_status_transport_error_exits_1_with_permissions_hint(monkeypatch, capsys):
+    # C1: status's USB path must also catch TransportError.
+    transport = CaptureTransport()
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    def _raise_transport_error(_transport, **_kwargs):
+        raise TransportError("USB read error: [Errno 5] Input/output error")
+
+    monkeypatch.setattr(cli, "request_status", _raise_transport_error)
+
+    rc = cli.main(["status"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "permission" in err.lower()
 
 
 def test_status_default_has_no_raw_hex_dump(monkeypatch, capsys):

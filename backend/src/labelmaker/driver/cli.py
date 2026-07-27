@@ -22,17 +22,33 @@ from collections.abc import Callable
 
 from PIL import Image, ImageDraw
 
-from labelmaker.driver.geometry import MediaFamily, TapeSpec, all_tapes, find_tape
+from labelmaker.driver.geometry import (
+    MIN_FEED_MM,
+    MediaFamily,
+    TapeSpec,
+    all_tapes,
+    dots_to_mm,
+    find_tape,
+)
 from labelmaker.driver.job import ChainMode, JobOptions, JobStream, build_job
 from labelmaker.driver.raster import BitOrder, RasterConfig
 from labelmaker.driver.status import (
     E720BT_MODEL_CODE,
+    STATUS_LEN,
     PrinterStatus,
     StatusTimeoutError,
+    StatusType,
+    media_family_for,
+    parse_status,
     request_status,
 )
 from labelmaker.driver.strategies import ClassicStrategy, E310BTStrategy, InitStrategy
-from labelmaker.driver.transport import PrinterNotFoundError, PyUsbTransport, Transport
+from labelmaker.driver.transport import (
+    PrinterNotFoundError,
+    PyUsbTransport,
+    Transport,
+    TransportError,
+)
 
 # --- Test patterns -----------------------------------------------------------
 
@@ -55,9 +71,11 @@ def _build_arrow(print_dots: int) -> Image.Image:
     A large triangle arrow (plus a trailing shaft) pointing toward row 0 --
     the high-pin edge under the default RasterConfig -- PLUS a solid square
     marker in the column-0/row-0 corner ONLY, PLUS a 1-dot border on the
-    column-0 edge only. Asymmetric under both a vertical flip (the pin/width
-    axis) and a horizontal mirror (the print-direction axis): one printed
-    label uniquely diagnoses `flip_pins` and print/column direction.
+    column-0 edge only, PLUS a bit-order comb: three 1-dot-tall full-width
+    horizontal lines at rows 1/3/5 (I5). Asymmetric under both a vertical
+    flip (the pin/width axis) and a horizontal mirror (the print-direction
+    axis): one printed label uniquely diagnoses `flip_pins` and print/column
+    direction.
     """
     img = _new_canvas(ARROW_LENGTH_DOTS, print_dots)
     draw = ImageDraw.Draw(img)
@@ -82,6 +100,17 @@ def _build_arrow(print_dots: int) -> Image.Image:
 
     # 1-dot border on the column-0 edge only (full height).
     draw.line([(0, 0), (0, print_dots - 1)], fill=0)
+
+    # Bit-order comb (I5): three 1-dot-tall full-width horizontal lines at
+    # rows 1, 3, 5 -- deliberately NOT byte-aligned (byte boundaries fall on
+    # 8-pin groups, so rows 1/3/5 land mid-byte under either bit order). A
+    # reversed bit order shows up here as the comb lines visibly shifting
+    # position or merging together -- unmistakable -- rather than the subtle
+    # few-pixel edge shift a bit-order bug would otherwise produce on the
+    # arrow/marker/border alone.
+    for comb_y in (1, 3, 5):
+        if comb_y < print_dots:
+            draw.line([(0, comb_y), (ARROW_LENGTH_DOTS - 1, comb_y)], fill=0)
 
     return img
 
@@ -176,14 +205,14 @@ def _open_transport() -> Transport:
 def _open_and_get_status() -> tuple[Transport, PrinterStatus]:
     """Open the transport and request status once.
 
-    Raises PrinterNotFoundError (no transport opened) or StatusTimeoutError
-    (transport opened and closed before re-raising) -- callers handle both
-    uniformly with the same permissions hint.
+    Raises PrinterNotFoundError (no transport opened), StatusTimeoutError, or
+    TransportError (transport opened and closed before re-raising) -- callers
+    handle all three uniformly with the same permissions hint (C1).
     """
     transport = _open_transport()
     try:
         status = request_status(transport)
-    except StatusTimeoutError:
+    except (StatusTimeoutError, TransportError):
         transport.close()
         raise
     return transport, status
@@ -239,11 +268,56 @@ def _build_stream(args: argparse.Namespace, tape: TapeSpec) -> JobStream:
 
 
 def _print_job_summary(stream: JobStream, tape: TapeSpec) -> None:
+    # M7: tape≈ is an estimated *length* of tape consumed (one raster line per
+    # dot of travel, floored at MIN_FEED_MM's mechanical head-to-cutter gap) --
+    # distinct from the tape= nominal *width* already printed alongside it.
+    estimated_length_mm = max(dots_to_mm(stream.total_raster_lines), MIN_FEED_MM)
     print(
         f"strategy={stream.strategy_name} pages={stream.page_count} "
         f"lines={stream.total_raster_lines} bytes={len(stream.data)} "
-        f"tape={tape.nominal_mm}mm"
+        f"tape={tape.nominal_mm}mm tape≈{estimated_length_mm:.1f}mm"
     )
+
+
+def _format_post_print_status(status: PrinterStatus) -> str:
+    label = (
+        status.status_type.name
+        if status.status_type is not None
+        else f"raw=0x{status.status_type_raw:02x}"
+    )
+    line = f"post-print status: {label}"
+    if status.errors:
+        line += " errors=" + ", ".join(status.errors)
+    return line
+
+
+def _drain_post_print_status(transport: Transport) -> None:
+    """I1: after writing the job stream, best-effort drain up to 4 status
+    blocks the printer may push unsolicited (job completion, mid-print
+    errors). Purely informational -- the job bytes are already on the wire,
+    so nothing here changes the command's exit code, including a transport
+    failure on the drain reads themselves.
+    """
+    received_any = False
+    for _ in range(4):
+        try:
+            block = transport.read(STATUS_LEN, timeout_ms=2000)
+        except TransportError as err:
+            print(f"post-print status: read failed ({err})")
+            break
+        if len(block) != STATUS_LEN:
+            continue
+        received_any = True
+        try:
+            status = parse_status(block)
+        except ValueError as err:
+            print(f"post-print status: malformed block ({err})")
+            continue
+        print(_format_post_print_status(status))
+        if status.status_type in (StatusType.ERROR_OCCURRED, StatusType.PRINTING_COMPLETED):
+            break
+    if not received_any:
+        print("no post-print status received (not necessarily an error)")
 
 
 # --- Subcommands ---------------------------------------------------------
@@ -252,7 +326,7 @@ def _print_job_summary(stream: JobStream, tape: TapeSpec) -> None:
 def _cmd_probe(args: argparse.Namespace) -> int:
     try:
         transport, status = _open_and_get_status()
-    except (PrinterNotFoundError, StatusTimeoutError) as err:
+    except (PrinterNotFoundError, StatusTimeoutError, TransportError) as err:
         return _handle_hardware_error(err)
     try:
         _print_status_summary(status)
@@ -264,7 +338,7 @@ def _cmd_probe(args: argparse.Namespace) -> int:
 def _cmd_status(args: argparse.Namespace) -> int:
     try:
         transport, status = _open_and_get_status()
-    except (PrinterNotFoundError, StatusTimeoutError) as err:
+    except (PrinterNotFoundError, StatusTimeoutError, TransportError) as err:
         return _handle_hardware_error(err)
     try:
         _print_status_summary(status)
@@ -288,7 +362,7 @@ def _run_capture(args: argparse.Namespace, out_path: str) -> int:
 def _run_usb_print(args: argparse.Namespace) -> int:
     try:
         transport, status = _open_and_get_status()
-    except (PrinterNotFoundError, StatusTimeoutError) as err:
+    except (PrinterNotFoundError, StatusTimeoutError, TransportError) as err:
         return _handle_hardware_error(err)
 
     try:
@@ -299,7 +373,15 @@ def _run_usb_print(args: argparse.Namespace) -> int:
             )
             return 1
 
-        tape = find_tape(status.media_width_mm)
+        # I4: bridge the decoded media type to a geometry family; fall back to
+        # TZe (with a warning) when the media type is unknown/undecoded, e.g.
+        # the still-undecoded 0x14 raw value (HANDOFF.md).
+        family = media_family_for(status.media_type)
+        if family is None:
+            print(f"media type unknown (0x{status.media_type_raw:02x}) — assuming TZe geometry")
+            family = MediaFamily.TZE
+
+        tape = find_tape(status.media_width_mm, family)
         if tape is None:
             print(
                 f"error: no TapeSpec for detected media width {status.media_width_mm}mm",
@@ -310,7 +392,10 @@ def _run_usb_print(args: argparse.Namespace) -> int:
         stream = _build_stream(args, tape)
         transport.write(stream.data)
         _print_job_summary(stream, tape)
+        _drain_post_print_status(transport)
         return 0
+    except TransportError as err:
+        return _handle_hardware_error(err)
     finally:
         transport.close()
 

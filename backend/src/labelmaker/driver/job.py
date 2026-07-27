@@ -1,6 +1,10 @@
 """Job builder: assembles complete, wire-ready byte streams from one or more
-label images, a tape spec, an init strategy, and chain-mode options. See
-task-0.5-brief.md for the chain-mode assembly rules.
+label images, a tape spec, an init strategy, and chain-mode options.
+
+Chain-mode assembly rules (FF/CTRL_Z placement, cut-mark line construction)
+follow HANDOFF.md's protocol quick-reference and Brother's family raster
+manual for the PT-E550W/P750W/P710BT (see HANDOFF.md's References section
+for the download link).
 """
 
 from __future__ import annotations

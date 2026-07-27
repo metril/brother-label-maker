@@ -2,7 +2,8 @@
 
 Tape dimension figures are taken verbatim from Brother's official raster
 manual for the PT-E550W/P750W/P710BT family (128-pin/180dpi head, shared by
-the PT-E720BT) — see task-0.2-brief.md.
+the PT-E720BT; see HANDOFF.md's References section for the download link)
+and cross-checked against docs/research/features.md's tape geometry tables.
 """
 
 import pytest
