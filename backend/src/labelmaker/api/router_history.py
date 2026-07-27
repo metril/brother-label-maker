@@ -25,12 +25,8 @@ from fastapi.responses import Response
 from pydantic import ValidationError
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
-from labelmaker.api.router_print import (
-    PrintRequest,
-    _job_to_response,
-    _validate_render_side,
-    _validate_serialized_print,
-)
+from labelmaker.api.router_print import PrintRequest, _job_to_response, _validate_and_measure
+from labelmaker.render.estimate import estimate
 
 router = APIRouter(prefix="/history", tags=["history"])
 
@@ -111,13 +107,15 @@ async def reprint_job(
     serialization block, if present -- see router_print.py's
     create_print_job docstring on why that snapshot is stored UNEXPANDED)
     and enqueues a brand NEW job: new id, its own definition copy. Reuses
-    POST /api/print's OWN pre-flight validation helpers
-    (_validate_render_side/_validate_serialized_print) so "does this still
-    render" is checked identically either way -- the only difference is the
-    status code: a bad NEW request is a client error (422, POST /api/print),
-    but a stored definition that no longer validates (e.g. a font or image
-    it referenced was since removed) is this SERVER-side resource having
-    gone stale, hence 409, not 422.
+    POST /api/print's OWN pre-flight validation+measurement helper
+    (_validate_and_measure) so "does this still render" -- and the rendered
+    lengths tape_used_mm is estimated from -- are computed identically
+    either way -- the only difference is the status code: a bad NEW
+    request is a client error (422, POST /api/print), but a stored
+    definition that no longer validates (e.g. a font or image it
+    referenced was since removed) is this SERVER-side resource having gone
+    stale, hence 409, not 422 -- so a 422 raised by _validate_and_measure is
+    caught and re-raised as 409 here, its detail message unchanged.
     """
     job = await db.get_job(job_id)
     if job is None:
@@ -129,26 +127,24 @@ async def reprint_job(
         raise HTTPException(status_code=409, detail=error_message(exc)) from exc
 
     try:
-        if print_request.serialization is not None:
-            bound = await anyio.to_thread.run_sync(
-                _validate_serialized_print,
-                print_request.labels[0],
-                print_request.serialization,
-                config.data_dir,
-            )
-            label_count = len(bound)
-        else:
-            await anyio.to_thread.run_sync(
-                _validate_render_side, print_request.labels, config.data_dir
-            )
-            label_count = len(print_request.labels)
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail=error_message(exc)) from exc
+        label_count, lengths_mm = await _validate_and_measure(print_request, config.data_dir)
+    except HTTPException as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+    # task 2.9: same POST-time tape_used_mm estimate POST /api/print stores
+    # (router_print.py's create_print_job) -- reprint is otherwise
+    # indistinguishable from a fresh POST /api/print of the same snapshot.
+    tape_estimate = estimate(
+        lengths_mm,
+        chain_mode=print_request.options.chain_mode.value,
+        margin_mm=print_request.options.margin_mm,
+    )
 
     new_job = await db.create_print_job(
         definition=print_request.model_dump(mode="json"),
         label_count=label_count,
         chain_mode=print_request.options.chain_mode.value,
+        tape_used_mm=tape_estimate.total_mm,
     )
     new_job_id = new_job["id"]
 

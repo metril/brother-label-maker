@@ -1,5 +1,5 @@
-"""POST /api/print, GET /api/print/jobs/{id}, POST /api/print/jobs/{id}/cancel,
-GET /api/print/jobs/{id}/stream.
+"""POST /api/print, POST /api/print/estimate, GET /api/print/jobs/{id},
+POST /api/print/jobs/{id}/cancel, GET /api/print/jobs/{id}/stream.
 
 The actual render/build/print work happens in jobs/worker.py, off a queue --
 this router only does cheap validation, persistence, and job-record I/O.
@@ -8,6 +8,7 @@ this router only does cheap validation, persistence, and job-record I/O.
 from __future__ import annotations
 
 import base64
+import dataclasses
 from pathlib import Path
 
 import anyio
@@ -16,9 +17,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
+from labelmaker.driver.geometry import dots_to_mm
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.render import render_definition
 from labelmaker.render.document import LabelDefinition
+from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition, ordered_values
 
 router = APIRouter(prefix="/print", tags=["print"])
@@ -43,7 +46,7 @@ class PrintRequest(BaseModel):
     serialization: Sequence | None = None
 
 
-def _validate_render_side(labels: list[LabelDefinition], data_dir: Path) -> None:
+def _validate_render_side(labels: list[LabelDefinition], data_dir: Path) -> list[float]:
     """Cheap per-label validation: resolve each label's tape and validate its
     params against the target type's own Params model (render_definition
     does both, plus building the SVG -- still no resvg call). The expensive
@@ -53,14 +56,19 @@ def _validate_render_side(labels: list[LabelDefinition], data_dir: Path) -> None
     `icon.kind="image"` param resolves against the same uploads/ directory
     the worker will use -- an unknown image_id fails HERE, at POST time,
     not after the job is already queued.
+
+    Returns each label's rendered length in mm (dots_to_mm of its
+    RenderedLabel.width_px) -- task 2.9 reuses this SAME render pass (no
+    second render_definition call) to feed render.estimate.estimate(), so
+    computing a tape-usage estimate at POST time costs nothing beyond the
+    validation this function was already doing.
     """
-    for defn in labels:
-        render_definition(defn, data_dir=data_dir)
+    return [dots_to_mm(render_definition(defn, data_dir=data_dir).width_px) for defn in labels]
 
 
 def _validate_serialized_print(
     template: LabelDefinition, serialization: Sequence, data_dir: Path
-) -> list[dict]:
+) -> tuple[list[dict], list[float]]:
     """task 2.4's serialized-print pre-flight: expand `template` now (still
     no resvg call) so an ALPHA run stepping below 'A'/beyond 'ZZZ' or an
     unknown {csv.<col>} in the template comes back as an immediate 422,
@@ -80,23 +88,36 @@ def _validate_serialized_print(
     is in the exact same order expand_definition's `bound` is), so the
     caller can go straight to the offending row/value instead of
     bisecting a 1000-label run by hand.
+
+    Returns (bound, lengths_mm) -- lengths_mm mirrors _validate_render_side's
+    own addition (task 2.9): one rendered length per expanded label, in the
+    same order as `bound`, for render.estimate.estimate() to consume without
+    a second render pass.
     """
     bound = expand_definition(template.model_dump(mode="json"), serialization)
     values = ordered_values(serialization)
+    lengths_mm: list[float] = []
     for i, (raw, value) in enumerate(zip(bound, values, strict=True)):
         try:
-            render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
+            rendered = render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
         except (KeyError, ValueError) as exc:
             raise ValueError(
                 f"label {i} (sequence value {value!r}): {error_message(exc)}"
             ) from exc
-    return bound
+        lengths_mm.append(dots_to_mm(rendered.width_px))
+    return bound, lengths_mm
 
 
-@router.post("", status_code=202)
-async def create_print_job(
-    body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep, config: AppConfigDep
-) -> dict:
+async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int, list[float]]:
+    """Shared pre-flight: the SAME cheap validation (serialization shape,
+    per-label render/params validation, single-shared-tape check) POST
+    /api/print has always done at 202-time, now also returning each label's
+    rendered length in mm -- shared by create_print_job (which goes on to
+    create+enqueue the job) and estimate_print_job (task 2.9's POST
+    /api/print/estimate, which does neither). Returns (label_count,
+    label_lengths_mm), in the same order build_job will eventually receive
+    the images in.
+    """
     if body.serialization is not None:
         if len(body.labels) != 1:
             raise HTTPException(
@@ -107,15 +128,17 @@ async def create_print_job(
                 ),
             )
         try:
-            bound = await anyio.to_thread.run_sync(
-                _validate_serialized_print, body.labels[0], body.serialization, config.data_dir
+            bound, lengths_mm = await anyio.to_thread.run_sync(
+                _validate_serialized_print, body.labels[0], body.serialization, data_dir
             )
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=error_message(exc)) from exc
         label_count = len(bound)
     else:
         try:
-            await anyio.to_thread.run_sync(_validate_render_side, body.labels, config.data_dir)
+            lengths_mm = await anyio.to_thread.run_sync(
+                _validate_render_side, body.labels, data_dir
+            )
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=error_message(exc)) from exc
         label_count = len(body.labels)
@@ -126,15 +149,34 @@ async def create_print_job(
             status_code=422, detail="all labels in a print job must share the same tape"
         )
 
+    return label_count, lengths_mm
+
+
+@router.post("", status_code=202)
+async def create_print_job(
+    body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep, config: AppConfigDep
+) -> dict:
+    label_count, lengths_mm = await _validate_and_measure(body, config.data_dir)
+    tape_estimate = estimate(
+        lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
+    )
+
     # `body.model_dump` snapshots `labels`/`serialization` exactly as
     # posted -- for a serialized job that's [template] + the Sequence spec,
     # UNEXPANDED (the brief's DECIDED contract: reprint re-expands from
     # this snapshot via jobs/worker.py, rather than replaying an already-
     # expanded list persisted at POST time).
+    #
+    # tape_used_mm is stored from THIS estimate at creation time (task 2.9)
+    # -- so a job's history entry shows an estimated tape figure even if it
+    # later fails before ever printing -- and jobs/worker.py refines it to
+    # the actual post-render figure once the job completes successfully
+    # (see that module: same value unless the render genuinely changed).
     job = await db.create_print_job(
         definition=body.model_dump(mode="json"),
         label_count=label_count,
         chain_mode=body.options.chain_mode.value,
+        tape_used_mm=tape_estimate.total_mm,
     )
     job_id = job["id"]
 
@@ -145,6 +187,21 @@ async def create_print_job(
     await queue.put(job_id)
 
     return {"job_id": job_id}
+
+
+@router.post("/estimate")
+async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> dict:
+    """Task 2.9: the SAME request body POST /api/print accepts (labels/
+    options/serialization), returning a TapeEstimate + `label_count`
+    WITHOUT creating a job -- no db.create_print_job call, no enqueue, no
+    broadcast. This is what a "how much tape will this use?" UI (the
+    JobTray) calls before committing to an actual print.
+    """
+    label_count, lengths_mm = await _validate_and_measure(body, config.data_dir)
+    tape_estimate = estimate(
+        lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
+    )
+    return {"label_count": label_count, **dataclasses.asdict(tape_estimate)}
 
 
 def _job_to_response(job: dict) -> dict:
@@ -168,16 +225,32 @@ async def get_print_job(job_id: str, db: DbDep) -> dict:
 
 
 @router.post("/jobs/{job_id}/cancel")
-async def cancel_print_job(job_id: str, db: DbDep) -> dict:
+async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
+    """Task 2.9 carry-forward: cancel via db.cancel_job_if_queued's atomic
+    CAS (single `UPDATE ... WHERE status = 'queued'`) instead of a
+    get-then-update pair -- closes the race where the worker dequeues and
+    marks the job "printing" between this route's read and its write (see
+    that method's own docstring). The CAS itself is the source of truth:
+    True -> 200 (and a job.canceled broadcast); False -> a follow-up
+    get_job() only to CLASSIFY the failure for the client (404 unknown vs.
+    409 naming the real current status) -- that second read is informational
+    only, never re-checked against the CAS result, so a status change
+    between the two reads (already "canceled" itself, say) just changes
+    which status the 409 names, not whether one fires.
+
+    jobs/worker.py's own `status != "queued"` dequeue check (see
+    _process_job) stays as a second line of defense -- belt-and-suspenders,
+    not load-bearing now that the CAS closes the race here.
+    """
+    canceled = await db.cancel_job_if_queued(job_id)
+    if canceled:
+        await bus.broadcast({"event": "job.canceled", "job_id": job_id})
+        return {"status": "canceled"}
+
     job = await db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if job["status"] != "queued":
-        raise HTTPException(
-            status_code=409, detail=f"cannot cancel job in status {job['status']!r}"
-        )
-    updated = await db.update_job(job_id, status="canceled")
-    return {"status": updated["status"]}
+    raise HTTPException(status_code=409, detail=f"cannot cancel job in status {job['status']!r}")
 
 
 @router.get("/jobs/{job_id}/stream")

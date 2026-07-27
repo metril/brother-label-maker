@@ -5,6 +5,7 @@ import type {
   LabelTypeInfo,
   PreviewRequest,
   PreviewResponse,
+  PrintEstimateResponse,
   PrintJob,
   PrintJobResponse,
   PrintRequest,
@@ -106,6 +107,16 @@ export function postPreview(body: PreviewRequest): Promise<PreviewResponse> {
 
 export function postPrint(body: PrintRequest): Promise<PrintJobResponse> {
   return request<PrintJobResponse>("/print", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/print/estimate (task 2.9): the SAME body postPrint() accepts,
+ * returning a tape-usage estimate WITHOUT creating a job -- what the
+ * JobTray calls before committing to an actual print. */
+export function postPrintEstimate(body: PrintRequest): Promise<PrintEstimateResponse> {
+  return request<PrintEstimateResponse>("/print/estimate", {
     method: "POST",
     body: JSON.stringify(body),
   });

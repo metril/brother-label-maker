@@ -34,7 +34,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, error_message
-from labelmaker.driver.geometry import all_tapes, dots_to_mm
+from labelmaker.driver.geometry import MIN_FEED_MM, all_tapes, dots_to_mm
 from labelmaker.render import (
     FontInfo,
     list_fonts,
@@ -43,7 +43,7 @@ from labelmaker.render import (
     rasterize,
     render_definition,
 )
-from labelmaker.render.document import LabelDefinition, family_name
+from labelmaker.render.document import LabelDefinition, RenderWarning, family_name
 from labelmaker.render.serialize import (
     MAX_CSV_ROWS,
     Sequence,
@@ -152,6 +152,30 @@ def _render_and_encode(
     rendered = render_definition(target, data_dir=data_dir)
     img: Image.Image = rasterize(rendered)
     png_bytes = preview_png(img, scale=scale)
+    length_mm_raw = dots_to_mm(rendered.width_px)
+
+    # task 2.9: the tape-usage estimator's floor, surfaced here too (SIMPLER
+    # option the brief chose over a full TapeEstimate on preview, since
+    # chain_mode isn't known yet at preview time -- the full estimate is
+    # POST /api/print/estimate's job, see router_print.py). `short_label` is
+    # appended to `warnings` (not a separate bool) so the frontend's
+    # existing warning-chip rendering picks it up automatically -- compared
+    # against the UNROUNDED length so a value that only LOOKS >= the floor
+    # after rounding to 1 decimal still gets flagged correctly.
+    warnings = list(rendered.warnings)
+    if length_mm_raw < MIN_FEED_MM:
+        warnings.append(
+            RenderWarning(
+                code="short_label",
+                severity="info",
+                message=(
+                    f"this label is {round(length_mm_raw, 1):g}mm long; the printer's "
+                    f"minimum feed is {MIN_FEED_MM:g}mm, so it will still consume "
+                    f"{MIN_FEED_MM:g}mm of tape."
+                ),
+            )
+        )
+
     return {
         "png_b64": base64.b64encode(png_bytes).decode("ascii"),
         # SCALED png dimensions (device dots x scale) -- named png_* so the
@@ -160,8 +184,9 @@ def _render_and_encode(
         # PreviewResponse doc on the frontend side of this contract).
         "png_width_px": img.width * scale,
         "png_height_px": img.height * scale,
-        "length_mm": round(dots_to_mm(rendered.width_px), 1),
-        "warnings": rendered.warnings,
+        "length_mm": round(length_mm_raw, 1),
+        "min_feed_mm": MIN_FEED_MM,
+        "warnings": warnings,
         "total_labels": total_labels_,
         "sequence_value": sequence_value,
     }

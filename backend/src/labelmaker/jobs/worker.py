@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import anyio
 from PIL import Image
 
+from labelmaker.driver.geometry import dots_to_mm
 from labelmaker.driver.job import JobOptions
 from labelmaker.driver.printer import PrintResult, get_status, print_images
 from labelmaker.driver.protocol import ChainMode
@@ -31,11 +33,60 @@ from labelmaker.driver.transport import (
     PyUsbTransport,
     Transport,
 )
+from labelmaker.jobs.events import EventBus
 from labelmaker.render import preview_png, rasterize, render_definition
 from labelmaker.render.document import LabelDefinition
+from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition
 
 logger = logging.getLogger(__name__)
+
+# job.progress broadcasts are throttled to firing only when `sent` crosses a
+# new multiple of this many percentage points since the last broadcast (see
+# _make_progress_cb) -- at most ~11 broadcasts per job (0%, 10%, ..., 100%).
+_PROGRESS_BROADCAST_THRESHOLD_PERCENT = 10
+
+
+def _make_progress_cb(bus: EventBus, job_id: str) -> Callable[[int, int], None]:
+    """Builds the sync progress_cb threaded down into print_images (via
+    _open_print_close/_print) for one job. print_images calls it from
+    INSIDE the worker thread spawned by THIS job's anyio.to_thread.run_sync
+    call (see _open_print_close's docstring) -- `anyio.from_thread.run()`
+    is what lets a plain synchronous callback hop back onto the event loop
+    to actually `await bus.broadcast(...)`; per anyio's docs this works
+    without an explicit portal specifically because it's called from a
+    thread anyio itself spawned via `to_thread.run_sync` (which is exactly
+    _open_print_close's whole call chain, C1: open->print->drain->close as
+    one synchronous call on a single worker thread).
+
+    Throttled by percentage (task 2.9): print_images calls the raw
+    progress_cb once per ~4096-byte write chunk (printer.
+    DEFAULT_WRITE_CHUNK_SIZE), which could be dozens of calls for a large
+    multi-label job -- broadcasting a WS event for every single one would
+    flood connected clients for no UI benefit. This wrapper only actually
+    broadcasts when `sent` has crossed a NEW
+    _PROGRESS_BROADCAST_THRESHOLD_PERCENT-point boundary since the last
+    broadcast, or unconditionally on the final chunk (sent >= total) -- so
+    a job always ends on an exact 100% event even if the total isn't a
+    clean multiple of the threshold.
+    """
+    last_percent = -1
+
+    def _progress_cb(sent: int, total: int) -> None:
+        nonlocal last_percent
+        if total <= 0:
+            return
+        percent = min(100, (sent * 100) // total)
+        is_final = sent >= total
+        if not is_final and percent < last_percent + _PROGRESS_BROADCAST_THRESHOLD_PERCENT:
+            return
+        last_percent = percent
+        anyio.from_thread.run(
+            bus.broadcast,
+            {"event": "job.progress", "job_id": job_id, "sent": sent, "total": total},
+        )
+
+    return _progress_cb
 
 
 async def run_worker(state) -> None:
@@ -122,6 +173,12 @@ async def _process_job(state, job_id: str) -> None:
         # POST /api/print time, router_print.py), so any definition's works.
         design_tape_mm = definitions[0].tape.width_mm
 
+        # task 2.9: throttled job.progress broadcaster for THIS job (see
+        # _make_progress_cb) -- built here, in the event-loop coroutine, but
+        # only ever actually INVOKED from inside the worker thread
+        # _open_print_close spawns below (via print_images' chunked write).
+        progress_cb = _make_progress_cb(bus, job_id)
+
         # C1: open -> print -> drain -> close as ONE synchronous call on a
         # single worker thread, entirely under USB_LOCK -- see transport.py's
         # USB_LOCK docstring. Doing this as one to_thread.run_sync call
@@ -129,9 +186,17 @@ async def _process_job(state, job_id: str) -> None:
         # a different thread-pool thread) keeps the acquire and release on
         # the same thread, and guarantees nothing else can open the
         # transport (another job, or router_printer's status check) for the
-        # full open..close lifetime of THIS job's print.
+        # full open..close lifetime of THIS job's print -- and is also what
+        # makes _make_progress_cb's anyio.from_thread.run() usage valid (see
+        # that function's docstring).
         result = await anyio.to_thread.run_sync(
-            _open_print_close, config.printer_mode, images, strategy, job_options, design_tape_mm
+            _open_print_close,
+            config.printer_mode,
+            images,
+            strategy,
+            job_options,
+            design_tape_mm,
+            progress_cb,
         )
 
         jobs_dir = config.data_dir / "jobs"
@@ -141,9 +206,19 @@ async def _process_job(state, job_id: str) -> None:
 
         thumbnail = await anyio.to_thread.run_sync(preview_png, images[0], 1)
 
-        # tape_used_mm stays whatever it already was (None at creation) --
-        # the tape-length estimator is Phase 2.9, not this task.
-        #
+        # task 2.9: refine tape_used_mm to the ACTUAL rendered lengths now
+        # that the print has genuinely happened, rather than leaving
+        # router_print.py's POST-time estimate (computed from the exact
+        # same render_definition() pipeline, over the exact same
+        # definitions -- so normally identical) as the job's final figure.
+        # `img.width` is the device-pixel width AFTER rasterize() -- which
+        # rasterize.py itself asserts equals each RenderedLabel.width_px
+        # (see render/rasterize.py), so this doesn't require re-rendering.
+        lengths_mm = [dots_to_mm(img.width) for img in images]
+        tape_estimate = estimate(
+            lengths_mm, chain_mode=job_options.chain_mode.value, margin_mm=job_options.margin_mm
+        )
+
         # Task 2.8 carry-forward: backfill strategy/tape_width_mm/
         # media_raw_byte from what this print ACTUALLY used, not what the
         # request declared -- result.job.strategy_name is the strategy that
@@ -162,6 +237,7 @@ async def _process_job(state, job_id: str) -> None:
             strategy=result.job.strategy_name,
             tape_width_mm=result.tape.nominal_mm,
             media_raw_byte=result.status_before.media_type_raw,
+            tape_used_mm=tape_estimate.total_mm,
         )
         await bus.broadcast({"event": "job.done", "job_id": job_id})
     except Exception as exc:
@@ -217,6 +293,7 @@ def _open_print_close(
     strategy: InitStrategy,
     options: JobOptions,
     design_tape_mm: float,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> PrintResult:
     """C1: runs entirely off the event loop thread (see run_worker's
     docstring on why every blocking call here does). Acquires USB_LOCK with
@@ -231,6 +308,11 @@ def _open_print_close(
     MockPrinterTransport doesn't need the lock (nothing physical to
     serialize against), but takes it anyway for uniformity -- every USB-
     transport-opening code path goes through the same helpers, mock or not.
+
+    `progress_cb` (task 2.9) is threaded straight through to print_images --
+    this whole function IS the single to_thread.run_sync call
+    _make_progress_cb's docstring says is required for its
+    anyio.from_thread.run() usage to work.
     """
     USB_LOCK.acquire()
     try:
@@ -239,7 +321,7 @@ def _open_print_close(
         else:
             transport = PyUsbTransport.open()
         try:
-            return _print(images, strategy, options, transport, design_tape_mm)
+            return _print(images, strategy, options, transport, design_tape_mm, progress_cb)
         finally:
             transport.close()
     finally:
@@ -252,6 +334,7 @@ def _print(
     options: JobOptions,
     transport: Transport,
     design_tape_mm: float,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> PrintResult:
     """The actual print step, isolated as its own module-level function so
     tests can monkeypatch it to force a deterministic failure (see
@@ -276,7 +359,13 @@ def _print(
     failure entirely.
     """
     try:
-        return print_images(images, strategy=strategy, options=options, transport=transport)
+        return print_images(
+            images,
+            strategy=strategy,
+            options=options,
+            transport=transport,
+            progress_cb=progress_cb,
+        )
     except ValueError as exc:
         if "tape.print_dots" not in str(exc):
             raise

@@ -202,12 +202,17 @@ export interface PreviewRequest {
  * (device dots x scale) -- see router_labels.py's _render_and_encode.
  * length_mm is the physical label length (backend/driver/geometry.dots_to_mm
  * of the UNscaled render width). Never derive mm from the png_* fields;
- * always read length_mm directly. */
+ * always read length_mm directly. `min_feed_mm` (task 2.9) is the mechanical
+ * head-to-cutter feed floor (backend/driver/geometry.MIN_FEED_MM, currently
+ * 24.5) -- any label under it still consumes that much tape; when
+ * `length_mm < min_feed_mm`, `warnings` also carries a `code: "short_label"`
+ * entry (severity "info") saying so. */
 export interface PreviewResponse {
   png_b64: string;
   png_width_px: number;
   png_height_px: number;
   length_mm: number;
+  min_feed_mm: number;
   warnings: RenderWarning[];
   /** Non-null only when the request included `serialization` -- the
    * expanded total label count / the sequence value that produced the
@@ -238,6 +243,36 @@ export interface PrintRequest {
 
 export interface PrintJobResponse {
   job_id: string;
+}
+
+// --- Tape estimate (task 2.9) ------------------------------------------
+// Mirrors backend/render/estimate.py's TapeEstimate -- see that module's
+// docstring for the full per-chain-mode model and constant provenance.
+
+/** How much physical tape a job (or a hypothetical one, via POST
+ * /api/print/estimate) consumes. `label_lengths_mm` is each label's
+ * rendered length, in the same order the job's labels expand to;
+ * `content_mm` is their sum; `feed_overhead_mm` is everything else
+ * (leader/margin/cut-mark waste, `total_mm - content_mm`); `per_label_mm`
+ * is `total_mm / label_lengths_mm.length`, a convenience for the UI.
+ * `notes` are human-readable explanations of where the overhead comes
+ * from (e.g. chaining savings, the 24.5mm minimum-feed floor). */
+export interface TapeEstimate {
+  label_lengths_mm: number[];
+  content_mm: number;
+  feed_overhead_mm: number;
+  total_mm: number;
+  per_label_mm: number;
+  notes: string[];
+}
+
+/** POST /api/print/estimate's response: the SAME body POST /api/print
+ * accepts (labels/options/serialization), returned as a TapeEstimate plus
+ * the expanded `label_count` -- WITHOUT creating a job (no history entry,
+ * nothing enqueued). This is what a "how much tape will this use?" UI
+ * (the JobTray) calls before committing to an actual print. */
+export interface PrintEstimateResponse extends TapeEstimate {
+  label_count: number;
 }
 
 export type JobStatus = "queued" | "printing" | "done" | "failed" | "canceled";
@@ -401,12 +436,25 @@ export interface PrinterStatusResponse {
   error: string | null;
 }
 
-export type JobEventType = "job.queued" | "job.started" | "job.done" | "job.failed";
+export type JobEventType =
+  | "job.queued"
+  | "job.started"
+  | "job.done"
+  | "job.failed"
+  | "job.canceled"
+  | "job.progress";
 
+/** `error` is present on `job.failed`; `sent`/`total` (task 2.9, in bytes
+ * of the job's wire stream) are present on `job.progress` -- broadcast at
+ * most ~11 times per job (throttled by 10-percentage-point increments,
+ * see backend/jobs/worker.py's _make_progress_cb), strictly increasing,
+ * always ending with `sent === total`. */
 export interface JobEvent {
   event: JobEventType;
   job_id: string;
   error?: string;
+  sent?: number;
+  total?: number;
 }
 
 /** FastAPI's shape for an HTTPException(detail=<string>) our routes raise on

@@ -69,6 +69,56 @@ async def test_preview_default_scale_is_2(client):
     assert png_bytes == expected_png
 
 
+# --- task 2.9: min_feed_mm + short_label warning ---------------------------
+
+
+async def test_preview_min_feed_mm_matches_geometry_constant(client):
+    from labelmaker.driver.geometry import MIN_FEED_MM
+
+    resp = await client.post("/api/render/preview", json={"definition": _HELLO_DEFINITION})
+    assert resp.status_code == 200
+    assert resp.json()["min_feed_mm"] == MIN_FEED_MM
+
+
+async def test_preview_short_label_warning_present_when_under_min_feed(client):
+    from labelmaker.driver.geometry import MIN_FEED_MM
+
+    short_definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["A"]},
+    }
+    resp = await client.post(
+        "/api/render/preview", json={"definition": short_definition, "scale": 1}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["length_mm"] < MIN_FEED_MM
+    short_label_warnings = [w for w in body["warnings"] if w["code"] == "short_label"]
+    assert len(short_label_warnings) == 1
+    assert short_label_warnings[0]["severity"] == "info"
+    assert str(MIN_FEED_MM) in short_label_warnings[0]["message"] or "24.5" in short_label_warnings[
+        0
+    ]["message"]
+
+
+async def test_preview_no_short_label_warning_when_at_or_above_min_feed(client):
+    from labelmaker.driver.geometry import MIN_FEED_MM
+
+    long_definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["HELLO"], "length_mm": 40.0},
+    }
+    resp = await client.post(
+        "/api/render/preview", json={"definition": long_definition, "scale": 1}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["length_mm"] >= MIN_FEED_MM
+    assert not any(w["code"] == "short_label" for w in body["warnings"])
+
+
 async def test_preview_warnings_pass_through_on_cramped_text(client):
     cramped_definition = {
         "type": "text",
@@ -81,7 +131,16 @@ async def test_preview_warnings_pass_through_on_cramped_text(client):
     assert resp.status_code == 200
     body = resp.json()
     assert any(w["code"] == "text_cramped" for w in body["warnings"])
-    assert all(w["severity"] == "warning" for w in body["warnings"])
+    assert all(
+        w["severity"] == "warning" for w in body["warnings"] if w["code"] == "text_cramped"
+    )
+    # task 2.9: this label's content is well under MIN_FEED_MM (24.5mm) on a
+    # 3.5mm tape -- the preview response's own short_label warning (info
+    # severity, NOT "warning" -- see test_preview_short_label_warning_and_min_feed_mm
+    # below for the dedicated coverage) legitimately coexists with
+    # text_cramped's "warning"-severity ones here, which is why the
+    # assertion above is now scoped to text_cramped specifically.
+    assert any(w["code"] == "short_label" for w in body["warnings"])
 
 
 async def test_preview_unknown_type_returns_422_listing_valid_types(client):
