@@ -107,7 +107,16 @@ ImageMode = Literal["threshold", "dither"]
 # GET/DELETE path-param validation, rather than keeping an independently
 # maintained duplicate that could drift out of sync with the one that
 # actually gates filesystem access here.
-IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+#
+# `\Z` (not `$`): `$` matches at the end of the string OR just before a
+# single trailing '\n' -- so "<32 lowercase hex chars>\n" would satisfy
+# `^[0-9a-f]{32}$` (harmless in practice today, since a trailing-newline
+# id just falls through to image_path()'s "unknown image_id" 422 rather
+# than the containment check ever seeing it -- there's no file named
+# "<id>\n.png" -- but it doesn't match the stated "exactly 32 lowercase
+# hex chars, nothing else" contract). `\Z` matches ONLY at the true end
+# of the string, no exception.
+IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}\Z")
 
 
 def uploads_dir(data_dir: Path) -> Path:

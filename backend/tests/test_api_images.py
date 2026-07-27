@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import struct
+import uuid
 import zlib
 
 import pytest
@@ -148,6 +149,52 @@ async def test_delete_uploaded_image_then_get_404s(client):
 async def test_delete_unknown_image_id_returns_404(client):
     resp = await client.delete("/api/images/deadbeefdeadbeefdeadbeefdeadbeef")
     assert resp.status_code == 404
+
+
+# --- 3b. SECURITY (coordinator review fix-up): a REGEX-VALID id whose ------
+# resolved path escapes uploads_dir/ (e.g. a symlink planted inside it)
+# must still 404, never a raw 500. image_path()'s containment check
+# raises ValueError for exactly this case even though the id itself
+# passes _validate_image_id's shape pre-check -- GET/DELETE must catch
+# that, not just trust the regex.
+
+
+async def test_get_symlinked_but_well_formed_image_id_returns_404_not_500(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    outside = data_dir.parent / "outside-uploads"
+    outside.mkdir(parents=True, exist_ok=True)
+    secret = outside / "secret.png"
+    secret.write_bytes(_png_bytes())
+
+    image_id = uuid.uuid4().hex  # well-formed -- passes IMAGE_ID_RE
+    (uploads / f"{image_id}.png").symlink_to(secret)
+
+    resp = await client.get(f"/api/images/{image_id}")
+    assert resp.status_code == 404
+
+
+async def test_delete_symlinked_but_well_formed_image_id_returns_404_not_500(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    outside = data_dir.parent / "outside-uploads"
+    outside.mkdir(parents=True, exist_ok=True)
+    secret = outside / "secret.png"
+    secret.write_bytes(_png_bytes())
+
+    image_id = uuid.uuid4().hex
+    symlink = uploads / f"{image_id}.png"
+    symlink.symlink_to(secret)
+
+    resp = await client.delete(f"/api/images/{image_id}")
+    assert resp.status_code == 404
+    # The symlink itself (and definitely the real secret file it points
+    # at) must survive an ostensibly-rejected delete.
+    assert secret.is_file()
 
 
 # --- 4. PNG normalization: RGBA flattened onto white ------------------------

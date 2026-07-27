@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import io
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import Response
@@ -114,6 +115,32 @@ def _validate_image_id(image_id: str) -> None:
         raise HTTPException(status_code=404, detail="image not found")
 
 
+def _resolve_existing_image_path(image_id: str, data_dir: Path) -> Path:
+    """Shared by GET/DELETE: resolve `image_id` to an existing file's path,
+    or 404 -- never a raw 500.
+
+    Coordinator review fix-up: `_validate_image_id`'s regex pre-check
+    catches most shape mismatches before `image_path()` is ever called,
+    but `image_path()`'s OWN second check -- the resolve()-containment
+    assertion (see that function's docstring) -- can still raise
+    `ValueError` for a REGEX-VALID id whose resolved path nonetheless
+    escapes `uploads_dir` (e.g. a symlink inside `data_dir/uploads/`
+    pointing outside it, confirmed live). Both handlers used to call
+    `image_path()` unguarded, so that `ValueError` escaped straight to
+    Starlette as a 500 -- contradicting this module's own "malformed/
+    unreachable id -> 404" contract. Catching it here (not just trusting
+    the regex pre-check) is what actually closes that gap.
+    """
+    _validate_image_id(image_id)
+    try:
+        path = image_path(image_id, data_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="image not found") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+    return path
+
+
 @router.post("", status_code=201)
 async def upload_image(
     request: Request, config: AppConfigDep, file: UploadFile
@@ -177,18 +204,12 @@ async def upload_image(
 
 @router.get("/{image_id}")
 async def get_image(image_id: str, config: AppConfigDep) -> Response:
-    _validate_image_id(image_id)
-    path = image_path(image_id, config.data_dir)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="image not found")
+    path = _resolve_existing_image_path(image_id, config.data_dir)
     return Response(content=path.read_bytes(), media_type="image/png")
 
 
 @router.delete("/{image_id}", status_code=204)
 async def delete_image(image_id: str, config: AppConfigDep) -> Response:
-    _validate_image_id(image_id)
-    path = image_path(image_id, config.data_dir)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="image not found")
+    path = _resolve_existing_image_path(image_id, config.data_dir)
     path.unlink()
     return Response(status_code=204)

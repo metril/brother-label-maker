@@ -245,6 +245,20 @@ def test_image_id_regex_only_accepts_32_lowercase_hex_chars():
         assert not IMAGE_ID_RE.match(bad), f"{bad!r} should not match IMAGE_ID_RE"
 
 
+def test_image_id_regex_rejects_trailing_newline():
+    # Coordinator review fix-up: `$` (unlike `\Z`) matches at the end of
+    # the string OR just before a single trailing '\n' -- so
+    # "<32 hex chars>\n" used to satisfy `^[0-9a-f]{32}$` even though it
+    # isn't actually 32 characters. Harmless in practice (falls through to
+    # image_path()'s "unknown image_id" 422, since no file is ever named
+    # "<id>\n.png"), but didn't match the stated "exactly 32 lowercase hex
+    # chars" contract -- IMAGE_ID_RE now uses `\Z`, which has no such
+    # exception.
+    valid_id = uuid.uuid4().hex
+    assert not IMAGE_ID_RE.match(valid_id + "\n")
+    assert not IMAGE_ID_RE.match(valid_id + "\n\n")
+
+
 def test_image_path_rejects_absolute_path_image_id(tmp_path):
     # Regression: Path("/a/uploads") / "/etc/passwd.png" DISCARDS the left
     # operand entirely (a pathlib gotcha) -- image_path() used to return
