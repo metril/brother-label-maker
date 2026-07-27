@@ -5,7 +5,7 @@ import { LabelPreview } from "./LabelPreview";
 describe("LabelPreview", () => {
   it("shows the physical length from length_mm (never derived from scaled px) and renders warning chips", () => {
     // UNIT TRAP guard: this component's props have no width_px/height_px at
-    // all (see LabelPreview.tsx's BAND_PX_PER_MM doc) -- lengthMm is the
+    // all (see LabelPreview.tsx's PX_PER_MM doc) -- lengthMm is the
     // ONLY source for the physical readout. A `scale`-naive px->mm
     // derivation (e.g. widthPx / DOTS_PER_MM without dividing out the
     // preview endpoint's `scale` multiplier) would read roughly double the

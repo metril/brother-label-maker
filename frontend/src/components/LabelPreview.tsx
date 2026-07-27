@@ -1,12 +1,19 @@
-/** On-screen px per physical mm of TAPE WIDTH, for the constant-height
- * display band (24mm tape -> 96px tall band; 12mm -> 48px, per the task
- * brief). The image's on-screen WIDTH is never computed from this -- the
- * <img> is given a fixed height and `width: "auto"`, so the browser scales
- * width from the PNG's own natural aspect ratio. This sidesteps the preview
- * endpoint's unit trap entirely: width_px/height_px (scaled device dots)
- * never enter this component at all, only the decoded image's own pixels
- * and the physical `length_mm` readout below it. */
-const BAND_PX_PER_MM = 4;
+/** On-screen px per physical mm, applied to the image's WIDTH from
+ * `lengthMm` directly (never to height first) -- height is then left to
+ * `"auto"`, so the browser derives it from the PNG's own natural aspect
+ * ratio. Deriving the OTHER way around (fix height from nominal tape
+ * width, let width auto-follow the image's raw pixel ratio) is wrong: the
+ * PNG's pixel height is the printable strip (tape.print_dots, e.g. 128
+ * dots / ~18mm for 24mm TZe tape -- driver/geometry.py's _TZE_ROWS), not
+ * the nominal tape width (24mm, which includes unprintable margin either
+ * side). Fixing a 24mm-tall band onto an 18mm-tall image stretches BOTH
+ * axes by ~24/18 (~33%) to fill it -- inflating the on-screen LENGTH the
+ * same amount. Anchoring on `lengthMm` (the backend's physical truth, same
+ * field the text readout below uses) instead sidesteps that mismatch
+ * entirely, and keeps this component's only unit-trap-relevant input as
+ * `lengthMm` -- it never reads width_px/height_px (scaled device dots) at
+ * all. */
+const PX_PER_MM = 4;
 
 interface LabelPreviewProps {
   tapeWidthMm: number;
@@ -27,7 +34,10 @@ export function LabelPreview({
   isFetching,
   error,
 }: LabelPreviewProps) {
-  const bandHeightPx = tapeWidthMm * BAND_PX_PER_MM;
+  // Only used for the loading shimmer's placeholder size, before a
+  // `lengthMm` is even known -- doesn't need to be physically exact, it's
+  // a loading indicator, not a rendering of the label itself.
+  const shimmerHeightPx = tapeWidthMm * PX_PER_MM;
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -43,14 +53,18 @@ export function LabelPreview({
             role="status"
             aria-label="Loading preview"
             className="shimmer rounded-sm"
-            style={{ height: bandHeightPx, width: Math.max(bandHeightPx * 2, 80) }}
+            style={{ height: shimmerHeightPx, width: Math.max(shimmerHeightPx * 2, 80) }}
           />
         ) : (
           <div className="relative">
             <img
               src={png}
               alt="Label preview"
-              style={{ height: bandHeightPx, width: "auto", imageRendering: "pixelated" }}
+              style={{
+                width: lengthMm != null ? lengthMm * PX_PER_MM : undefined,
+                height: "auto",
+                imageRendering: "pixelated",
+              }}
               className="rounded-sm bg-white shadow-[0_2px_10px_rgba(0,0,0,0.5)]"
             />
             {isFetching && (

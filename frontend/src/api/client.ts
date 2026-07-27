@@ -54,10 +54,14 @@ export function extractErrorDetail(body: unknown, fallback: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // `...init` spreads FIRST so the computed `headers` below always wins --
+  // reversed, an `init.headers` key (even `undefined`, which every call
+  // site above implicitly has by omitting it) would silently clobber the
+  // Content-Type merge, since a later object-literal key always overrides
+  // an earlier one of the same name.
   const res = await fetch(`${API_BASE}${path}`, {
-    headers:
-      init?.body !== undefined ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
     ...init,
+    headers: init?.body !== undefined ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
   });
 
   if (!res.ok) {

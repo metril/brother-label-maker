@@ -16,19 +16,19 @@ interface PrintButtonProps {
 }
 
 /** POST /api/print, then track the job to a terminal state two ways at
- * once: the shared WS event stream (useJobEvent, live push) and a
- * 1s poll of GET /api/print/jobs/{id} as a fallback (capped at 30s) --
- * whichever source reports "done"/"failed" first wins. See the task brief's
- * PrintButton doc: "tracks job via useJobEvents (fallback: poll ... every
- * 1s until terminal, max 30s)". */
+ * once: the shared WS event stream (useJobEvent, live push) and a 1s poll
+ * of GET /api/print/jobs/{id} as a fallback -- whichever source reports
+ * "done"/"failed" first wins. A REAL timer (not query data) enforces the
+ * 30s cap -- see its effect below for why. */
 export function PrintButton({ definition, disabled }: PrintButtonProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [jobId, setJobId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const startedAtRef = useRef<number>(0);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const wsEvent = useJobEvent(jobId);
+  const wsStatus = wsEvent?.event;
+  const wsError = wsEvent?.error;
 
   const mutation = useMutation({
     mutationFn: (def: LabelDefinition) =>
@@ -36,12 +36,8 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
         labels: [def],
         options: { chain_mode: "cut_each", margin_mm: 2.0, auto_cut: true },
       }),
-    onMutate: () => {
-      setErrorText(null);
-    },
     onSuccess: (data) => {
       setJobId(data.job_id);
-      startedAtRef.current = Date.now();
       setPhase("printing");
     },
     onError: (err) => {
@@ -50,8 +46,8 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
     },
   });
 
-  const resolvedByWs = wsEvent?.event === "job.done" || wsEvent?.event === "job.failed";
-  const pollEnabled = phase === "printing" && jobId !== null && !resolvedByWs;
+  const pollEnabled =
+    phase === "printing" && jobId !== null && wsStatus !== "job.done" && wsStatus !== "job.failed";
 
   const pollQuery = useQuery({
     queryKey: ["print-job-poll", jobId],
@@ -59,39 +55,63 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
     enabled: pollEnabled,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === "done" || status === "failed" || status === "canceled") return false;
-      if (Date.now() - startedAtRef.current > POLL_TIMEOUT_MS) return false;
-      return POLL_INTERVAL_MS;
+      return status === "done" || status === "failed" || status === "canceled" ? false : POLL_INTERVAL_MS;
     },
   });
+
+  // Read out only the PRIMITIVE fields the derivation below cares about
+  // (not `pollQuery.data` itself) -- TanStack Query's structural sharing
+  // keeps `data` reference-STABLE across polls that return an equal
+  // payload, so depending on the object would mean this effect silently
+  // stops re-running the moment the server starts replying with the same
+  // status every time (e.g. stuck "printing"). That was exactly the bug
+  // that made the old 30s-timeout branch dead code -- see the timer effect
+  // below for the actual fix to that (a real timer, independent of any
+  // query/WS data reference at all).
+  const polledStatus = pollQuery.data?.status;
+  const polledError = pollQuery.data?.error;
+  const pollErrorMessage = pollQuery.error
+    ? pollQuery.error instanceof ApiError
+      ? pollQuery.error.message
+      : "failed to check print status"
+    : null;
 
   useEffect(() => {
     if (phase !== "printing" || !jobId) return;
 
-    if (wsEvent?.event === "job.done") {
+    if (wsStatus === "job.done") {
       setPhase("done");
-      return;
-    }
-    if (wsEvent?.event === "job.failed") {
+    } else if (wsStatus === "job.failed") {
       setPhase("failed");
-      setErrorText(wsEvent.error ?? "print job failed");
-      return;
-    }
-
-    const polled = pollQuery.data;
-    if (polled?.status === "done") {
+      setErrorText(wsError ?? "print job failed");
+    } else if (polledStatus === "done") {
       setPhase("done");
-    } else if (polled?.status === "failed") {
+    } else if (polledStatus === "failed") {
       setPhase("failed");
-      setErrorText(polled.error ?? "print job failed");
-    } else if (polled?.status === "canceled") {
+      setErrorText(polledError ?? "print job failed");
+    } else if (polledStatus === "canceled") {
       setPhase("failed");
       setErrorText("print job was canceled");
-    } else if (Date.now() - startedAtRef.current > POLL_TIMEOUT_MS) {
+    } else if (pollErrorMessage) {
+      setPhase("failed");
+      setErrorText(pollErrorMessage);
+    }
+  }, [phase, jobId, wsStatus, wsError, polledStatus, polledError, pollErrorMessage]);
+
+  // Hard 30s cap, driven by a REAL timer armed the moment we enter
+  // "printing" -- deliberately NOT derived from query/WS data, so it fires
+  // even when nothing ever changes at all (job wedged "queued"/"printing"
+  // forever, or both the WS and poll paths silently going nowhere). Self-
+  // cancels via the effect cleanup once `phase` leaves "printing" for any
+  // other reason (the derivation effect above already resolved it first).
+  useEffect(() => {
+    if (phase !== "printing") return;
+    const timer = setTimeout(() => {
       setPhase("failed");
       setErrorText("timed out waiting for print status");
-    }
-  }, [phase, jobId, wsEvent, pollQuery.data]);
+    }, POLL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   // Flash "done" briefly, then return to idle so the button is usable again.
   useEffect(() => {
@@ -109,6 +129,12 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
 
   function handleClick() {
     if (busy || disabled) return;
+    // Clear the previous job's id/error BEFORE mutating -- otherwise a
+    // re-click after a failure briefly re-reads the old job's terminal WS
+    // event / poll data (still keyed on the old jobId) and flashes its
+    // error again before the new job id ever arrives.
+    setJobId(null);
+    setErrorText(null);
     setPhase("printing");
     mutation.mutate(definition);
   }
