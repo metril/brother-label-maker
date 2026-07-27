@@ -27,9 +27,15 @@ services:
       # every replug/power-cycle -- a `--device`/`devices:` entry pinned to
       # today's path silently goes stale the next time the printer is
       # unplugged and replugged, or the container restarts after the host
-      # reboots). Mounting the whole `/dev/bus/usb` tree means libusb's
-      # re-enumeration on hotplug just works, because the directory it
-      # rescans is the same directory the host kernel is updating.
+      # reboots). Mounting the whole `/dev/bus/usb` tree means whatever node
+      # the printer re-enumerates onto is already reachable for OPENING the
+      # device on a (re)start of this container. That's a distinct step
+      # from DISCOVERY, though: libusb finds devices via sysfs, not by
+      # scanning this directory, and a container that's already running
+      # when the printer gets unplugged/replugged is not guaranteed to
+      # notice without being restarted. See ../docs/usb-setup.md's
+      # "Hotplug / power-cycle behavior" section for the full explanation
+      # and the restart-based workaround.
       - /dev/bus/usb:/dev/bus/usb
       - labeldata:/data
     # Grants access to USB device nodes (major 189, all minors) without
@@ -37,11 +43,14 @@ services:
     # namespace plus capabilities it doesn't need) and without a `devices:`
     # list (which hits the same stale-path problem as above, one entry per
     # device instead of one bind mount). The cgroup rule + directory mount
-    # combination is what survives unplug/replug and reboot cycles; the
-    # printer's actual, non-root-writable access still comes from the udev
-    # rule in docker/99-brother-pte720bt.rules (MODE="0666"), installed on
-    # the HOST -- this rule only gets the container's cgroup permission to
-    # open the node once it exists.
+    # combination is what lets a (re)started container open the printer
+    # wherever it's currently enumerated, across unplug/replug and reboot
+    # cycles -- see ../docs/usb-setup.md for why that's a stronger
+    # guarantee than an already-running container noticing a mid-session
+    # replug. The printer's actual, non-root-writable access still comes
+    # from the udev rule in docker/99-brother-pte720bt.rules (MODE="0666"),
+    # installed on the HOST -- this rule only gets the container's cgroup
+    # permission to open the node once it exists.
     device_cgroup_rules:
       - "c 189:* rmw"
 
