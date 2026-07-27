@@ -19,7 +19,14 @@ _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _MIGRATION_FILE_RE = re.compile(r"^(\d{4})_.*\.sql$")
 
 _VALID_JOB_STATUSES = {"queued", "printing", "done", "failed", "canceled"}
-_UPDATABLE_PRESET_FIELDS = {"name", "definition", "tape_width_mm", "favorite", "label_type"}
+_UPDATABLE_PRESET_FIELDS = {
+    "name",
+    "definition",
+    "tape_width_mm",
+    "tape_family",
+    "favorite",
+    "label_type",
+}
 
 
 def _utcnow() -> str:
@@ -181,6 +188,21 @@ class Database:
         return {row["key"]: json.loads(row["value"]) for row in rows}
 
     # -- presets -------------------------------------------------------
+    #
+    # A preset's `definition` is that type's own PARAMS dict (validated via
+    # renderer.Params.model_validate(definition) at the API layer -- see
+    # api/router_presets.py), NOT a full LabelDefinition (type+tape+params).
+    # `label_type` says which renderer's Params it must satisfy;
+    # `tape_width_mm`/`tape_family` (0002_preset_tape_family.sql) are an
+    # OPTIONAL tape hint tracked as their own columns instead of nested
+    # inside `definition` -- `tape_width_mm` is nullable ("any tape");
+    # `tape_family` is NOT nullable (every preset has SOME family, "tze" by
+    # default -- see that migration). This module never stores this data
+    # as a full LabelDefinition, so 0001_init.sql's column comment
+    # ("LabelDefinition JSON", written for print_jobs.definition and
+    # reused verbatim for presets.definition) does not describe this
+    # table's own `definition` column; this docstring is the authoritative
+    # shape for it.
 
     async def create_preset(
         self,
@@ -188,20 +210,23 @@ class Database:
         label_type: str,
         definition: dict,
         tape_width_mm: float | None = None,
+        tape_family: str = "tze",
         favorite: bool = False,
     ) -> dict:
         preset_id = uuid.uuid4().hex
         now = _utcnow()
         await self._conn.execute(
             "INSERT INTO presets "
-            "(id, name, label_type, definition, tape_width_mm, favorite, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, name, label_type, definition, tape_width_mm, tape_family, favorite, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 preset_id,
                 name,
                 label_type,
                 json.dumps(definition),
                 tape_width_mm,
+                tape_family,
                 int(favorite),
                 now,
                 now,
@@ -213,6 +238,7 @@ class Database:
             "label_type": label_type,
             "definition": definition,
             "tape_width_mm": tape_width_mm,
+            "tape_family": tape_family,
             "favorite": bool(favorite),
             "created_at": now,
             "updated_at": now,
@@ -451,7 +477,17 @@ class Database:
         offset = (page - 1) * page_size
         cur = await self._conn.execute(
             "SELECT id, created_at, status, error, definition, label_count, chain_mode, "
-            f"strategy, tape_width_mm, media_raw_byte, tape_used_mm FROM print_jobs {where} "
+            "strategy, tape_width_mm, media_raw_byte, tape_used_mm, "
+            # review fix-up: derive thumbnail presence from the BLOB column
+            # itself (`preview_png IS NOT NULL`), not from `status == "done"`
+            # -- the caller (api/router_history.py's light list items) used
+            # to infer it from status, which is only correct as long as
+            # "sets preview_png" and "sets status=done" never drift apart in
+            # jobs/worker.py. Selecting the real fact directly removes that
+            # coupling without fetching the (comparatively large) BLOB
+            # itself for every row on every listing.
+            "(preview_png IS NOT NULL) AS has_thumbnail "
+            f"FROM print_jobs {where} "
             "ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
             [*params, page_size, offset],
         )
@@ -460,6 +496,7 @@ class Database:
         for row in rows:
             d = dict(row)
             d["definition"] = json.loads(d["definition"])
+            d["has_thumbnail"] = bool(d["has_thumbnail"])
             items.append(d)
         return {"items": items, "page": page, "page_size": page_size, "total": total}
 

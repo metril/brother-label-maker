@@ -261,12 +261,16 @@ export interface PrintJob {
 // Mirrors backend/api/router_presets.py + db/database.py's presets table.
 // A preset's `definition` is the label TYPE's own `params` shape (e.g.
 // TextLabelParams for label_type="text") -- NOT a full LabelDefinition
-// (type+tape+params). `label_type` and `tape_width_mm` are separate,
-// independently-settable fields: `label_type` says which type `definition`
-// is validated against, `tape_width_mm` is an OPTIONAL tape-width hint
-// (null = "any tape") -- presets don't track a tape family at all, so
-// POST /api/presets/{id}/print can only build a job when it's set (422
-// otherwise), and always assumes family "tze" when it does.
+// (type+tape+params). `label_type`/`tape_width_mm`/`tape_family` are
+// separate, independently-settable fields: `label_type` says which type
+// `definition` is validated against; `tape_width_mm` is an OPTIONAL
+// tape-width hint (null = "any tape") and `tape_family` is NOT nullable
+// ("tze" default, review fix-up) -- both are validated together against
+// the real tape table server-side (422 at create/update on an impossible
+// combination). POST /api/presets/{id}/print builds a job's Tape from
+// those two UNLESS the request body supplies its own `tape` (which always
+// wins -- the only way to print an "any tape" preset, or a different tape
+// than the one saved).
 
 export interface Preset {
   id: string;
@@ -274,6 +278,7 @@ export interface Preset {
   label_type: string;
   definition: Record<string, unknown>;
   tape_width_mm: number | null;
+  tape_family: TapeFamily;
   favorite: boolean;
   created_at: string;
   updated_at: string;
@@ -285,27 +290,37 @@ export interface PresetCreateRequest {
   label_type: string;
   definition: Record<string, unknown>;
   tape_width_mm?: number | null;
+  tape_family?: TapeFamily;
   favorite?: boolean;
 }
 
 /** PUT /api/presets/{id}'s request body: every field optional (a true
- * partial update -- an OMITTED field is left untouched server-side, but an
- * explicit `null` for `tape_width_mm` DOES clear it back to "any tape"). */
+ * partial update -- an OMITTED field is left untouched server-side). Of
+ * the fields that ARE sent explicitly as `null`, only `tape_width_mm` is
+ * actually nullable server-side (clears back to "any tape") -- `name`/
+ * `label_type`/`favorite`/`tape_family` are all non-nullable and 422 if
+ * sent as explicit null (review fix-up: previously a 500 for `name`/
+ * `label_type`, or a silent no-op clear for `favorite`). */
 export interface PresetUpdateRequest {
   name?: string;
   label_type?: string;
   definition?: Record<string, unknown>;
   tape_width_mm?: number | null;
+  tape_family?: TapeFamily;
   favorite?: boolean;
 }
 
-/** POST /api/presets/{id}/print's request body -- both fields optional (the
- * whole body may be omitted entirely); mirrors PrintRequest's own
- * options/serialization split minus `labels` (built server-side from the
- * preset). Same 202 `{job_id}` contract as POST /api/print. */
+/** POST /api/presets/{id}/print's request body -- every field optional
+ * (the whole body may be omitted entirely); `options`/`serialization`
+ * mirror PrintRequest's own split minus `labels` (built server-side from
+ * the preset). `tape`, when given, always overrides the preset's own
+ * tape_width_mm/tape_family (review fix-up) -- required to print an "any
+ * tape" preset (tape_width_mm is null) at all. Same 202 `{job_id}`
+ * contract as POST /api/print. */
 export interface PresetPrintRequest {
   options?: Partial<PrintOptions>;
   serialization?: Sequence | null;
+  tape?: Tape | null;
 }
 
 // --- History (task 2.8) ------------------------------------------------------

@@ -51,16 +51,18 @@ def _to_light_item(job: dict) -> dict:
     """The list shape: `_LIGHT_ITEM_FIELDS` verbatim, plus a `thumbnail_url`
     pointing at GET /api/history/{id}/thumbnail instead of inline bytes.
 
-    `thumbnail_url` is null unless `status == "done"` -- jobs/worker.py's
-    ONLY call that sets `preview_png` sets `status="done"` in that exact
-    same update_job call (see _process_job's success path), so a job that
-    hasn't reached "done" can never have a thumbnail yet. Deriving presence
-    from `status` this way avoids fetching the (comparatively large) BLOB
-    column for every row on every listing just to know whether it's NULL.
+    `thumbnail_url` is null unless `job["has_thumbnail"]` -- db.list_jobs
+    (review fix-up) derives that directly from `preview_png IS NOT NULL` in
+    SQL, rather than this router inferring it from `status == "done"`. The
+    two happen to coincide today (jobs/worker.py's only call that sets
+    `preview_png` also sets `status="done"`, in the same update_job call),
+    but deriving it from the real column removes the coupling instead of
+    relying on that never drifting.
     """
     item = {key: job[key] for key in _LIGHT_ITEM_FIELDS}
-    has_thumbnail = job["status"] == "done"
-    item["thumbnail_url"] = f"/api/history/{job['id']}/thumbnail" if has_thumbnail else None
+    item["thumbnail_url"] = (
+        f"/api/history/{job['id']}/thumbnail" if job["has_thumbnail"] else None
+    )
     return item
 
 

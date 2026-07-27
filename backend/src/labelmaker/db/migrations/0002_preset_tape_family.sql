@@ -1,0 +1,26 @@
+-- Task 2.8 review fix-up: presets previously had no way to record a tape
+-- FAMILY (only the optional `tape_width_mm` from 0001_init.sql) -- POST
+-- /api/presets/{id}/print therefore always assumed family "tze", silently
+-- resolving the WRONG geometry for any HSe-family preset (e.g. a 9.0mm
+-- hse_3_1 preset resolved against the 9mm TZE tape instead -- 50 print dots
+-- instead of the correct 44). Every existing row defaults to "tze" (the
+-- same assumption POST .../print already made unconditionally, so this is
+-- a no-op for data created before this migration).
+--
+-- Numbered 0002 (not 0003 as review discussion floated) -- 0001_init.sql is
+-- still the only OTHER real migration in this tree; there is no 0002 to
+-- collide with.
+--
+-- Documentation note (review fix-up, comment-only -- 0001_init.sql is an
+-- ALREADY-APPLIED migration and is left untouched rather than edited after
+-- the fact): that file's `definition TEXT NOT NULL, -- LabelDefinition
+-- JSON` comment describes `print_jobs.definition` correctly, but is
+-- ALSO, confusingly, the same column comment used for `presets.definition`
+-- just above it -- and for `presets`, `definition` is NOT a full
+-- LabelDefinition (type+tape+params). It is only that type's own PARAMS
+-- dict (validated via renderer.Params.model_validate(definition), see
+-- api/router_presets.py) -- `label_type` (which renderer) and now
+-- `tape_family`/`tape_width_mm` (an optional tape hint) are tracked as
+-- their own separate columns instead. See db/database.py's presets-section
+-- docstrings for the authoritative shape.
+ALTER TABLE presets ADD COLUMN tape_family TEXT NOT NULL DEFAULT 'tze';

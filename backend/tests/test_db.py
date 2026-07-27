@@ -14,6 +14,12 @@ from labelmaker.db.database import _MIGRATIONS_DIR, Database
 
 
 async def test_open_sets_wal_mode_and_applies_migrations_once(tmp_path):
+    # Derived from the REAL migrations dir (not hardcoded) so this test
+    # doesn't need updating every time a new migration is added -- it's
+    # asserting "every discovered migration applied exactly once", not a
+    # specific count.
+    expected_migration_count = len(Database._discover_migrations(_MIGRATIONS_DIR))
+
     db_path = tmp_path / "app.db"
     db = await Database.open(db_path)
 
@@ -23,7 +29,7 @@ async def test_open_sets_wal_mode_and_applies_migrations_once(tmp_path):
 
     cur = await db._conn.execute("SELECT COUNT(*) FROM schema_migrations")
     (count,) = await cur.fetchone()
-    assert count == 1
+    assert count == expected_migration_count
 
     await db.set_setting("greeting", "hello")
     await db.close()
@@ -32,7 +38,7 @@ async def test_open_sets_wal_mode_and_applies_migrations_once(tmp_path):
     db2 = await Database.open(db_path)
     cur = await db2._conn.execute("SELECT COUNT(*) FROM schema_migrations")
     (count2,) = await cur.fetchone()
-    assert count2 == 1
+    assert count2 == expected_migration_count
     assert await db2.get_setting("greeting") == "hello"
     await db2.close()
 
@@ -402,8 +408,15 @@ async def test_media_observations_insert_and_list_newest_first():
 async def test_migration_runner_applies_additional_migration(tmp_path):
     import shutil
 
+    # Copies ONLY 0001_init.sql (not the whole real migrations dir, via
+    # shutil.copytree) -- this test injects its OWN synthetic "0002" next
+    # migration, which would collide (duplicate version) with whatever the
+    # real migrations dir's own next migration happens to be numbered.
+    # Isolating from that keeps this test about the GENERAL mechanism, not
+    # coupled to however many real migrations currently exist.
     custom_dir = tmp_path / "migrations"
-    shutil.copytree(_MIGRATIONS_DIR, custom_dir)
+    custom_dir.mkdir()
+    shutil.copy(_MIGRATIONS_DIR / "0001_init.sql", custom_dir / "0001_init.sql")
     (custom_dir / "0002_add_preset_note.sql").write_text(
         "ALTER TABLE presets ADD COLUMN note TEXT;\n"
     )
@@ -439,8 +452,13 @@ async def test_migration_gap_fill_applies_missing_version_below_already_applied_
     already recorded", not "is this version <= the highest one recorded"."""
     import shutil
 
+    # Same isolation as test_migration_runner_applies_additional_migration
+    # above: copy ONLY 0001_init.sql, not the whole real migrations dir, so
+    # this test's own synthetic "0002"/"0003" files can't collide with
+    # whatever the real migrations dir's own next migrations are numbered.
     custom_dir = tmp_path / "migrations"
-    shutil.copytree(_MIGRATIONS_DIR, custom_dir)  # ships 0001_init.sql
+    custom_dir.mkdir()
+    shutil.copy(_MIGRATIONS_DIR / "0001_init.sql", custom_dir / "0001_init.sql")
     (custom_dir / "0003_add_note3.sql").write_text(
         "ALTER TABLE presets ADD COLUMN note3 TEXT;\n"
     )

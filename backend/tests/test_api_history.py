@@ -86,6 +86,34 @@ async def test_history_list_is_light_shape_without_definition_or_thumbnail_bytes
     assert item["thumbnail_url"] == f"/api/history/{job['id']}/thumbnail"
 
 
+async def test_history_list_thumbnail_url_derives_from_preview_png_not_status(app_and_client):
+    """review fix-up: thumbnail_url used to be derived from `status ==
+    "done"` -- correct today only because jobs/worker.py happens to always
+    set preview_png and status="done" in the same update_job call. db.
+    list_jobs now selects `preview_png IS NOT NULL` directly, so this holds
+    even for a row where that coupling doesn't apply -- proven here with a
+    job created directly with a preview_png but left at status="queued"
+    (never touched by the worker): the OLD status-based derivation would
+    have wrongly reported no thumbnail_url for this row."""
+    app, client = app_and_client
+    db = app.state.db
+    job = await db.create_print_job(
+        {"labels": [_text_label()], "options": {"chain_mode": "cut_each"}},
+        label_count=1,
+        chain_mode="cut_each",
+        preview_png=b"\x89PNG\r\n\x1a\nfake thumbnail bytes",
+    )
+    assert job["status"] == "queued"
+
+    resp = await client.get("/api/history")
+    item = next(i for i in resp.json()["items"] if i["id"] == job["id"])
+    assert item["status"] == "queued"
+    assert item["thumbnail_url"] == f"/api/history/{job['id']}/thumbnail"
+
+    thumb = await client.get(item["thumbnail_url"])
+    assert thumb.status_code == 200
+
+
 async def test_history_list_newest_first_and_pagination(client):
     ids = []
     for i in range(3):
