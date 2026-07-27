@@ -1,0 +1,25 @@
+# udev rule: grant non-root read/write access to the Brother PT-E720BT's USB
+# device node.
+#
+# What: matches the PT-E720BT by its USB vendor:product id (04f9:224a, per
+# `lsusb` and docs/protocol-notes.md's checkpoint procedure) and sets the
+# device node's permissions to 0666 (rw for all users) whenever it's
+# plugged in.
+#
+# Why: without this, /dev/bus/usb/<bus>/<dev> is only writable by root (or a
+# group like `plugdev` that varies by distro and isn't guaranteed to exist),
+# so pyusb's libusb backend gets a permissions error opening the device --
+# both for a host-side `uv run ... driver.cli` and for the Docker container
+# in docker/docker-compose.yml, which runs as a non-root `app` user and
+# relies on this rule rather than any in-container group membership (see
+# docker/Dockerfile's non-root user comment, and docs/usb-setup.md).
+#
+# Install:
+#   sudo cp docker/99-brother-pte720bt.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   # then unplug and replug the printer
+#
+# Keep this in sync with docs/protocol-notes.md's inline copy of the same
+# rule (step 1, USB permissions fix).
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="224a", MODE="0666"

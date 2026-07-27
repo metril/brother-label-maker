@@ -1,0 +1,30 @@
+# Build context is the repo root (see docker/Dockerfile). Keep this narrow:
+# it only trims things Docker never needs to COPY, not a general-purpose
+# gitignore. Patterns are anchored to the repo root with a leading "/" where
+# a bare name would otherwise also match same-named paths nested under
+# backend/ or frontend/ (e.g. "docs" must not eat backend/assets/... — there
+# is none today, but anchoring keeps that true by construction). The one
+# deliberate exception is backend/assets/, which the runtime image needs
+# (fonts) and which must survive every pattern below, including *.md.
+
+.git
+
+# Frontend: rebuilt fresh by the frontend-build stage; host artifacts (if
+# any exist from local `npm run build`/`npm install`) would only bloat the
+# context and can shadow stage output.
+frontend/node_modules
+frontend/dist
+
+# Backend: rebuilt fresh by the runtime stage's `uv sync`; a host .venv is
+# almost certainly built for the host's arch, not the target image's.
+backend/.venv
+**/__pycache__
+backend/.pytest_cache
+backend/.ruff_cache
+
+# Repo-local tooling, docs, and secrets that never belong in the image.
+/.superpowers
+/data
+/.env
+/docs
+/*.md

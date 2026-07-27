@@ -1,0 +1,49 @@
+# Reference deployment: single container serving the SPA + API, with USB
+# passthrough for a real PT-E720BT. Run from the repo root:
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# See ../docs/usb-setup.md for host-side prerequisites (udev rule) this
+# depends on, and ../docs/protocol-notes.md for the physical checkpoint that
+# resolves PRINTER_INIT_STRATEGY.
+
+services:
+  labelmaker:
+    image: brother-label-maker:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PRINTER_MODE: usb
+      # UNVERIFIED default (see docs/protocol-notes.md) -- flip to e310bt
+      # after the physical checkpoint resolves which init strategy the
+      # PT-E720BT actually needs.
+      PRINTER_INIT_STRATEGY: classic
+    volumes:
+      # Bind-mount the *directory*, not a specific device node
+      # (`/dev/bus/usb/001/005`-style paths under `devices:` renumber on
+      # every replug/power-cycle -- a `--device`/`devices:` entry pinned to
+      # today's path silently goes stale the next time the printer is
+      # unplugged and replugged, or the container restarts after the host
+      # reboots). Mounting the whole `/dev/bus/usb` tree means libusb's
+      # re-enumeration on hotplug just works, because the directory it
+      # rescans is the same directory the host kernel is updating.
+      - /dev/bus/usb:/dev/bus/usb
+      - labeldata:/data
+    # Grants access to USB device nodes (major 189, all minors) without
+    # `--privileged` (which would hand the container the entire host device
+    # namespace plus capabilities it doesn't need) and without a `devices:`
+    # list (which hits the same stale-path problem as above, one entry per
+    # device instead of one bind mount). The cgroup rule + directory mount
+    # combination is what survives unplug/replug and reboot cycles; the
+    # printer's actual, non-root-writable access still comes from the udev
+    # rule in docker/99-brother-pte720bt.rules (MODE="0666"), installed on
+    # the HOST -- this rule only gets the container's cgroup permission to
+    # open the node once it exists.
+    device_cgroup_rules:
+      - "c 189:* rmw"
+
+volumes:
+  labeldata: {}
