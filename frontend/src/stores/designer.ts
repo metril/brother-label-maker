@@ -102,3 +102,19 @@ export function hasRenderableContent(params: TextLabelParams): boolean {
 export function buildDefinition(tape: Tape, params: TextLabelParams): LabelDefinition {
   return { type: "text", tape, params };
 }
+
+/** I1: tape-mismatch preflight guardrail message, or null when there's
+ * nothing to warn about (disconnected, the printer's loaded width isn't
+ * known yet, or it matches the design). A WARNING, never a hard block --
+ * printer/status can be stale (usePrinterStatus polls every 10s), so this
+ * is only a banner; the backend still re-checks against the printer's live
+ * status at print time and fails the job with the same friendly wording if
+ * it's really wrong (see jobs/worker.py's tape-mismatch error, I1). */
+export function tapeMismatchWarning(
+  designWidthMm: number,
+  connected: boolean,
+  loadedWidthMm: number | null | undefined,
+): string | null {
+  if (!connected || loadedWidthMm == null || loadedWidthMm === designWidthMm) return null;
+  return `Printer has ${loadedWidthMm}mm tape loaded — this label is designed for ${designWidthMm}mm`;
+}
