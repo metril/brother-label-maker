@@ -59,6 +59,25 @@ class RasterConfig:
 _DEFAULT_CONFIG = RasterConfig()
 
 
+def set_pin(line: bytearray, pin: int, bit_order: BitOrder = BitOrder.MSB_FIRST) -> None:
+    """Set one head-pin's bit within a 16-byte raster line, honoring
+    `bit_order` (byte = pin // 8; MSB_FIRST packs pin 0 into byte0's bit 7,
+    counting down; LSB_FIRST packs pin 0 into byte0's bit 0, counting up --
+    see RasterConfig's docstring).
+
+    The single shared pin-packing primitive for this module: both
+    image_to_pin_lines (image-derived lines, below) and job.py's
+    _cut_mark_line (a synthetic, non-image-derived line) go through this,
+    so a bit_order fix/change only ever needs to happen in one place (task
+    2.1 review's original ask -- _cut_mark_line used to hardcode MSB-first
+    packing inline instead of sharing this logic, so it silently ignored a
+    non-default RasterConfig.bit_order).
+    """
+    byte_index = pin // 8
+    bit = pin % 8 if bit_order is BitOrder.LSB_FIRST else 7 - pin % 8
+    line[byte_index] |= 1 << bit
+
+
 def image_to_pin_lines(
     img: Image.Image, tape: TapeSpec, config: RasterConfig = _DEFAULT_CONFIG
 ) -> list[bytes]:
@@ -81,9 +100,7 @@ def image_to_pin_lines(
                     if config.flip_pins
                     else tape.left_pin + tape.print_dots - 1 - y
                 )
-                byte_index = pin // 8
-                bit = pin % 8 if config.bit_order is BitOrder.LSB_FIRST else 7 - pin % 8
-                line[byte_index] |= 1 << bit
+                set_pin(line, pin, config.bit_order)
         lines.append(bytes(line))
     return lines
 

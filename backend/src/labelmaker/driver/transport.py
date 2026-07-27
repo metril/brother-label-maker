@@ -43,8 +43,31 @@ class TransportError(Exception):
     """
 
 
+def _split_into_chunks(data: bytes, chunk_size: int | None) -> list[bytes]:
+    """Task 2.9's chunked-write helper: split `data` into pieces of at most
+    `chunk_size` bytes each, in order, covering every byte exactly once.
+    `chunk_size=None` (the default everywhere `write()` is called without it
+    -- every pre-2.9 call site) is a no-op: returns `[data]` unchanged, so
+    every existing Transport implementation/test keeps its exact prior
+    single-write behavior. An empty `data` always yields `[data]` (one
+    "chunk", possibly empty) rather than `[]`, so a caller that always does
+    at least one write per `write()` call keeps doing so.
+    """
+    if chunk_size is None or not data:
+        return [data]
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+
+
 class Transport(Protocol):
-    def write(self, data: bytes, timeout_ms: int = 10000) -> None: ...
+    def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:
+        """Write `data`. `chunk_size` (task 2.9), when given, splits `data`
+        into sequential pieces of at most that many bytes each -- each piece
+        is its own underlying write, still within `timeout_ms` per piece --
+        instead of one single potentially-huge transfer. `None` (the
+        default) preserves the pre-2.9 single-write behavior exactly."""
+        ...
 
     def read(self, n: int, timeout_ms: int = 500) -> bytes:
         """Read up to n bytes. Returns b"" on timeout; may return fewer than n bytes."""
@@ -64,11 +87,16 @@ class CaptureTransport:
         self.writes_list: list[bytes] = []
         self._read_queue: list[bytes] = []
 
-    def write(self, data: bytes, timeout_ms: int = 10000) -> None:
+    def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:
         # timeout_ms is part of the Transport protocol (I2) but meaningless
-        # for an in-memory double -- accepted and ignored.
-        self.written.extend(data)
-        self.writes_list.append(bytes(data))
+        # for an in-memory double -- accepted and ignored. When chunk_size
+        # splits `data`, each piece is recorded as its OWN writes_list entry
+        # (not the original, unsplit `data`) -- writes_list is meant to
+        # mirror what actually went out over "the wire" one piece at a
+        # time, which is exactly what a real chunked transport would do.
+        for piece in _split_into_chunks(data, chunk_size):
+            self.written.extend(piece)
+            self.writes_list.append(bytes(piece))
 
     def queue_read(self, data: bytes) -> None:
         """Queue one scripted reply. Each read() call pops the next one, FIFO."""
@@ -115,8 +143,11 @@ class MockPrinterTransport(CaptureTransport):
         self._pending_status_reply = False
         self.closed = False
 
-    def write(self, data: bytes, timeout_ms: int = 10000) -> None:
-        super().write(data, timeout_ms)
+    def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:
+        super().write(data, timeout_ms, chunk_size)
+        # Checked against the ORIGINAL, unsplit `data` -- whether the
+        # status-request suffix is present doesn't depend on how many
+        # pieces it got recorded as.
         self._pending_status_reply = bytes(data).endswith(STATUS_REQUEST)
 
     def read(self, n: int, timeout_ms: int = 500) -> bytes:
@@ -207,10 +238,11 @@ class PyUsbTransport:
                 f"(see docs/protocol-notes.md step 1)"
             ) from err
 
-    def write(self, data: bytes, timeout_ms: int = 10000) -> None:
+    def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:
         usb_error, _usb_timeout_error = _usb_errors()
         try:
-            self._device.write(self._ep_out, data, timeout=timeout_ms)
+            for piece in _split_into_chunks(data, chunk_size):
+                self._device.write(self._ep_out, piece, timeout=timeout_ms)
         except usb_error as err:
             raise TransportError(f"USB write error: {err}") from err
 

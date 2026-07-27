@@ -428,6 +428,32 @@ class Database:
             return None
         return await self.get_job(job_id)
 
+    async def cancel_job_if_queued(self, job_id: str) -> bool:
+        """Atomic compare-and-swap cancel (task 2.9 carry-forward): a single
+        `UPDATE ... WHERE id = ? AND status = 'queued'`, returning whether
+        THIS call was the one that made the change (`rowcount == 1`).
+
+        This is the sole race-free way to cancel: a plain
+        get_job()-then-update_job("canceled") pair (the pre-2.9 router
+        implementation) has a window between the read and the write where
+        the worker could dequeue and start printing the job -- the cancel
+        would then silently stomp a "printing" (or "done"/"failed") row
+        back to "canceled" with no error. Folding the status check into the
+        UPDATE's WHERE clause makes the whole read-check-write atomic at
+        the database level: if another writer (the worker's own
+        `status="printing"` update) already changed the row's status away
+        from "queued", this UPDATE matches zero rows and rowcount is 0, no
+        matter how the two calls interleave. The caller (api/router_print.py)
+        uses the False case to distinguish "unknown id" (404) from "known
+        but not cancelable" (409, naming the current status) via a follow-up
+        get_job() -- see that router for the exact mapping.
+        """
+        cur = await self._conn.execute(
+            "UPDATE print_jobs SET status = 'canceled' WHERE id = ? AND status = 'queued'",
+            (job_id,),
+        )
+        return cur.rowcount == 1
+
     async def get_job(self, job_id: str) -> dict | None:
         cur = await self._conn.execute("SELECT * FROM print_jobs WHERE id = ?", (job_id,))
         row = await cur.fetchone()

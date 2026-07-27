@@ -207,6 +207,68 @@ async def test_print_job_lifecycle():
         await db.close()
 
 
+# --- 4b. task 2.9: cancel_job_if_queued -- atomic CAS cancel -------------
+
+
+async def test_cancel_job_if_queued_succeeds_on_a_queued_job():
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        assert job["status"] == "queued"
+
+        canceled = await db.cancel_job_if_queued(job["id"])
+        assert canceled is True
+
+        got = await db.get_job(job["id"])
+        assert got["status"] == "canceled"
+    finally:
+        await db.close()
+
+
+async def test_cancel_job_if_queued_fails_on_unknown_id():
+    db = await Database.open(":memory:")
+    try:
+        assert await db.cancel_job_if_queued("does-not-exist") is False
+    finally:
+        await db.close()
+
+
+async def test_cancel_job_if_queued_fails_once_already_printing():
+    """The race this CAS exists to close: simulate the worker having
+    already dequeued and marked the job "printing" BEFORE the cancel
+    request's UPDATE runs -- the CAS must match zero rows (not silently
+    stomp "printing" back to "canceled"), and the row's status must be left
+    exactly as the worker set it."""
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        await db.update_job(job["id"], status="printing")
+
+        canceled = await db.cancel_job_if_queued(job["id"])
+        assert canceled is False
+
+        got = await db.get_job(job["id"])
+        assert got["status"] == "printing"  # untouched by the failed cancel attempt
+    finally:
+        await db.close()
+
+
+async def test_cancel_job_if_queued_double_cancel_second_call_fails():
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+
+        assert await db.cancel_job_if_queued(job["id"]) is True
+        # Second call: the row is now "canceled", not "queued" -- the CAS
+        # must fail rather than being a harmless idempotent no-op.
+        assert await db.cancel_job_if_queued(job["id"]) is False
+
+        got = await db.get_job(job["id"])
+        assert got["status"] == "canceled"
+    finally:
+        await db.close()
+
+
 async def test_update_job_widened_columns_and_clear_error_sentinel():
     """Task 2.8 carry-forward: update_job widened to also accept
     strategy/tape_width_mm/media_raw_byte (the worker backfill columns --

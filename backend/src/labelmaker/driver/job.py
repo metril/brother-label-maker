@@ -23,6 +23,7 @@ from labelmaker.driver.raster import (
     encode_image,
     encode_line,
     image_to_pin_lines,
+    set_pin,
 )
 
 if TYPE_CHECKING:
@@ -55,20 +56,27 @@ class JobStream:
     chain_mode: ChainMode
 
 
-def _cut_mark_line(tape: TapeSpec) -> bytes:
+def _cut_mark_line(tape: TapeSpec, raster_config: RasterConfig) -> bytes:
     """One 16-byte pin line, dashed within the print area only: pins where
-    ((pin - tape.left_pin) // 4) % 2 == 0 are set. Packed MSB-first (byte =
-    pin // 8, bit = 7 - pin % 8) -- cut marks are synthetic, not image-derived,
-    so unlike raster.py's image pipeline they don't track RasterConfig's
-    bit_order/flip_pins flags.
+    ((pin - tape.left_pin) // 4) % 2 == 0 are set.
+
+    Packed via raster.py's shared set_pin() helper, honoring
+    `raster_config.bit_order` (task 2.1 review fix-up: this used to hardcode
+    MSB-first packing inline instead of sharing raster.py's pin-packing
+    logic, so it silently ignored a non-default RasterConfig.bit_order --
+    see set_pin's docstring). Deliberately does NOT track `flip_pins`: cut
+    marks are synthetic, not image-derived -- `flip_pins` only affects how
+    an image's row axis maps onto pin numbers (image_to_pin_lines), which
+    has no meaning for this offset-within-the-print-area dash pattern.
+    With the default RasterConfig (MSB_FIRST), this produces byte-identical
+    output to the pre-2.9 hardcoded implementation -- see test_job.py's
+    golden test_strip_marks_two_images_full_stream, unchanged.
     """
     line = bytearray(BYTES_PER_LINE)
     for offset in range(tape.print_dots):
         if (offset // 4) % 2 == 0:
             pin = tape.left_pin + offset
-            byte_index = pin // 8
-            bit = 7 - pin % 8
-            line[byte_index] |= 1 << bit
+            set_pin(line, pin, raster_config.bit_order)
     return bytes(line)
 
 
@@ -123,7 +131,7 @@ def _build_strip_marks(
     # image_to_pin_lines validates mode/height/width per image; a mixed-height
     # list raises ValueError here, from the raster layer -- not pre-checked or caught.
 
-    cut_mark = _cut_mark_line(tape)
+    cut_mark = _cut_mark_line(tape, options.raster_config)
     gap = [ZERO_LINE] * options.cut_mark_gap
     dashes = [cut_mark] * options.cut_mark_width
 

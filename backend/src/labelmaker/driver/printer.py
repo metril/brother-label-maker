@@ -10,6 +10,7 @@ moved to the caller (print_images itself never prints).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PIL import Image
@@ -26,6 +27,8 @@ from labelmaker.driver.status import (
 )
 from labelmaker.driver.strategies import InitStrategy
 from labelmaker.driver.transport import Transport, TransportError
+
+DEFAULT_WRITE_CHUNK_SIZE = 4096
 
 
 class PrinterBusyError(Exception):
@@ -132,6 +135,44 @@ def _drain_post_print(transport: Transport) -> tuple[list[PrinterStatus | str], 
     return events, blocks_seen
 
 
+def _write_chunked(
+    transport: Transport,
+    data: bytes,
+    chunk_size: int,
+    progress_cb: Callable[[int, int], None] | None,
+) -> None:
+    """Task 2.9: write `data` in pieces of at most `chunk_size` bytes,
+    calling `progress_cb(bytes_written_so_far, total)` after each piece
+    (never before the first, always after the last -- the last call always
+    has `bytes_written_so_far == total`, so a caller can rely on that as
+    "done"). No-op (never calls `progress_cb`) for an empty stream, which
+    should not occur in practice (build_job always produces at least the
+    preamble bytes for a non-empty images list) but is handled defensively
+    rather than dividing by zero or reporting a meaningless 0/0.
+
+    Deliberately does NOT accept a `should_abort` callback: the printer has
+    already started buffering (and, per docs/research/features.md's raster
+    protocol notes, USB uncompressed data makes the printer start printing
+    as data arrives, before any explicit print command) by the time the
+    first chunk is on the wire -- aborting partway through would leave a
+    half-printed label on the tape, which is strictly worse than letting an
+    already-committed job finish. Mid-print cancellation is out of scope
+    for this task; see jobs/worker.py's module docstring for where the
+    per-job cancel flag this WOULD need to consult is (not) wired.
+    """
+    total = len(data)
+    if total == 0:
+        transport.write(data)
+        return
+    sent = 0
+    for start in range(0, total, chunk_size):
+        piece = data[start : start + chunk_size]
+        transport.write(piece)
+        sent += len(piece)
+        if progress_cb is not None:
+            progress_cb(sent, total)
+
+
 def print_images(
     images: list[Image.Image],
     *,
@@ -139,13 +180,15 @@ def print_images(
     options: JobOptions,
     transport: Transport,
     status_before: PrinterStatus | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
+    chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE,
 ) -> PrintResult:
     """request_status -> raise PrinterBusyError if the printer reports
     error(s) -> resolve tape geometry (I4: TZe fallback on unknown media
     type; TapeNotFoundError if no TapeSpec matches) -> build_job ->
-    transport.write(stream.data) -> drain post-print status -> return
-    PrintResult. Image/tape height mismatches are not pre-validated here --
-    raster.py raises ValueError, which propagates.
+    write the job stream in chunks (see _write_chunked) -> drain post-print
+    status -> return PrintResult. Image/tape height mismatches are not
+    pre-validated here -- raster.py raises ValueError, which propagates.
 
     `transport` is injected and NOT closed by this function -- the caller
     owns its lifetime (the CLI closes it in a finally; the web worker will
@@ -157,6 +200,15 @@ def print_images(
     already have a fresh status in hand. Omit it (the default) to have
     print_images fetch status itself, as cli._run_usb_print's original
     inline implementation did.
+
+    `progress_cb`/`chunk_size` (task 2.9): the job stream is always written
+    in `chunk_size`-byte pieces (default 4096, matching DEFAULT_WRITE_CHUNK_SIZE)
+    -- unconditionally, not just when `progress_cb` is given -- so a small
+    job (stream shorter than `chunk_size`) is still exactly ONE write, and a
+    large one is several, regardless of whether anyone's listening.
+    `progress_cb`, when given, is called after every chunk with
+    (bytes_written_so_far, total) -- see jobs/worker.py for the throttled
+    job.progress broadcast built on top of this.
     """
     if status_before is None:
         status_before = request_status(transport)
@@ -168,7 +220,7 @@ def print_images(
         raise TapeNotFoundError(status_before, assumed_tze=assumed_tze)
 
     stream = build_job(images, tape, strategy, options)
-    transport.write(stream.data)
+    _write_chunked(transport, stream.data, chunk_size, progress_cb)
 
     post_print_events, blocks_seen = _drain_post_print(transport)
 
