@@ -32,10 +32,10 @@ router = APIRouter(tags=["labels"])
 
 @router.get("/label-types")
 async def get_label_types() -> list[dict]:
-    return [
-        {"type": info.type, "title": info.title, "params_schema": info.params_schema}
-        for info in list_types()
-    ]
+    # Every LabelTypeInfo field (type/title/category/min_tape_mm/params_schema)
+    # passes through as-is -- no per-field allowlist to keep in sync when
+    # base.py's LabelTypeInfo shape grows (e.g. category/min_tape_mm, task 2.2).
+    return [info.model_dump() for info in list_types()]
 
 
 @router.get("/fonts")

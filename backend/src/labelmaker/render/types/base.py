@@ -15,18 +15,26 @@ _REGISTRY: dict[str, type["LabelRenderer"]] = {}
 class LabelTypeInfo(BaseModel):
     type: str
     title: str
+    category: str
+    min_tape_mm: float | None = None  # None = usable on any tape width
     params_schema: dict
 
 
 class LabelRenderer(ABC):
     """Base class for a label type's renderer.
 
-    Subclasses set `title` (a display name) and `Params` (their own pydantic
-    model for `params`), and implement `render`. Registered via @register.
+    Subclasses set `title` (a display name), `category` (grouping for a
+    future type picker -- "general" for freeform text types, "network" for
+    the patch_panel/punch_down/faceplate family, more later), and `Params`
+    (their own pydantic model for `params`), and implement `render`.
+    Registered via @register. `min_tape_mm` is optional (defaults to None,
+    meaning "usable on any tape width") -- most types don't need a floor.
     """
 
     type: str
     title: str
+    category: str
+    min_tape_mm: float | None = None
     Params: type[BaseModel]
 
     @abstractmethod
@@ -53,7 +61,13 @@ def get_renderer(type_name: str) -> LabelRenderer:
 
 def list_types() -> list[LabelTypeInfo]:
     return [
-        LabelTypeInfo(type=cls.type, title=cls.title, params_schema=cls.Params.model_json_schema())
+        LabelTypeInfo(
+            type=cls.type,
+            title=cls.title,
+            category=cls.category,
+            min_tape_mm=cls.min_tape_mm,
+            params_schema=cls.Params.model_json_schema(),
+        )
         for cls in _REGISTRY.values()
     ]
 

@@ -1,12 +1,16 @@
-"""Shared fixtures for the API test suite (test_api_*.py).
+"""Shared fixtures for the whole test suite.
 
-Every API test runs in mock printer mode against a tmp_path data_dir, wired
-directly to the ASGI app via httpx.ASGITransport -- no real socket/port.
-ASGITransport does not drive the ASGI lifespan protocol on its own, so the
-`app_and_client` fixture drives it explicitly via
+Every API test (test_api_*.py) runs in mock printer mode against a tmp_path
+data_dir, wired directly to the ASGI app via httpx.ASGITransport -- no real
+socket/port. ASGITransport does not drive the ASGI lifespan protocol on its
+own, so the `app_and_client` fixture drives it explicitly via
 `app.router.lifespan_context(app)` (the same async context manager
 `create_app`'s `lifespan=` callable becomes), which starts the db/bus/worker
 exactly as a real server boot would and tears them down on fixture exit.
+
+`_isolated_render_registry` below is unrelated to the API-test fixtures
+above -- it applies to every test in the whole session (this is the only
+conftest.py under tests/), not just test_api_*.py.
 """
 
 from __future__ import annotations
@@ -16,6 +20,35 @@ import pytest
 
 from labelmaker.config import AppConfig
 from labelmaker.main import create_app
+from labelmaker.render.types.base import _REGISTRY
+
+
+@pytest.fixture(autouse=True)
+def _isolated_render_registry():
+    """Registry test pollution (deferred from 1.2): labelmaker.render.types.
+    base._REGISTRY is a bare module-level dict, mutated in place by every
+    @register(...) class decorator. A type registered at TEST-MODULE import
+    time (decorator on a class body, e.g. a "dummy" test-only renderer)
+    would otherwise stay registered for the rest of the whole pytest
+    session -- Python only imports/decorates a module once -- silently
+    changing what list_types()/get_renderer() return for every other test
+    file that happens to run afterward (e.g. an assertion like "exactly 4
+    types" would flake depending on collection/run order).
+
+    Snapshotting a shallow copy of the registry before each test and
+    restoring it after undoes any register() a test performed (directly, or
+    via its own autouse fixture -- see test_render_registry.py's
+    `_register_dummy`, which relies on this fixture for cleanup rather than
+    registering at import time). Fixture teardown order is LIFO, and this
+    conftest-level fixture is requested before same-scope fixtures declared
+    in a test module, so the snapshot taken here never includes a test-local
+    registration, and the restore here always runs after that
+    registration's own (no-op) teardown -- see test_render_registry.py.
+    """
+    snapshot = dict(_REGISTRY)
+    yield
+    _REGISTRY.clear()
+    _REGISTRY.update(snapshot)
 
 # I4: app_config's own explicit defaults for the three checkpoint-pending
 # fields (printer_init_strategy/printer_bit_order/printer_flip_pins).

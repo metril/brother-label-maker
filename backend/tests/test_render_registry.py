@@ -4,6 +4,15 @@ Registers a local dummy type (rather than depending on the real "text" type)
 so this file tests registry mechanics in isolation; text-specific
 registration (list_types() containing "text", its schema) is asserted in
 test_text_label.py alongside the rest of that type's behavior.
+
+The dummy type is registered by the `_register_dummy` autouse fixture below,
+NOT by decorating `_DummyRenderer`'s class body directly -- a class-body
+`@register("dummy")` would run once at module-import (collection) time and
+stay in the global registry for the rest of the whole pytest session (Python
+only imports a module once), permanently polluting every other test file's
+`list_types()`. Registering per-test instead lets conftest.py's
+`_isolated_render_registry` autouse fixture (which snapshots/restores the
+registry around every test) actually clean it up afterward.
 """
 
 import pytest
@@ -24,13 +33,18 @@ class _DummyParams(BaseModel):
     text: str = "hi"
 
 
-@register("dummy")
 class _DummyRenderer(LabelRenderer):
     title = "Dummy"
+    category = "general"
     Params = _DummyParams
 
     def render(self, params: _DummyParams, tape) -> RenderedLabel:
         return RenderedLabel(svg=f"<svg>{params.text}</svg>", width_px=1, height_px=tape.print_dots)
+
+
+@pytest.fixture(autouse=True)
+def _register_dummy():
+    register("dummy")(_DummyRenderer)
 
 
 def test_register_adds_entry_to_list_types():

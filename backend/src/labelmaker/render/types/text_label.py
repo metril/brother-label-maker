@@ -68,6 +68,7 @@ class TextLabelParams(BaseModel):
 @register("text")
 class TextLabelRenderer(LabelRenderer):
     title = "Text"
+    category = "general"
     Params = TextLabelParams
 
     def render(self, params: TextLabelParams, tape: TapeSpec) -> RenderedLabel:

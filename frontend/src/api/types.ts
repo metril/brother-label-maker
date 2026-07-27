@@ -41,6 +41,12 @@ export interface HealthResponse {
 export interface LabelTypeInfo {
   type: string;
   title: string;
+  /** Grouping for a future type picker: "general" for freeform text types,
+   * "network" for patch_panel/punch_down/faceplate, more later. Not yet
+   * consumed by any UI (2.10 does). */
+  category: string;
+  /** None (null) = usable on any tape width. Not yet consumed by any UI. */
+  min_tape_mm: number | null;
   params_schema: Record<string, unknown>;
 }
 
