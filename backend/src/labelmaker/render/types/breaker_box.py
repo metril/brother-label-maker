@@ -40,19 +40,24 @@ Worked example (`numbering_scheme="odd"`, `start_value=1`, breakers
 2-pole breaker), then 3 (after the next 1-pole) -- slots = 1 + 2*[0, 2, 3] =
 [1, 5, 7]. "odd" and "even" differ only in `start_value` (an odd-column
 strip starts at 1, an even-column strip starts at 2) -- both use the same
-increment=2; this module does not special-case a default `start_value` per
-scheme, since the caller already has an explicit `start_value` field for
-exactly this.
+increment=2, so a caller who leaves `start_value` at its default (1) while
+picking `numbering_scheme="even"` would silently get ODD numbers back (1, 5,
+7, ...) that read as a valid-looking but WRONG panel schedule, not an error.
+`_check_start_value_parity` closes that gap: "odd" REQUIRES an odd
+`start_value`, "even" REQUIRES an even one (checked via `% 2`), rejected
+with a message naming both schemes' requirement -- the API itself stays
+self-consistent instead of relying on a future caller/UI to remember to
+pick the right starting number for the scheme it also picked.
 
 `show_numbers` toggles whether the computed slot number is prepended to each
 breaker's own `lines` (circuit descriptions) at all; when it's off, only
-`lines` renders (no numbering math has any visible effect). Because
-divided_blocks.py's blocks are capped at 2 visible lines' worth of *this*
-module's own content model (number + description), a breaker validating
-`show_numbers=True` with 2 description lines already fills both slots
-before the number even goes in -- rejected explicitly (see
-`_check_show_numbers_leaves_room`) rather than silently dropping the
-second description line.
+`lines` renders (no numbering math has any visible effect). This module's
+own content model caps a block at 2 visible lines -- number + 1 description
+(NOT an engine limit: divided_blocks.py's BlockSpec itself allows up to 4)
+-- so a breaker validating `show_numbers=True` with 2 description lines
+already fills both of THIS module's lines before the number even goes in --
+rejected explicitly (see `_check_show_numbers_leaves_room`) rather than
+silently dropping the second description line.
 
 `orientation` has no user-facing param (v1 only supports the standard
 panel-schedule horizontal layout, hardcoded to Orientation.HORIZONTAL below)
@@ -70,7 +75,7 @@ catch it) -- so does `build_divided_blocks_params`'s outer-type-name
 error-message substitution (see divided_blocks.py).
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -95,6 +100,15 @@ _MAX_START_VALUE = 999
 _MIN_POLES = 1
 _MAX_POLES = 4
 _MAX_DESCRIPTION_LINES = 2
+# Guardrail, not decoration: render_divided_blocks fits ONE shared font size
+# across every block in the strip (see divided_blocks.py's module
+# docstring), using the narrowest per-block fit as that shared size. Without
+# a per-item bound here, one overly long circuit description wouldn't just
+# clip/warn on its OWN block -- fit_font_size would shrink toward its
+# min_px floor trying to fit that one line, and that shrunk size then
+# applies to EVERY OTHER breaker's block too (text_cramped, silently, not a
+# 422 -- the whole strip becomes unreadable because of one long word).
+_MAX_DESCRIPTION_CHARS = 30
 
 NumberingScheme = Literal["sequential", "odd", "even"]
 
@@ -106,8 +120,14 @@ class BreakerSpec(BaseModel):
         le=_MAX_POLES,
         description="breaker width in panel positions (2 = double-pole)",
     )
-    lines: list[str] = Field(
-        [], max_length=_MAX_DESCRIPTION_LINES, description="circuit description under the number"
+    # Per-item max_length (not a validator-body loop) so an out-of-range
+    # item gets its own error `loc`, matching terminal_block.py's `labels`
+    # convention -- see _MAX_DESCRIPTION_CHARS above for why this bound
+    # exists at all.
+    lines: list[Annotated[str, Field(max_length=_MAX_DESCRIPTION_CHARS)]] = Field(
+        default_factory=list,
+        max_length=_MAX_DESCRIPTION_LINES,
+        description="circuit description under the number",
     )
 
 
@@ -134,7 +154,10 @@ class BreakerBoxParams(BaseModel):
         1,
         ge=_MIN_START_VALUE,
         le=_MAX_START_VALUE,
-        description="slot number of the first breaker's first position",
+        description=(
+            "slot number of the first breaker's first position -- must be odd for "
+            "numbering_scheme='odd', even for 'even'"
+        ),
     )
     show_numbers: bool = Field(
         True, description="prepend the computed panel-position number to each breaker's text"
@@ -157,6 +180,27 @@ class BreakerBoxParams(BaseModel):
             raise ValueError(
                 "with numbering enabled, at most 1 description line fits "
                 "(the panel-position number takes the other line)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_start_value_parity(self) -> "BreakerBoxParams":
+        # See the module docstring's worked-example paragraph: "odd" and
+        # "even" share the same increment=2, so without this check a caller
+        # could pick numbering_scheme="even" and leave start_value at its
+        # default (1) and silently get back ODD numbers -- a wrong panel
+        # schedule that looks valid. Reject the mismatch outright instead
+        # (message names BOTH schemes' requirement, not just the one that
+        # failed, so the fix is obvious either way).
+        if self.numbering_scheme == "odd" and self.start_value % 2 == 0:
+            raise ValueError(
+                f"numbering_scheme='odd' requires an odd start_value, got {self.start_value} "
+                "('even' requires an even start_value)"
+            )
+        if self.numbering_scheme == "even" and self.start_value % 2 == 1:
+            raise ValueError(
+                f"numbering_scheme='even' requires an even start_value, got {self.start_value} "
+                "('odd' requires an odd start_value)"
             )
         return self
 

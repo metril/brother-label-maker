@@ -297,6 +297,18 @@ def test_breaker_spec_two_lines_accepted_when_show_numbers_false():
     BreakerBoxParams(breakers=[BreakerSpec(lines=["A", "B"])], show_numbers=False)
 
 
+def test_breaker_spec_line_over_30_chars_rejected():
+    # Guardrail against one long description collapsing the shared font size
+    # for every OTHER block in the strip too (see _MAX_DESCRIPTION_CHARS'
+    # comment in breaker_box.py).
+    with pytest.raises(ValidationError):
+        BreakerSpec(lines=["A" * 31])
+
+
+def test_breaker_spec_line_exactly_30_chars_accepted():
+    BreakerSpec(lines=["A" * 30])
+
+
 @pytest.mark.parametrize("value", [1, 999])
 def test_breaker_box_start_value_boundaries_accepted(value):
     BreakerBoxParams(breakers=[BreakerSpec()], start_value=value)
@@ -308,14 +320,53 @@ def test_breaker_box_start_value_out_of_range_rejected(value):
         BreakerBoxParams(breakers=[BreakerSpec()], start_value=value)
 
 
-@pytest.mark.parametrize("scheme", ["sequential", "odd", "even"])
-def test_breaker_box_numbering_scheme_valid_values_accepted(scheme):
-    BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme=scheme)
+# start_value paired per scheme's parity requirement (see
+# test_breaker_box_even_scheme_requires_even_start_value below): "sequential"
+# doesn't care about parity, "odd" needs an odd start_value, "even" needs an
+# even one.
+@pytest.mark.parametrize(
+    "scheme,start_value", [("sequential", 1), ("odd", 1), ("even", 2)]
+)
+def test_breaker_box_numbering_scheme_valid_values_accepted(scheme, start_value):
+    BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme=scheme, start_value=start_value)
 
 
 def test_breaker_box_invalid_numbering_scheme_rejected():
     with pytest.raises(ValidationError):
         BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="prime")
+
+
+# --- 4b. breaker_box: numbering_scheme/start_value PARITY (odd/even must ---
+# agree with start_value's own parity, or the scheme silently prints the
+# wrong column's numbers -- see breaker_box.py's module docstring and
+# _check_start_value_parity).
+
+
+def test_breaker_box_even_scheme_requires_even_start_value():
+    # start_value=1 is odd -- "even" without an even start silently produces
+    # odd numbers (1,3,5,...) if unchecked; must be rejected instead.
+    with pytest.raises(ValidationError, match="numbering_scheme='even'"):
+        BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="even", start_value=1)
+
+
+def test_breaker_box_odd_scheme_requires_odd_start_value():
+    # start_value=2 is even -- symmetric case for "odd".
+    with pytest.raises(ValidationError, match="numbering_scheme='odd'"):
+        BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="odd", start_value=2)
+
+
+def test_breaker_box_even_scheme_with_even_start_value_accepted():
+    BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="even", start_value=2)
+
+
+def test_breaker_box_odd_scheme_with_odd_start_value_accepted():
+    BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="odd", start_value=1)
+
+
+def test_breaker_box_sequential_scheme_ignores_start_value_parity():
+    # "sequential" has no parity requirement at all -- both parities pass.
+    BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="sequential", start_value=1)
+    BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme="sequential", start_value=2)
 
 
 # --- 5. breaker_box: panel-position numbering math (the point of this task) -
@@ -488,9 +539,11 @@ def test_breaker_box_pitch_mm_forwarded_as_block_length_mm():
 
 
 def test_breaker_box_orientation_always_horizontal():
-    for scheme in ("sequential", "odd", "even"):
+    for scheme, start_value in (("sequential", 1), ("odd", 1), ("even", 2)):
         engine_params = breaker_box_engine_params(
-            BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme=scheme)
+            BreakerBoxParams(
+                breakers=[BreakerSpec()], numbering_scheme=scheme, start_value=start_value
+            )
         )
         assert engine_params.orientation == Orientation.HORIZONTAL
 
