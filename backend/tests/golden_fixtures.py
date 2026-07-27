@@ -1,9 +1,9 @@
 """Golden-PNG fixture definitions: the single source of truth both the
-test suite's golden byte-lock tests (test_text_label.py, test_divided_blocks.py)
-and scripts/regen_goldens.py render from, so the two can never drift out of
-sync with each other -- a fixture added/changed here is immediately what
-both the test assertions and the regen script use, with no second copy to
-remember to update.
+test suite's golden byte-lock tests (test_text_label.py, test_divided_blocks.py,
+test_type_configs.py) and scripts/regen_goldens.py render from, so the two
+can never drift out of sync with each other -- a fixture added/changed here
+is immediately what both the test assertions and the regen script use, with
+no second copy to remember to update.
 """
 
 from dataclasses import dataclass
@@ -14,6 +14,11 @@ from labelmaker.render.types.divided_blocks import (
     Orientation,
     Separator,
 )
+from labelmaker.render.types.faceplate import BlockText as FaceplateBlockText
+from labelmaker.render.types.faceplate import FaceplateParams
+from labelmaker.render.types.patch_panel import BlockText as PatchPanelBlockText
+from labelmaker.render.types.patch_panel import PatchPanelParams
+from labelmaker.render.types.punch_down import PunchDownParams
 from labelmaker.render.types.text_label import TextLabelParams
 
 # Upscale factor golden PNGs are encoded at (preview_png's `scale`) -- purely
@@ -94,6 +99,54 @@ DIVIDED_BLOCKS_FIXTURES: tuple[DividedBlocksFixture, ...] = (
             block_length_mm=20.0,
             separator=Separator.FRAME,
             orientation=Orientation.VERTICAL,
+        ),
+        tape_mm=24,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class TypeConfigFixture:
+    name: str  # golden file is tests/golden/render/{name}.png
+    type: str  # registered label type name -- rendered via get_renderer(type)
+    params: PatchPanelParams | PunchDownParams | FaceplateParams
+    tape_mm: float
+    tape_family: str = "tze"
+
+
+# Task 2.2's three thin-config types (patch_panel/punch_down/faceplate), each
+# rendered via get_renderer(fixture.type).render(...) -- i.e. through the
+# real registered type, not by calling render_divided_blocks directly (unlike
+# DIVIDED_BLOCKS_FIXTURES above, which exercises the un-registered engine
+# module on its own).
+TYPE_CONFIG_FIXTURES: tuple[TypeConfigFixture, ...] = (
+    # (a) patch_panel, 6 blocks "P-01".."P-06", 24mm tape, LINE separator
+    # (default), block_length_mm 15.0 (default).
+    TypeConfigFixture(
+        name="patch_panel_6block_p0x_24mm",
+        type="patch_panel",
+        params=PatchPanelParams(
+            blocks=[PatchPanelBlockText(lines=[f"P-0{i}"]) for i in range(1, 7)]
+        ),
+        tape_mm=24,
+    ),
+    # (b) punch_down, 4-pair, start_value 1, 6 blocks, 12mm tape (all defaults).
+    TypeConfigFixture(
+        name="punch_down_4pair_start1_6block_12mm",
+        type="punch_down",
+        params=PunchDownParams(),
+        tape_mm=12,
+    ),
+    # (c) faceplate, 2 blocks ["OFFICE 1", "OFFICE 2"], 24mm tape, NONE
+    # separator (default), total_length_mm 70.0 (default).
+    TypeConfigFixture(
+        name="faceplate_2block_office_24mm",
+        type="faceplate",
+        params=FaceplateParams(
+            blocks=[
+                FaceplateBlockText(lines=["OFFICE 1"]),
+                FaceplateBlockText(lines=["OFFICE 2"]),
+            ]
         ),
         tape_mm=24,
     ),

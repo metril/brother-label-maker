@@ -79,6 +79,7 @@ def main() -> None:
 
     from labelmaker.render.document import RenderedLabel, Tape
     from labelmaker.render.rasterize import preview_png, rasterize
+    from labelmaker.render.types import get_renderer
     from labelmaker.render.types.divided_blocks import render_divided_blocks
     from labelmaker.render.types.text_label import TextLabelRenderer
 
@@ -106,6 +107,15 @@ def main() -> None:
     for fixture in golden_fixtures.DIVIDED_BLOCKS_FIXTURES:
         tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
         _write(fixture.name, render_divided_blocks(fixture.params, tape))
+        count += 1
+
+    # Task 2.2's thin-config types (patch_panel/punch_down/faceplate) --
+    # rendered through the real registered renderer (get_renderer), unlike
+    # DIVIDED_BLOCKS_FIXTURES above which calls the un-registered engine
+    # module directly.
+    for fixture in golden_fixtures.TYPE_CONFIG_FIXTURES:
+        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
+        _write(fixture.name, get_renderer(fixture.type).render(fixture.params, tape))
         count += 1
 
     print(f"regenerated {count} golden(s) in {_GOLDEN_DIR}")

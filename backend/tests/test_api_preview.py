@@ -92,3 +92,30 @@ async def test_preview_scale_out_of_range_returns_422(client):
         "/api/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 9}
     )
     assert resp.status_code == 422
+
+
+async def test_preview_divided_blocks_engine_value_error_returns_422_with_message_intact(client):
+    # Task 2.2 infra item 3: a ValueError raised by the divided-blocks
+    # ENGINE itself (layout_blocks, called from inside patch_panel's
+    # render()) -- not a pydantic ValidationError from Params, not
+    # Tape.resolve()'s ValueError -- must surface as 422 with its message
+    # unmangled. 4 blocks x 300mm (patch_panel's own max block_length_mm)
+    # = 1200mm, which clears PatchPanelParams' own [5, 300] range but
+    # exceeds this tze tape's 1000mm max_length_mm, so the ValueError comes
+    # from layout_blocks (same message shape as
+    # test_divided_blocks.py's test_total_above_tape_max_length_mm_raises).
+    bad_definition = {
+        "type": "patch_panel",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {
+            "blocks": [{"lines": ["A"]} for _ in range(4)],
+            "block_length_mm": 300.0,
+        },
+    }
+    resp = await client.post(
+        "/api/render/preview", json={"definition": bad_definition, "scale": 1}
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "1200.0mm" in detail
+    assert "1000.0" in detail
