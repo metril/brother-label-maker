@@ -8,6 +8,7 @@ no second copy to remember to update.
 
 from dataclasses import dataclass
 
+from labelmaker.render.types.breaker_box import BreakerBoxParams, BreakerSpec
 from labelmaker.render.types.divided_blocks import (
     BlockSpec,
     DividedBlocksParams,
@@ -19,6 +20,7 @@ from labelmaker.render.types.faceplate import FaceplateParams
 from labelmaker.render.types.patch_panel import BlockText as PatchPanelBlockText
 from labelmaker.render.types.patch_panel import PatchPanelParams
 from labelmaker.render.types.punch_down import PunchDownParams
+from labelmaker.render.types.terminal_block import TerminalBlockParams
 from labelmaker.render.types.text_label import TextLabelParams
 
 # Upscale factor golden PNGs are encoded at (preview_png's `scale`) -- purely
@@ -147,6 +149,49 @@ TYPE_CONFIG_FIXTURES: tuple[TypeConfigFixture, ...] = (
                 FaceplateBlockText(lines=["OFFICE 1"]),
                 FaceplateBlockText(lines=["OFFICE 2"]),
             ]
+        ),
+        tape_mm=24,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ElectricalTypeFixture:
+    name: str  # golden file is tests/golden/render/{name}.png
+    type: str  # registered label type name -- rendered via get_renderer(type)
+    params: TerminalBlockParams | BreakerBoxParams
+    tape_mm: float
+    tape_family: str = "tze"
+
+
+# Task 2.3's two thin-config types (terminal_block/breaker_box) -- the
+# product's differentiators, no Brother equivalent -- each rendered via
+# get_renderer(fixture.type).render(...), same convention as
+# TYPE_CONFIG_FIXTURES above.
+ELECTRICAL_TYPE_FIXTURES: tuple[ElectricalTypeFixture, ...] = (
+    # (a) terminal_block, 12 terminals (default), numbered 1-12 (defaults:
+    # numbering=True, start_value=1, step=1), VERTICAL (default), 9mm tape --
+    # the realistic DIN-rail case.
+    ElectricalTypeFixture(
+        name="terminal_block_12terminal_vertical_9mm",
+        type="terminal_block",
+        params=TerminalBlockParams(),
+        tape_mm=9,
+    ),
+    # (b) breaker_box, odd-numbering-scheme panel column, breakers
+    # [2p "MAIN", 1p "KITCHEN", 1p "LIGHTS", 2p "DRYER"] -> slots 1, 5, 7, 9
+    # (see test_electrical_types.py's numbering-math derivations), 24mm tape.
+    ElectricalTypeFixture(
+        name="breaker_box_odd_main_kitchen_lights_dryer_24mm",
+        type="breaker_box",
+        params=BreakerBoxParams(
+            breakers=[
+                BreakerSpec(poles=2, lines=["MAIN"]),
+                BreakerSpec(poles=1, lines=["KITCHEN"]),
+                BreakerSpec(poles=1, lines=["LIGHTS"]),
+                BreakerSpec(poles=2, lines=["DRYER"]),
+            ],
+            numbering_scheme="odd",
         ),
         tape_mm=24,
     ),

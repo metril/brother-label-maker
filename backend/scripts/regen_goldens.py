@@ -118,6 +118,13 @@ def main() -> None:
         _write(fixture.name, get_renderer(fixture.type).render(fixture.params, tape))
         count += 1
 
+    # Task 2.3's thin-config types (terminal_block/breaker_box) -- same
+    # get_renderer(...) convention as TYPE_CONFIG_FIXTURES above.
+    for fixture in golden_fixtures.ELECTRICAL_TYPE_FIXTURES:
+        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
+        _write(fixture.name, get_renderer(fixture.type).render(fixture.params, tape))
+        count += 1
+
     print(f"regenerated {count} golden(s) in {_GOLDEN_DIR}")
     print("INSPECT every new/changed golden visually before committing it.")
 
