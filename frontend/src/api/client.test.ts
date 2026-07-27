@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractErrorDetail } from "./client";
+import { extractErrorDetail, parsePydanticValidationError } from "./client";
 
 describe("extractErrorDetail", () => {
   it("extracts a readable message from both 422 detail shapes FastAPI can send", () => {
@@ -28,5 +28,50 @@ describe("extractErrorDetail", () => {
     // Neither shape present -- falls back instead of dumping raw JSON.
     expect(extractErrorDetail(null, "fallback")).toBe("fallback");
     expect(extractErrorDetail({}, "fallback")).toBe("fallback");
+  });
+
+  it("turns a raw pydantic ValidationError dump (error_message()'s str(exc) for a ValidationError that slipped past client-side checks) into a readable message instead of the bracket/URL-laden original", () => {
+    // Captured verbatim from a live 422 (POST /api/render/preview,
+    // breaker_box with pitch_mm=5 against a minimum of 10).
+    const raw =
+      "1 validation error for BreakerBoxParams\npitch_mm\n  Input should be " +
+      "greater than or equal to 10 [type=greater_than_equal, input_value=5, " +
+      "input_type=int]\n    For further information visit " +
+      "https://errors.pydantic.dev/2.13/v/greater_than_equal";
+
+    expect(extractErrorDetail({ detail: raw }, "fallback")).toBe(
+      "pitch_mm: Input should be greater than or equal to 10",
+    );
+  });
+
+  it("joins multiple pydantic errors with '; ', in order, and strips a 'Value error, ' validator prefix", () => {
+    const raw =
+      "3 validation errors for BreakerBoxParams\n" +
+      "pitch_mm\n  Input should be greater than or equal to 10 [type=greater_than_equal, input_value=5, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.13/v/greater_than_equal\n" +
+      "breakers.0.poles\n  Input should be less than or equal to 4 [type=less_than_equal, input_value=9, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.13/v/less_than_equal\n" +
+      "start_value\n  Input should be less than or equal to 999 [type=less_than_equal, input_value=1000, input_type=int]\n    For further information visit https://errors.pydantic.dev/2.13/v/less_than_equal";
+
+    expect(parsePydanticValidationError(raw)).toBe(
+      "pitch_mm: Input should be greater than or equal to 10; " +
+        "breakers.0.poles: Input should be less than or equal to 4; " +
+        "start_value: Input should be less than or equal to 999",
+    );
+  });
+
+  it("survives a validator message that itself contains brackets (e.g. 'must be in [6, 128]') without truncating at the wrong bracket", () => {
+    const raw =
+      "1 validation error for TextLabelParams\nfont_size_px\n  Value error, " +
+      "font_size_px must be in [6, 128], got 500 [type=value_error, " +
+      "input_value=500, input_type=int]\n    For further information visit " +
+      "https://errors.pydantic.dev/2.13/v/value_error";
+
+    expect(parsePydanticValidationError(raw)).toBe("font_size_px: font_size_px must be in [6, 128], got 500");
+  });
+
+  it("returns null (not a pydantic dump) for an already-readable string, so extractErrorDetail passes it through unchanged", () => {
+    expect(parsePydanticValidationError("all labels in a print job must share the same tape")).toBeNull();
+    expect(extractErrorDetail({ detail: "all labels in a print job must share the same tape" }, "fallback")).toBe(
+      "all labels in a print job must share the same tape",
+    );
   });
 });

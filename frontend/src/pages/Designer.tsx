@@ -11,6 +11,7 @@ import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { useLabelTypes } from "../hooks/useLabelTypes";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
 import { useTapes } from "../hooks/useTapes";
+import { hasNumberOutOfRange } from "../schema/numberValidity";
 import { hasRenderableContent } from "../schema/renderable";
 import { buildDefinition, tapeMismatchWarning, useDesignerStore } from "../stores/designer";
 import type { LabelDefinition } from "../api/types";
@@ -62,14 +63,32 @@ export function Designer() {
   // before (Rules of Hooks: same hooks, same order, every render).
   const schema = typeInfo?.params_schema ?? { type: "object", properties: {} };
   const definition = buildDefinition(selectedType ?? "text", tape, params);
-  // Gated on `typeInfo` explicitly (not just the fallback schema's shape)
-  // so usePreview/usePrintEstimate below stay disabled -- never firing a
-  // request against the placeholder "text"/{} definition -- until the real
-  // type and its schema have actually loaded.
-  const isRenderable = (def: LabelDefinition) => typeInfo !== null && hasRenderableContent(schema, def.params);
-  const hasContent = isRenderable(definition);
 
-  const preview = usePreview(definition, isRenderable);
+  // Two DELIBERATELY different gates, not one:
+  //
+  // `hasContent` (loose) -- FeedDeck's ONLY signal for placeholder-vs-deck
+  // ("Type something to preview your label." vs the real strip) AND for
+  // whether its derived readouts (length, warning chips) may show at all.
+  // Required-content only (schema/renderable.ts) -- deliberately blind to
+  // whether some OTHER, non-required numeric field happens to be out of
+  // range right now, so clearing e.g. padding_mm mid-edit doesn't blank the
+  // whole deck back to the empty state while there's still real "PORT 1"
+  // text content sitting right there.
+  //
+  // `canSubmit` (strict) -- gates the actual network requests
+  // (usePreview/usePrintEstimate's `enabled`) AND the Print button: ANDs in
+  // hasNumberOutOfRange too, so a field the UI is ALREADY showing an inline
+  // bounds/empty error for never also gets sent in a request the backend
+  // was always going to 422 on. When canSubmit goes false but hasContent
+  // stays true (the out-of-range case), the query is simply disabled --
+  // react-query's placeholderData then keeps showing the LAST successful
+  // preview/estimate (see usePreview.ts), which is exactly "keep the last
+  // good preview and show the inline error" from the field itself.
+  const hasContent = typeInfo !== null && hasRenderableContent(schema, params);
+  const canSubmit = (def: LabelDefinition) =>
+    typeInfo !== null && hasRenderableContent(schema, def.params) && !hasNumberOutOfRange(schema, def.params);
+
+  const preview = usePreview(definition, canSubmit);
   const tapeInfo = tapes?.find((t) => t.family === tape.family && t.nominal_mm === tape.width_mm) ?? null;
 
   const printerStatus = usePrinterStatus();
@@ -83,7 +102,10 @@ export function Designer() {
     setHighlightId(objectId);
     const el = document.getElementById(objectId);
     el?.focus();
-    el?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+    // scrollIntoView isn't implemented in every test/legacy environment --
+    // guarded so a missing polyfill there can't turn a warning-chip click
+    // into a hard crash.
+    el?.scrollIntoView?.({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
     if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
     highlightTimerRef.current = setTimeout(() => setHighlightId(null), HIGHLIGHT_MS);
   }
@@ -109,6 +131,11 @@ export function Designer() {
             }}
           />
         </div>
+        {/* The ONE place this warning shows -- see JobTray/Designer's own
+            history for why a second copy next to Print was removed: the
+            role="alert" here is announced immediately regardless, and the
+            Job panel sits right below this on every viewport (the mobile
+            reorder below puts it directly under the deck). */}
         {tapeWarning && (
           <div role="alert" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-300">
             {tapeWarning}
@@ -148,8 +175,7 @@ export function Designer() {
 
         <section className={`${panel} order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-80 lg:shrink-0`}>
           <h2 className={panelHeading}>Job</h2>
-          {tapeWarning && <p className="mb-3 text-[12px] text-amber-400">{tapeWarning}</p>}
-          <JobTray definition={definition} hasContent={hasContent} isRenderable={isRenderable} />
+          <JobTray definition={definition} canSubmit={canSubmit(definition)} isRenderable={canSubmit} />
         </section>
       </div>
     </div>

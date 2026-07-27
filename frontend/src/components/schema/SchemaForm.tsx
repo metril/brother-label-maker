@@ -1,4 +1,4 @@
-import { resolveOverride } from "../overrides/registry";
+import { resolveHelpTextOverride, resolveOverride } from "../overrides/registry";
 import type { JsonSchemaObject } from "../../schema/jsonSchema";
 import { SchemaField } from "./SchemaField";
 
@@ -24,9 +24,15 @@ export function SchemaForm({ labelType, schema, params, onChange }: SchemaFormPr
     <div className="flex flex-col gap-5">
       {Object.entries(properties).map(([key, propSchema]) => {
         const Override = resolveOverride(labelType, key);
+        // A field with no schema-provided `description` can still get one
+        // from resolveHelpTextOverride (a GAP-FILL only -- never overrides
+        // a description the schema already has, see that function's own
+        // docstring) by patching it in before either render path sees it.
+        const helpOverride = propSchema.description === undefined ? resolveHelpTextOverride(labelType, key) : undefined;
+        const patchedSchema = helpOverride ? { ...propSchema, description: helpOverride } : propSchema;
         const fieldProps = {
           fieldKey: key,
-          schema: propSchema,
+          schema: patchedSchema,
           root: schema,
           value: params[key],
           onChange: (value: unknown) => onChange({ ...params, [key]: value }),

@@ -35,6 +35,49 @@ function isValidationIssueArray(detail: unknown): detail is ValidationIssue[] {
   );
 }
 
+// Matches pydantic v2's own `str(ValidationError)` header, e.g. "1
+// validation error for BreakerBoxParams" / "3 validation errors for
+// TextLabelParams".
+const PYDANTIC_ERROR_HEADER_RE = /^\d+ validation errors? for \S+/;
+// One error "block" within that dump: a field-path line, then an indented
+// message line ending in pydantic's own "[type=..., input_value=...,
+// input_type=...]" tag -- see the worked example in this function's own
+// docstring. The lazy `(.+?)` + literal `\[type=` anchor (not a generic
+// "last bracket group") is what lets this survive a message that itself
+// contains brackets, e.g. "font_size_px must be in [6, 128], got 500".
+const PYDANTIC_ERROR_BLOCK_RE = /([^\n]+)\n\s+(.+?)\s*\[type=[^\]]*\]/g;
+
+/** Turns pydantic v2's own multi-line `str(ValidationError)` dump --
+ * what `error_message()` (backend/api/deps.py) returns VERBATIM for a
+ * ValidationError that slips past this app's own client-side checks (see
+ * schema/numberValidity.ts's hasNumberOutOfRange docstring for why that
+ * should be rare but not zero -- it can't see every server-side rule, e.g.
+ * breaker_box's start_value/numbering_scheme cross-field parity check) --
+ * into one readable "<field>: <message>" line (or several, "; "-joined).
+ * Verified against a live 422 body:
+ *
+ *   "1 validation error for BreakerBoxParams\npitch_mm\n  Input should be
+ *   greater than or equal to 10 [type=greater_than_equal, input_value=5,
+ *   input_type=int]\n    For further information visit
+ *   https://errors.pydantic.dev/2.13/v/greater_than_equal"
+ *   -> "pitch_mm: Input should be greater than or equal to 10"
+ *
+ * Returns null for anything that doesn't start with pydantic's own header,
+ * so a genuinely different (already-readable) string message passes
+ * through extractErrorDetail below unchanged. */
+export function parsePydanticValidationError(detail: string): string | null {
+  if (!PYDANTIC_ERROR_HEADER_RE.test(detail)) return null;
+
+  const body = detail.replace(PYDANTIC_ERROR_HEADER_RE, "");
+  const messages: string[] = [];
+  for (const match of body.matchAll(PYDANTIC_ERROR_BLOCK_RE)) {
+    const field = match[1]!.trim();
+    const message = match[2]!.trim().replace(/^Value error,\s*/, "");
+    messages.push(`${field}: ${message}`);
+  }
+  return messages.length > 0 ? messages.join("; ") : null;
+}
+
 /** Turn a FastAPI error body into one readable line, never a raw JSON dump.
  *
  * FastAPI 422s come in two shapes: our own handlers raise
@@ -42,11 +85,16 @@ function isValidationIssueArray(detail: unknown): detail is ValidationIssue[] {
  * router_print.py's error_message()), but automatic pydantic
  * request-validation failures (e.g. a malformed body) produce
  * `detail: [{loc, msg, type}, ...]` instead. Both are handled here so the
- * UI never has to know which one it got. */
+ * UI never has to know which one it got -- and a "readable string" can
+ * ITSELF be a raw pydantic ValidationError dump (error_message() returns
+ * `str(exc)` unmodified for that exception type), so every string detail
+ * is run through parsePydanticValidationError first. */
 export function extractErrorDetail(body: unknown, fallback: string): string {
   if (body === null || typeof body !== "object") return fallback;
   const detail = (body as ApiErrorBody).detail;
-  if (typeof detail === "string" && detail.trim() !== "") return detail;
+  if (typeof detail === "string" && detail.trim() !== "") {
+    return parsePydanticValidationError(detail) ?? detail;
+  }
   if (isValidationIssueArray(detail) && detail.length > 0) {
     return detail
       .map((issue) => {

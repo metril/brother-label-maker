@@ -1,10 +1,10 @@
+import { numberFieldErrorMessage } from "../../schema/numberValidity";
 import { NumberInput } from "../ui/inputs";
 import { SegmentedControl } from "../ui/SegmentedControl";
 import { errorText, fieldLabelText, helpText, indexBadge } from "../ui/styles";
 import type { OverrideFieldProps } from "./types";
 
-const MIN = 0.1;
-const MAX = 9.5;
+const ITEM_SCHEMA = { minimum: 0.1, maximum: 9.5 };
 
 /** patch_panel's `multipliers`: a nullable list[float] that, when set, MUST
  * have exactly one entry per block (backend/render/types/patch_panel.py's
@@ -21,7 +21,7 @@ export function MultipliersField({ value, onChange, allParams }: OverrideFieldPr
   const blocks = Array.isArray(allParams.blocks) ? allParams.blocks : [];
   const count = blocks.length;
   const isAuto = value === null || value === undefined;
-  const values = Array.isArray(value) ? (value as number[]) : [];
+  const values = Array.isArray(value) ? (value as (number | undefined)[]) : [];
   const mismatched = !isAuto && values.length !== count;
 
   function setMode(mode: "auto" | "manual") {
@@ -32,7 +32,7 @@ export function MultipliersField({ value, onChange, allParams }: OverrideFieldPr
     }
   }
 
-  function setItem(i: number, next: number) {
+  function setItem(i: number, next: number | undefined) {
     onChange(values.map((v, idx) => (idx === i ? next : v)));
   }
 
@@ -61,13 +61,30 @@ export function MultipliersField({ value, onChange, allParams }: OverrideFieldPr
           ) : (
             <p className={helpText}>One per block (currently {count}).</p>
           )}
-          {values.map((v, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className={indexBadge}>{i}</span>
-              <NumberInput value={v} min={MIN} max={MAX} step={0.1} ariaLabel={`Multiplier ${i + 1}`} onChange={(next) => setItem(i, next)} />
-              <span className="font-mono text-[12px] text-deck-400">x</span>
-            </div>
-          ))}
+          {values.map((v, i) => {
+            const errorMessage = numberFieldErrorMessage(v, ITEM_SCHEMA);
+            return (
+              <div key={i} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className={indexBadge}>{i + 1}</span>
+                  <NumberInput
+                    value={v}
+                    min={ITEM_SCHEMA.minimum}
+                    max={ITEM_SCHEMA.maximum}
+                    step={0.1}
+                    ariaLabel={`Multiplier ${i + 1}`}
+                    onChange={(next) => setItem(i, next)}
+                  />
+                  <span className="font-mono text-[12px] text-deck-400">x</span>
+                </div>
+                {errorMessage && (
+                  <p role="alert" className={`${errorText} ml-8`}>
+                    {errorMessage}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

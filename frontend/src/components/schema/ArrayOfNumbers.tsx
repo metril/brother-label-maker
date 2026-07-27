@@ -23,7 +23,8 @@ export function ArrayOfNumbers({ label, help, schema, value, onChange }: ArrayOf
   const max = schema.items?.maximum;
   const atMax = maxItems !== undefined && value.length >= maxItems;
 
-  function setItem(i: number, next: number) {
+  function setItem(i: number, next: number | undefined) {
+    if (next === undefined) return; // mid-edit/cleared -- NumberInput's own local buffer shows it
     onChange(value.map((item, idx) => (idx === i ? next : item)));
   }
   function addItem() {
@@ -47,7 +48,7 @@ export function ArrayOfNumbers({ label, help, schema, value, onChange }: ArrayOf
       {help && <p className={`${helpText} -mt-1 mb-1`}>{help}</p>}
       {value.map((item, i) => (
         <div key={i} className="flex items-center gap-2">
-          <span className={indexBadge}>{i}</span>
+          <span className={indexBadge}>{i + 1}</span>
           <NumberInput value={item} min={min} max={max} ariaLabel={`${label} ${i + 1}`} onChange={(v) => setItem(i, v)} />
           <button
             type="button"

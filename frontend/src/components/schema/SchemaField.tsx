@@ -1,6 +1,7 @@
 import { buildFieldDefault } from "../../schema/defaults";
 import { humanizeEnumValue, humanizeFieldName } from "../../schema/humanize";
 import { classifyField, resolveRef, splitNullable, type JsonSchemaObject } from "../../schema/jsonSchema";
+import { numberFieldErrorMessage } from "../../schema/numberValidity";
 import type { PathSegment } from "../../schema/paths";
 import { Checkbox, NumberInput, Select, TextInput } from "../ui/inputs";
 import { SegmentedControl } from "../ui/SegmentedControl";
@@ -24,6 +25,13 @@ export interface SchemaFieldProps {
    * reading `blocks.length`. Nested (array-of-object row) fields pass their
    * OWN item as allParams, which is what a nested field's siblings are. */
   allParams: Record<string, unknown>;
+  /** Set only by ArrayOfObjects' BlockRow when recursing into a repeated
+   * row's own fields -- "Block 2", "Breaker 1" -- so THIS field's own
+   * label (and any array-of-string/array-of-object row labels nested
+   * inside it) reads "Block 2 Lines 1" instead of a bare "Lines 1" that
+   * collides with every other block's identical field name. Undefined at
+   * the top level (no ambiguity to resolve there). */
+  labelPrefix?: string;
 }
 
 /** A starting value for flipping a nullable field from Auto to Manual --
@@ -37,21 +45,15 @@ const NULLABLE_MANUAL_SEEDS: Record<string, unknown> = {
   length_mm: 40,
 };
 
-function boundsMessage(min: number | undefined, max: number | undefined): string | null {
-  if (min !== undefined && max !== undefined) return `must be between ${min} and ${max}`;
-  if (min !== undefined) return `must be at least ${min}`;
-  if (max !== undefined) return `must be at most ${max}`;
-  return null;
-}
-
 /** Recursive schema-driven field renderer -- the core of task 2.10's B: one
  * engine handles every field shape actually present across the 9 label
  * types' params_schema (string/number/bool/enum/array-of-string/array-of-
  * object/nullable-auto-manual), instead of nine hand-written forms. See
  * schema/jsonSchema.ts's module docstring for exactly which shapes that is. */
-export function SchemaField({ fieldKey, schema, root, value, onChange, path }: SchemaFieldProps) {
+export function SchemaField({ fieldKey, schema, root, value, onChange, path, labelPrefix }: SchemaFieldProps) {
   const { nullable, inner } = splitNullable(schema, root);
-  const label = humanizeFieldName(fieldKey);
+  const bareLabel = humanizeFieldName(fieldKey);
+  const label = labelPrefix ? `${labelPrefix} ${bareLabel}` : bareLabel;
   const help = schema.description ?? inner.description;
   const id = `field-${path.join("-")}`;
 
@@ -119,6 +121,9 @@ interface FieldControlProps {
   onChange: (value: unknown) => void;
   path: PathSegment[];
   id: string;
+  /** Already prefix-qualified (see SchemaFieldProps.labelPrefix) -- every
+   * branch below just uses this verbatim for its visible label AND (for
+   * array kinds) the repeatable-row aria-labels. */
   label: string;
   help?: string;
 }
@@ -147,10 +152,8 @@ function FieldControl({ fieldKey, schema, root, value, onChange, path, id, label
 
     case "integer":
     case "number": {
-      const num = typeof value === "number" && !Number.isNaN(value) ? value : 0;
-      const min = resolved.minimum;
-      const max = resolved.maximum;
-      const outOfBounds = (min !== undefined && num < min) || (max !== undefined && num > max);
+      const numValue = typeof value === "number" && !Number.isNaN(value) ? value : undefined;
+      const errorMessage = numberFieldErrorMessage(value, resolved);
       return (
         <div>
           <label htmlFor={id} className={`${fieldLabelText} mb-1 block`}>
@@ -158,15 +161,15 @@ function FieldControl({ fieldKey, schema, root, value, onChange, path, id, label
           </label>
           <NumberInput
             id={id}
-            value={num}
-            min={min}
-            max={max}
+            value={numValue}
+            min={resolved.minimum}
+            max={resolved.maximum}
             step={kind === "integer" ? 1 : 0.1}
-            onChange={(v) => onChange(kind === "integer" ? Math.round(v) : v)}
+            onChange={(v) => onChange(v === undefined ? undefined : kind === "integer" ? Math.round(v) : v)}
           />
-          {outOfBounds ? (
+          {errorMessage ? (
             <p role="alert" className={errorText}>
-              {boundsMessage(min, max)}
+              {errorMessage}
             </p>
           ) : (
             help && <p className={helpText}>{help}</p>

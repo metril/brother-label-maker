@@ -1,5 +1,4 @@
 import type { RenderWarning, Tape, TapeInfo } from "../api/types";
-import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { computeFeedDeckGeometry, formatMm, PX_PER_MM } from "../lib/feedDeckGeometry";
 import { Pending } from "./ui/Pending";
 
@@ -10,6 +9,24 @@ interface FeedDeckProps {
    * Infinity) or, in principle, for a tape combination the catalog
    * doesn't have. */
   tapeInfo: TapeInfo | null;
+  /** Whether the CURRENT params have enough required content to preview at
+   * all (schema/renderable.ts's hasRenderableContent) -- deliberately the
+   * LOOSE gate, not "is it safe to actually send a request right now"
+   * (Designer.tsx's stricter canSubmit, which also requires every number
+   * field in bounds). Everything below -- the deck strip itself, the
+   * length readout, the warning chips -- is gated on THIS prop, and only
+   * this prop: `png`/`lengthMm`/`warnings` come from a react-query cache
+   * that can otherwise hold stale data from before the user cleared the
+   * form, or from a DIFFERENT label type entirely (switching types keeps
+   * this same component mounted) -- gating strictly on `hasContent`
+   * (synchronous, derived fresh from the current params every render,
+   * never stale) is what stops a blank form or a freshly-switched type
+   * from showing a contradictory leftover "10.0 mm" readout above a "Type
+   * something to preview your label." message. A numeric field being
+   * transiently out of bounds does NOT flip hasContent false, so the deck
+   * correctly keeps showing the last successful render in that case
+   * instead ("keep the last good preview" -- see Designer.tsx's canSubmit
+   * split and usePreview.ts's query gating). */
   hasContent: boolean;
   png: string | null;
   lengthMm: number | null;
@@ -43,10 +60,15 @@ export function FeedDeck({
   error,
   onFocusObject,
 }: FeedDeckProps) {
-  const reducedMotion = usePrefersReducedMotion();
   const warningList = warnings.filter((w) => w.severity === "warning");
   const infoList = warnings.filter((w) => w.severity === "info");
   const ready = png !== null && tapeInfo !== null && lengthMm !== null && minFeedMm !== null;
+  // Everything derived (length readout, warning chips) is shown only when
+  // there's real, current content AND no error -- see hasContent's own
+  // docstring above for why this specific gate (not "is `lengthMm` set")
+  // is what keeps a stale/cross-type readout from ever appearing next to
+  // an empty-state or error message.
+  const showDerived = hasContent && !error;
 
   return (
     <div className="flex flex-col gap-3">
@@ -74,14 +96,15 @@ export function FeedDeck({
             printMm={tapeInfo.print_mm}
             minFeedMm={minFeedMm}
             isFetching={isFetching}
-            reducedMotion={reducedMotion}
           />
         )}
       </div>
 
-      {lengthMm !== null && <p className="font-mono text-[20px] leading-none text-deck-200">{lengthMm.toFixed(1)} mm</p>}
+      {showDerived && lengthMm !== null && (
+        <p className="font-mono text-[20px] leading-none text-deck-200">{lengthMm.toFixed(1)} mm</p>
+      )}
 
-      {(warningList.length > 0 || infoList.length > 0) && (
+      {showDerived && (warningList.length > 0 || infoList.length > 0) && (
         <div className="flex flex-col gap-1.5">
           {warningList.length > 0 && <WarningChipRow warnings={warningList} tone="warning" onFocusObject={onFocusObject} />}
           {infoList.length > 0 && <WarningChipRow warnings={infoList} tone="info" onFocusObject={onFocusObject} />}
@@ -98,7 +121,6 @@ interface DeckStripProps {
   printMm: number;
   minFeedMm: number;
   isFetching: boolean;
-  reducedMotion: boolean;
 }
 
 function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }: DeckStripProps) {
@@ -109,6 +131,7 @@ function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }:
       <div className="relative" style={{ width: geo.totalWidthPx, height: geo.stripHeightPx }}>
         {/* The tape strip -- the one place true light appears (--color-tape). */}
         <div
+          data-testid="printable-band"
           className="absolute inset-y-0 left-0 overflow-hidden rounded-[2px] shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
           style={{ width: geo.stripWidthPx, backgroundColor: "var(--color-tape)" }}
         >
@@ -152,6 +175,7 @@ function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }:
         {/* Cut line -- a hairline dashed rust rule at the label's end. */}
         <div
           aria-hidden
+          data-testid="cut-line"
           className="absolute inset-y-0"
           style={{ left: geo.cutLineXPx, borderLeft: "1.5px dashed var(--color-rust-500)" }}
         />
@@ -160,6 +184,7 @@ function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }:
         {geo.feedWasteWidthPx > 0 && (
           <div
             aria-label={`${geo.feedWasteMm.toFixed(1)} mm feed waste`}
+            data-testid="feed-waste"
             className="absolute inset-y-0"
             style={{
               left: geo.stripWidthPx,
@@ -204,7 +229,7 @@ function WarningChipRow({
             <button
               type="button"
               onClick={() => onFocusObject(w.object_id!)}
-              className={`${chipClass} cursor-pointer hover:border-amber-400`}
+              className={`${chipClass} cursor-pointer hover:border-amber-300`}
             >
               {w.message}
             </button>

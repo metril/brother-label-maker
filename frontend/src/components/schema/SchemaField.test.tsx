@@ -27,7 +27,7 @@ function Harness<T>({ schema, root, fieldKey, initial }: { schema: JsonSchemaObj
 }
 
 describe("SchemaField shapes", () => {
-  it("string: renders a labeled text input, description becomes help text, typing calls onChange", async () => {
+  it("string: renders a labeled text input with maxLength enforced, description becomes help text, typing calls onChange", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const schema: JsonSchemaObject = {
@@ -37,8 +37,10 @@ describe("SchemaField shapes", () => {
     };
     render(<SchemaField fieldKey="data" schema={schema} root={schema} value="" onChange={onChange} path={["data"]} allParams={{}} />);
 
+    const input = screen.getByLabelText("Data");
+    expect(input).toHaveAttribute("maxLength", "500");
     expect(screen.getByText("the value encoded in the code")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Data"), "X");
+    await user.type(input, "X");
     expect(onChange).toHaveBeenCalledWith("X");
   });
 
@@ -56,6 +58,22 @@ describe("SchemaField shapes", () => {
       <SchemaField fieldKey="block_length_mm" schema={schema} root={schema} value={400} onChange={vi.fn()} path={["x"]} allParams={{}} />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("must be between 5 and 300");
+  });
+
+  it("number: clearing the field emits undefined (never a coerced 0) and shows 'enter a value', not a bounds message", async () => {
+    const user = userEvent.setup();
+    const schema: JsonSchemaObject = { type: "number", minimum: 5, maximum: 300 };
+    render(<Harness schema={schema} fieldKey="block_length_mm" initial={15} />);
+
+    const input = screen.getByLabelText("Block length (mm)");
+    await user.clear(input);
+
+    expect(input).toHaveValue(null); // the box is genuinely empty, not snapped back to 0/15
+    expect(screen.getByRole("alert")).toHaveTextContent("enter a value");
+
+    await user.type(input, "42");
+    expect(input).toHaveValue(42);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("boolean: renders a real checkbox toggled by its own label", async () => {
@@ -78,11 +96,13 @@ describe("SchemaField shapes", () => {
     expect(screen.getByRole("radio", { name: "Center" })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("enum with >4 options renders a native select instead", () => {
+  it("enum with >4 options renders a native select instead (with a dropdown chevron affordance)", () => {
     const schema: JsonSchemaObject = { type: "string", enum: ["tic", "dash", "line", "bold", "frame", "none"] };
     render(<SchemaField fieldKey="separator" schema={schema} root={schema} value="line" onChange={vi.fn()} path={["separator"]} allParams={{}} />);
 
-    expect(screen.getByLabelText("Separator").tagName).toBe("SELECT");
+    const select = screen.getByLabelText("Separator");
+    expect(select.tagName).toBe("SELECT");
+    expect(select).toHaveStyle({ backgroundRepeat: "no-repeat" });
   });
 
   it("array-of-string: add respects maxItems, remove respects minItems, reorder swaps values, rows are labeled 1-indexed", async () => {
@@ -106,7 +126,34 @@ describe("SchemaField shapes", () => {
     expect(screen.getByLabelText("Remove Lines 1")).toBeDisabled();
   });
 
-  it("array-of-object: rows recurse through SchemaField for their own nested fields, get block-N DOM ids, and add/remove works", async () => {
+  it("array-of-string: keyboard reorder moves focus WITH the row (stable keys), so repeated presses keep walking the same logical row instead of oscillating", async () => {
+    const user = userEvent.setup();
+    const schema: JsonSchemaObject = { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5 };
+    render(<Harness schema={schema} fieldKey="lines" initial={["A", "B", "C"]} />);
+
+    const moveDownA = screen.getByLabelText("Move Lines 1 down");
+    moveDownA.focus();
+    await user.keyboard("{Enter}");
+
+    // Row A (now at index 1) took its own DOM/focus WITH it -- the exact
+    // same button element, its aria-label updated to match its new
+    // position, still focused.
+    expect(document.activeElement).toBe(screen.getByLabelText("Move Lines 2 down"));
+    expect(screen.getByLabelText("Lines 1")).toHaveValue("B");
+    expect(screen.getByLabelText("Lines 2")).toHaveValue("A");
+
+    // Pressing the SAME (still-focused) button again must move row A a
+    // second time -- the bug this regresses: keyed-by-index rows left
+    // focus sitting at position 1 acting on whatever row happened to be
+    // there, so a second press bounced back toward the original order
+    // instead of continuing to move A.
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("Lines 1")).toHaveValue("B");
+    expect(screen.getByLabelText("Lines 2")).toHaveValue("C");
+    expect(screen.getByLabelText("Lines 3")).toHaveValue("A");
+  });
+
+  it("array-of-object: rows recurse through SchemaField for their own nested fields (labels qualified by row, e.g. 'Breaker 1 Poles', so they don't collide across rows), get block-N DOM ids, and add/remove works", async () => {
     const user = userEvent.setup();
     const root: JsonSchemaObject = {
       type: "object",
@@ -125,16 +172,37 @@ describe("SchemaField shapes", () => {
     render(<Harness schema={schema} root={root} fieldKey="breakers" initial={[{ poles: 1, lines: [] }]} />);
 
     expect(document.getElementById("block-0")).toBeInTheDocument();
-    expect(screen.getByLabelText("Poles")).toHaveValue(1); // nested field, recursively rendered
+    expect(screen.getByLabelText("Breaker 1 Poles")).toHaveValue(1); // nested field, recursively rendered, row-qualified
     expect(screen.getByLabelText("Remove Breakers 1")).toBeDisabled();
 
     await user.click(screen.getByLabelText("Add Breakers row"));
     expect(document.getElementById("block-1")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Poles")).toHaveLength(2);
+    expect(screen.getByLabelText("Breaker 1 Poles")).toBeInTheDocument();
+    expect(screen.getByLabelText("Breaker 2 Poles")).toBeInTheDocument(); // unique per row, not a collision
 
     await user.click(screen.getByLabelText("Remove Breakers 2"));
     expect(document.getElementById("block-1")).not.toBeInTheDocument();
-    expect(screen.getAllByLabelText("Poles")).toHaveLength(1);
+    expect(screen.getByLabelText("Breaker 1 Poles")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Breaker 2 Poles")).not.toBeInTheDocument();
+  });
+
+  it("array-of-object: keyboard reorder moves focus (and the row's own data) WITH the row too", async () => {
+    const user = userEvent.setup();
+    const root: JsonSchemaObject = {
+      type: "object",
+      properties: {},
+      $defs: { BreakerSpec: { type: "object", properties: { poles: { type: "integer", minimum: 1, maximum: 4, default: 1 } } } },
+    };
+    const schema: JsonSchemaObject = { type: "array", items: { $ref: "#/$defs/BreakerSpec" }, minItems: 1, maxItems: 5 };
+    render(<Harness schema={schema} root={root} fieldKey="breakers" initial={[{ poles: 1 }, { poles: 2 }, { poles: 3 }]} />);
+
+    const moveDown1 = screen.getByLabelText("Move Breakers 1 down");
+    moveDown1.focus();
+    await user.keyboard("{Enter}");
+
+    expect(document.activeElement).toBe(screen.getByLabelText("Move Breakers 2 down"));
+    expect(screen.getByLabelText("Breaker 1 Poles")).toHaveValue(2);
+    expect(screen.getByLabelText("Breaker 2 Poles")).toHaveValue(1);
   });
 
   it("nullable field: starts Auto (control hidden), Manual reveals it seeded with a sensible value, Auto clears it back to null", async () => {

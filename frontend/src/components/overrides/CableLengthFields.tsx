@@ -1,4 +1,5 @@
 import { humanizeFieldName } from "../../schema/humanize";
+import { numberFieldErrorMessage } from "../../schema/numberValidity";
 import { NumberInput } from "../ui/inputs";
 import { errorText, fieldLabelText, helpText } from "../ui/styles";
 import type { OverrideFieldProps } from "./types";
@@ -13,21 +14,19 @@ function NumberFieldWithReadout({
 }: OverrideFieldProps & { readout: string }) {
   const label = humanizeFieldName(fieldKey);
   const id = `field-${path.join("-")}`;
-  const num = typeof value === "number" && !Number.isNaN(value) ? value : 0;
-  const min = schema.minimum;
-  const max = schema.maximum;
-  const outOfBounds = (min !== undefined && num < min) || (max !== undefined && num > max);
+  const numValue = typeof value === "number" && !Number.isNaN(value) ? value : undefined;
+  const errorMessage = numberFieldErrorMessage(value, schema);
 
   return (
     <div>
       <label htmlFor={id} className={`${fieldLabelText} mb-1 block`}>
         {label}
       </label>
-      <NumberInput id={id} value={num} min={min} max={max} step={0.1} onChange={onChange} />
+      <NumberInput id={id} value={numValue} min={schema.minimum} max={schema.maximum} step={0.1} onChange={onChange} />
       <p className="mt-1 font-mono text-[12px] text-deck-400">{readout}</p>
-      {outOfBounds ? (
+      {errorMessage ? (
         <p role="alert" className={errorText}>
-          must be between {min} and {max}
+          {errorMessage}
         </p>
       ) : (
         schema.description && <p className={helpText}>{schema.description}</p>

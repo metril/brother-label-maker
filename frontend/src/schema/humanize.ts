@@ -64,3 +64,12 @@ export function humanizeEnumValue(value: string): string {
     .map((word, i) => (i === 0 ? capitalize(word) : word))
     .join(" ");
 }
+
+/** Crude, not-a-general-English-singularizer -- just enough for this app's
+ * own two array-of-object field names ("Blocks" -> "Block", "Breakers" ->
+ * "Breaker") so a nested row's qualifying label prefix reads naturally
+ * ("Block 2 Lines 1", not "Blocks 2 Lines 1"). See ArrayOfObjects.tsx's
+ * BlockRow, which is the only caller. */
+export function singularize(word: string): string {
+  return word.endsWith("s") ? word.slice(0, -1) : word;
+}

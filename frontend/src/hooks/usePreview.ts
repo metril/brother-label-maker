@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ApiError, pngDataUrl, postPreview } from "../api/client";
 import type { LabelDefinition, RenderWarning } from "../api/types";
 
@@ -24,9 +24,21 @@ export interface UsePreviewResult {
 
 /** Debounces `definition` by 300ms before firing /api/render/preview, so a
  * burst of keystrokes/param changes collapses into a single request instead
- * of one per change. The previous image is kept on screen (placeholderData:
- * keepPreviousData) while a new one loads, so the preview never flashes
- * blank between renders -- only `isFetching` flips, for a subtle indicator.
+ * of one per change. The previous image is kept on screen while a new one
+ * loads (a `placeholderData` function, not the built-in `keepPreviousData`
+ * helper) so the preview never flashes blank between renders -- only
+ * `isFetching` flips, for a subtle indicator.
+ *
+ * That bridge is scoped to the SAME label type only: Designer.tsx keeps
+ * this same usePreview() call (and therefore the same underlying useQuery
+ * observer) mounted across a label-TYPE switch, not just across param
+ * edits within one type -- `keepPreviousData` bridges an observer's data
+ * across ANY key change with no such distinction, so it used to carry a
+ * "text" label's last png/lengthMm/warnings into a freshly-selected
+ * "punch_down" label's still-loading initial render, showing numbers that
+ * described the wrong type. `definition.type` is threaded into the
+ * queryKey as its own segment specifically so this comparison is a direct
+ * equality check, not a re-parse of the debounced JSON blob.
  *
  * `isRenderable` decides whether the (debounced) definition is even worth
  * sending -- type-generic (task 2.10: every one of the 9 label types has
@@ -59,12 +71,14 @@ export function usePreview(
   // still-blank initial state) -- firing a request against that stale,
   // non-renderable `debounced` and 422-ing for one query cycle.
   const isDebouncedRenderable = debounced !== undefined && isRenderable(debounced);
+  const debouncedType = debounced?.type ?? null;
 
   const query = useQuery({
-    queryKey: ["preview", debounced ? JSON.stringify(debounced) : null, PREVIEW_SCALE],
+    queryKey: ["preview", debouncedType, debounced ? JSON.stringify(debounced) : null, PREVIEW_SCALE],
     queryFn: () => postPreview({ definition: debounced as LabelDefinition, scale: PREVIEW_SCALE }),
     enabled: isDebouncedRenderable,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      debouncedType !== null && previousQuery?.queryKey?.[1] === debouncedType ? previousData : undefined,
     retry: false,
     staleTime: Infinity,
   });

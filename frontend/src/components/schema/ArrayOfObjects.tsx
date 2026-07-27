@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { buildItemDefault } from "../../schema/defaults";
+import { singularize } from "../../schema/humanize";
 import { resolveRef, type JsonSchemaObject } from "../../schema/jsonSchema";
 import type { PathSegment } from "../../schema/paths";
 import { dashedAddButtonClass, fieldLabelText, helpText, iconButtonClass, indexBadge } from "../ui/styles";
@@ -16,6 +18,12 @@ interface ArrayOfObjectsProps {
   path: PathSegment[];
 }
 
+let uidCounter = 0;
+function newRowUid(): string {
+  uidCounter += 1;
+  return `row-${uidCounter}`;
+}
+
 /** Repeatable groups -- patch_panel/faceplate's `blocks`, breaker_box's
  * `breakers`. Each row recursively renders its own item schema's
  * properties via SchemaField (so BreakerSpec's `poles` number field and
@@ -24,33 +32,65 @@ interface ArrayOfObjectsProps {
  * own name -- that's the exact `object_id` divided_blocks.py's own
  * RenderWarnings use (see render/types/divided_blocks.py), so a warning
  * chip's "focus this row" click resolves correctly whether the array is
- * called `blocks` or `breakers`. */
+ * called `blocks` or `breakers`.
+ *
+ * Rows are keyed by a STABLE per-row uid (`keysRef`, assigned once when a
+ * row is created and carried along through add/remove/reorder), NOT by
+ * their current array index. Keying by index made keyboard reorder a
+ * near-no-op past one swap: React reconciles same-key elements as "the
+ * same DOM node, just moved", so a stable key is what actually MOVES a
+ * row's DOM (and therefore keyboard focus) to its new position along with
+ * the data -- keyed by index instead, the DOM node at each position stayed
+ * put while its CONTENT swapped underneath it, so a focused "move down"
+ * button kept acting on whatever row now happened to render at that same
+ * position rather than the row the user actually meant. */
 export function ArrayOfObjects({ label, help, schema, root, value, onChange, path }: ArrayOfObjectsProps) {
   const minItems = schema.minItems ?? 0;
   const maxItems = schema.maxItems;
   const itemSchema = resolveRef(schema.items ?? {}, root);
   const atMax = maxItems !== undefined && value.length >= maxItems;
+  const keysRef = useRef<string[]>(value.map(() => newRowUid()));
+
+  // Keep keysRef in lockstep positionally with `value` -- our own
+  // addItem/removeItem/move below mutate both together for user-driven
+  // changes; this guards against `value` changing length from OUTSIDE this
+  // component entirely (a preset load, switching label types) by assigning
+  // fresh uids for any new tail positions rather than losing sync.
+  if (keysRef.current.length !== value.length) {
+    keysRef.current = value.map((_, i) => keysRef.current[i] ?? newRowUid());
+  }
 
   function updateItem(i: number, next: Record<string, unknown>) {
     onChange(value.map((item, idx) => (idx === i ? next : item)));
   }
   function addItem() {
     if (atMax) return;
+    keysRef.current = [...keysRef.current, newRowUid()];
     onChange([...value, buildItemDefault(schema.items ?? {}, root) as Record<string, unknown>]);
   }
   function removeItem(i: number) {
     if (value.length <= minItems) return;
+    keysRef.current = keysRef.current.filter((_, idx) => idx !== i);
     onChange(value.filter((_, idx) => idx !== i));
   }
   function move(i: number, dir: -1 | 1) {
     const j = i + dir;
     if (j < 0 || j >= value.length) return;
+
+    const nextKeys = [...keysRef.current];
+    const tmpKey = nextKeys[i]!;
+    nextKeys[i] = nextKeys[j]!;
+    nextKeys[j] = tmpKey;
+    keysRef.current = nextKeys;
+
     const next = [...value];
     const tmp = next[i]!;
     next[i] = next[j]!;
     next[j] = tmp;
     onChange(next);
   }
+
+  const rowPrefixBase = singularize(label);
 
   return (
     <fieldset className="flex flex-col gap-3">
@@ -64,9 +104,10 @@ export function ArrayOfObjects({ label, help, schema, root, value, onChange, pat
       {help && <p className={`${helpText} -mt-1 mb-1`}>{help}</p>}
       {value.map((item, i) => (
         <BlockRow
-          key={i}
+          key={keysRef.current[i]}
           index={i}
           rowLabel={label}
+          labelPrefix={`${rowPrefixBase} ${i + 1}`}
           item={item}
           itemSchema={itemSchema}
           root={root}
@@ -96,6 +137,11 @@ export function ArrayOfObjects({ label, help, schema, root, value, onChange, pat
 interface BlockRowProps {
   index: number;
   rowLabel: string;
+  /** "Block 1", "Breaker 2" -- threaded into this row's own nested
+   * SchemaField calls so a repeated field name (e.g. every block's own
+   * "Lines") gets a row-qualified, unique accessible name instead of
+   * colliding across rows (see SchemaFieldProps.labelPrefix). */
+  labelPrefix: string;
   item: Record<string, unknown>;
   itemSchema: JsonSchemaObject;
   root: JsonSchemaObject;
@@ -112,6 +158,7 @@ interface BlockRowProps {
 function BlockRow({
   index,
   rowLabel,
+  labelPrefix,
   item,
   itemSchema,
   root,
@@ -136,7 +183,7 @@ function BlockRow({
       }`}
     >
       <div className="mb-3 flex items-center justify-between">
-        <span className={indexBadge}>{index}</span>
+        <span className={indexBadge}>{index + 1}</span>
         <div className="flex gap-1">
           <button
             type="button"
@@ -178,6 +225,7 @@ function BlockRow({
             onChange={(v) => onChange({ ...item, [key]: v })}
             path={[...path, key]}
             allParams={item}
+            labelPrefix={labelPrefix}
           />
         ))}
       </div>

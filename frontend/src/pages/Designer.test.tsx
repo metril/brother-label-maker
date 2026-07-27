@@ -1,10 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Designer } from "./Designer";
 import { useDesignerStore } from "../stores/designer";
+import { buildDefaultParams } from "../schema/defaults";
+import type { JsonSchemaObject } from "../schema/jsonSchema";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { TINY_PNG_B64 } from "../test/msw/handlers";
+import labelTypesFixture from "../test/fixtures/label-types.json";
+
+interface FixtureType {
+  type: string;
+  title: string;
+  params_schema: JsonSchemaObject;
+}
+
+const LABEL_TYPES = labelTypesFixture as unknown as FixtureType[];
+const PATCH_PANEL_TYPE = LABEL_TYPES.find((t) => t.type === "patch_panel")!;
 
 // useDesignerStore is a module-level singleton (zustand) -- reset it after
 // each test so a click on a different tape width (or typed content) in one
@@ -47,7 +61,7 @@ function connectedStatusBody(mediaWidthMm: number) {
 // I1: banner appears on mismatch, absent on match/disconnected. Designer's
 // default tape (stores/designer.ts's initial state) is 24mm.
 describe("Designer tape-mismatch banner (I1)", () => {
-  it("shows an amber banner and a matching warning next to the Print button when the loaded tape doesn't match the design", async () => {
+  it("shows exactly one amber banner (role=alert) when the loaded tape doesn't match the design", async () => {
     server.use(
       http.get("/api/printer/status", () => HttpResponse.json(connectedStatusBody(12))),
     );
@@ -56,8 +70,11 @@ describe("Designer tape-mismatch banner (I1)", () => {
 
     const message = "Printer has 12mm tape loaded — this label is designed for 24mm";
     const matches = await screen.findAllByText(message);
-    // Once as the banner (role="alert"), once next to the Print button.
-    expect(matches).toHaveLength(2);
+    // Shown once (the hero banner, role="alert") -- a duplicate copy next
+    // to the Print button was removed: role="alert" is already announced
+    // immediately, and the Job panel sits directly below the hero on every
+    // viewport, so a second copy was pure redundancy, not reinforcement.
+    expect(matches).toHaveLength(1);
     expect(screen.getByRole("alert")).toHaveTextContent(message);
   });
 
@@ -98,5 +115,44 @@ describe("Designer tape-mismatch banner (I1)", () => {
     await waitFor(() =>
       expect(screen.queryByText(/this label is designed for/)).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("Designer warning-chip -> form-row focus wiring", () => {
+  it("clicking a warning chip with an object_id focuses and highlights the matching block row in the form", async () => {
+    const user = userEvent.setup();
+    useDesignerStore.getState().selectType("patch_panel", PATCH_PANEL_TYPE.params_schema);
+    useDesignerStore.getState().setParams("patch_panel", {
+      ...buildDefaultParams(PATCH_PANEL_TYPE.params_schema),
+      blocks: [{ lines: ["a very long line that would get truncated"] }],
+    });
+
+    server.use(
+      http.post("/api/render/preview", () =>
+        HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          png_width_px: 200,
+          png_height_px: 96,
+          length_mm: 30,
+          min_feed_mm: 24.5,
+          warnings: [
+            { code: "text_truncated", severity: "warning", message: "block 0: text truncated", object_id: "block-0" },
+          ],
+          total_labels: null,
+          sequence_value: null,
+        }),
+      ),
+    );
+
+    renderWithProviders(<Designer />);
+
+    const chip = await screen.findByRole("button", { name: "block 0: text truncated" });
+    const row = document.getElementById("block-0")!;
+    expect(row.className).not.toContain("border-amber-500");
+
+    await user.click(chip);
+
+    expect(row.className).toContain("border-amber-500");
+    expect(document.activeElement).toBe(row);
   });
 });

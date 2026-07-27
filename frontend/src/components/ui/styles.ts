@@ -12,8 +12,11 @@ export const panelHeading = `${eyebrow} mb-4`;
  * most important piece of context on the page, so it gets the type scale's
  * top step (28px) instead of blending in with eyebrow-sized section labels
  * like "Parameters"/"Job". Condensed + tight leading per the design doc's
- * "Headings are condensed and tight" rule. */
-export const typeHeading = "font-condensed text-[28px] font-bold uppercase leading-tight tracking-wide text-deck-100";
+ * "Headings are condensed and tight" rule. deck-200 is the palette's own
+ * brightest defined neutral text tone (the locked palette stops at
+ * deck-200 -- there is no deck-100) -- used here instead for the same
+ * "emphasis" intent. */
+export const typeHeading = "font-condensed text-[28px] font-bold uppercase leading-tight tracking-wide text-deck-200";
 
 export const fieldLabelText = "block text-[13px] font-medium text-deck-200";
 export const helpText = "mt-1 text-[12px] leading-snug text-deck-400";
@@ -24,7 +27,10 @@ export const inputBase =
 
 export const numberInputClass = `${inputBase} font-mono`;
 export const textInputClass = inputBase;
-export const selectClass = `${inputBase} appearance-none`;
+/** Asymmetric padding (not inputBase's shared `px-3`) to leave room for the
+ * chevron background image Select (ui/inputs.tsx) paints on the right. */
+export const selectClass =
+  "w-full appearance-none rounded-md border border-deck-600 bg-deck-800 py-1.5 pl-3 pr-8 text-[14px] text-deck-200 disabled:cursor-not-allowed disabled:opacity-60";
 
 export function segmentedButtonClass(selected: boolean): string {
   return `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
@@ -38,7 +44,7 @@ export const indexBadge =
   "flex h-6 w-6 shrink-0 items-center justify-center rounded font-mono text-[11px] text-deck-400";
 
 export const iconButtonClass =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-deck-600 bg-deck-800 text-deck-200 hover:border-deck-400 hover:text-deck-100 disabled:cursor-not-allowed disabled:opacity-40";
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-deck-600 bg-deck-800 text-deck-200 hover:border-deck-400 hover:text-deck-200 disabled:cursor-not-allowed disabled:opacity-40";
 
 export const dashedAddButtonClass =
   "self-start rounded-md border border-dashed border-deck-600 px-3 py-1 text-[12px] font-medium text-deck-200 hover:border-amber-500 hover:text-amber-300";

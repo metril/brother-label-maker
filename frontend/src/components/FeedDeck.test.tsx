@@ -58,4 +58,33 @@ describe("FeedDeck", () => {
     expect(onFocusObject).toHaveBeenCalledWith("block-2");
     expect(screen.getByText("no target here", { selector: "span" }).tagName).toBe("SPAN");
   });
+
+  it("renders the printable band at the tape's own strip width, and a cut line positioned exactly at the label's end (length_mm * PX_PER_MM) -- never derived from the PNG's own pixel dims", () => {
+    render(<FeedDeck {...baseProps()} lengthMm={40} minFeedMm={24.5} />);
+
+    const printableBand = screen.getByTestId("printable-band");
+    expect(printableBand).toHaveStyle({ width: "160px" }); // 40mm * PX_PER_MM(4)
+
+    const cutLine = screen.getByTestId("cut-line");
+    expect(cutLine).toHaveStyle({ left: "160px" });
+    expect(cutLine.style.borderLeft).toContain("dashed");
+  });
+
+  it("shows the minimum-feed hatch region past the cut line only when under the floor, sized to reach exactly the floor", () => {
+    const { rerender } = render(<FeedDeck {...baseProps()} lengthMm={40} minFeedMm={24.5} />);
+    expect(screen.queryByTestId("feed-waste")).not.toBeInTheDocument();
+
+    rerender(<FeedDeck {...baseProps()} lengthMm={10} minFeedMm={24.5} />);
+    const waste = screen.getByTestId("feed-waste");
+    expect(waste).toHaveStyle({ left: "40px", width: "58px" }); // (24.5-10)mm * 4 = 58px
+  });
+
+  it("hides the length readout and warning chips (never a stale leftover) when hasContent is false, even if lengthMm/warnings are still set -- the regression this covers: clearing the form, or switching label type, used to leave the PREVIOUS type's numbers showing above the empty-state message", () => {
+    const warnings: RenderWarning[] = [{ code: "short_label", severity: "info", message: "stale info", object_id: null }];
+    render(<FeedDeck {...baseProps()} hasContent={false} lengthMm={40} minFeedMm={24.5} warnings={warnings} />);
+
+    expect(screen.getByText("Type something to preview your label.")).toBeInTheDocument();
+    expect(screen.queryByText("40.0 mm")).not.toBeInTheDocument();
+    expect(screen.queryByText("stale info")).not.toBeInTheDocument();
+  });
 });

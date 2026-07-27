@@ -40,7 +40,7 @@ export function PrinterStatusBadge() {
       <Dot colorClass={dotClass} />
       <span>{label}</span>
       {data?.printer_mode === "mock" && (
-        <span className="rounded border border-deck-600 px-1.5 py-0.5 font-condensed text-[10px] font-bold uppercase tracking-wide text-amber-400">
+        <span className="rounded border border-deck-600 px-1.5 py-0.5 font-condensed text-[10px] font-bold uppercase tracking-wide text-amber-300">
           mock
         </span>
       )}

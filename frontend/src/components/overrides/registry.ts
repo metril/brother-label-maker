@@ -24,3 +24,17 @@ const OVERRIDES: Record<string, ComponentType<OverrideFieldProps>> = {
 export function resolveOverride(labelType: string, fieldKey: string): ComponentType<OverrideFieldProps> | null {
   return OVERRIDES[`${labelType}.${fieldKey}`] ?? OVERRIDES[`*.${fieldKey}`] ?? null;
 }
+
+/** Supplemental help text for a field whose own schema doesn't carry a
+ * `description` (not every Field(...) in the backend has one -- see e.g.
+ * faceplate.py's `blocks`, which is padded/auto-generated server-side in a
+ * way that's easy to misread as "you must fill every block in yourself").
+ * Only ever fills a GAP -- SchemaForm.tsx uses this as a fallback, never an
+ * override of a description the schema already provides. */
+const HELP_TEXT_OVERRIDES: Record<string, string> = {
+  "faceplate.blocks": "Leave empty to auto-generate the given number of blocks.",
+};
+
+export function resolveHelpTextOverride(labelType: string, fieldKey: string): string | undefined {
+  return HELP_TEXT_OVERRIDES[`${labelType}.${fieldKey}`];
+}

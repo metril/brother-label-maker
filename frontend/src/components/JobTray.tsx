@@ -15,7 +15,13 @@ const CHAIN_MODE_OPTIONS: { value: ChainMode; label: string }[] = [
 
 interface JobTrayProps {
   definition: LabelDefinition;
-  hasContent: boolean;
+  /** Whether `definition`, AS IT STANDS RIGHT NOW, is actually safe to
+   * send -- required content present AND every number field in bounds
+   * (Designer.tsx's stricter gate; see its own docstring for how this
+   * differs from FeedDeck's looser `hasContent`). Print stays disabled,
+   * and the estimate panel shows an empty-state prompt instead of a
+   * perpetual "···", until this is true. */
+  canSubmit: boolean;
   isRenderable: (definition: LabelDefinition) => boolean;
 }
 
@@ -23,7 +29,7 @@ interface JobTrayProps {
  * chain mode/auto-cut choice feeds both the live tape-usage estimate
  * (POST /api/print/estimate) and the actual print request, so the number
  * shown is always the number that would actually get used. */
-export function JobTray({ definition, hasContent, isRenderable }: JobTrayProps) {
+export function JobTray({ definition, canSubmit, isRenderable }: JobTrayProps) {
   const [chainMode, setChainMode] = useState<ChainMode>("cut_each");
   const [autoCut, setAutoCut] = useState(true);
   const options: PrintOptions = { chain_mode: chainMode, margin_mm: 2.0, auto_cut: autoCut };
@@ -41,7 +47,9 @@ export function JobTray({ definition, hasContent, isRenderable }: JobTrayProps) 
 
       <div className="rounded-lg border border-deck-700 bg-deck-800/40 p-3">
         <p className={eyebrow}>Tape estimate</p>
-        {error ? (
+        {!canSubmit ? (
+          <p className="mt-1.5 text-[12px] text-deck-400">Add content to estimate tape usage.</p>
+        ) : error ? (
           <p role="alert" className="mt-1.5 text-[12px] text-rust-500">
             {error}
           </p>
@@ -76,7 +84,7 @@ export function JobTray({ definition, hasContent, isRenderable }: JobTrayProps) 
         )}
       </div>
 
-      <PrintButton definition={definition} disabled={!hasContent} options={options} />
+      <PrintButton definition={definition} disabled={!canSubmit} options={options} />
     </div>
   );
 }

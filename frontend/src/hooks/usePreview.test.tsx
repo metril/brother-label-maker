@@ -166,4 +166,70 @@ describe("usePreview", () => {
     await waitFor(() => expect(requestSpy).toHaveBeenCalledTimes(1));
     expect(requestSpy).toHaveBeenCalledWith(["H"]);
   });
+
+  // Regression test (task 2.10 review): the hook's underlying useQuery
+  // observer persists across a label-TYPE switch (Designer.tsx calls
+  // usePreview once, for whichever type is currently selected) -- the
+  // built-in keepPreviousData placeholder bridges an observer's data
+  // across ANY key change, so switching from "text" to "barcode" used to
+  // keep showing text's own last png/lengthMm/warnings until barcode's OWN
+  // fetch resolved, contradicting the type actually on screen.
+  it(
+    "does not carry a previous label TYPE's data forward while a DIFFERENT type's request is still in flight",
+    async () => {
+      let releaseBarcode: (() => void) | undefined;
+      server.use(
+        http.post("/api/render/preview", async ({ request }) => {
+          const body = (await request.json()) as { definition: LabelDefinition };
+          if (body.definition.type === "barcode") {
+            await new Promise<void>((resolve) => {
+              releaseBarcode = resolve;
+            });
+            return HttpResponse.json({
+              png_b64: TINY_PNG_B64,
+              png_width_px: 100,
+              png_height_px: 96,
+              length_mm: 12.0,
+              min_feed_mm: 24.5,
+              warnings: [],
+            });
+          }
+          return HttpResponse.json({
+            png_b64: TINY_PNG_B64,
+            png_width_px: 200,
+            png_height_px: 96,
+            length_mm: 25.4,
+            min_feed_mm: 24.5,
+            warnings: [],
+          });
+        }),
+      );
+
+      const alwaysRenderable = () => true;
+      const { result, rerender } = renderHook(({ definition }) => usePreview(definition, alwaysRenderable), {
+        initialProps: { definition: definitionWithText("HELLO") },
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => expect(result.current.lengthMm).toBe(25.4), { timeout: 2000 });
+
+      const barcodeDefinition: LabelDefinition = {
+        type: "barcode",
+        tape: { width_mm: 24, family: "tze" },
+        params: { data: "X" },
+      };
+      rerender({ definition: barcodeDefinition });
+
+      // The barcode fetch is now in flight, deliberately held open -- this
+      // is exactly the moment the old (buggy) behavior would still show
+      // "text"'s stale 25.4mm/png. It must show nothing instead.
+      await waitFor(() => expect(result.current.isFetching).toBe(true), { timeout: 2000 });
+      expect(result.current.lengthMm).toBeNull();
+      expect(result.current.png).toBeNull();
+
+      releaseBarcode?.();
+      await waitFor(() => expect(result.current.lengthMm).toBe(12.0), { timeout: 2000 });
+    },
+    10_000,
+  );
 });
