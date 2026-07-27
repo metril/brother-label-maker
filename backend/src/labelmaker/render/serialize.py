@@ -31,7 +31,11 @@ _MAX_TOTAL_LABELS = 1000
 _MIN_LIST_VALUES = 1
 _MAX_LIST_VALUES = 500
 _MIN_CSV_ROWS = 1
-_MAX_CSV_ROWS = 500
+# Public (not underscore-prefixed): also imported by api/router_labels.py's
+# POST /api/serialize/csv upload endpoint, so the "500 data rows" cap has
+# exactly one owner instead of two independently-maintained constants that
+# could drift apart.
+MAX_CSV_ROWS = 500
 
 # Spreadsheet-style (bijective) base-26 ordinal of "ZZZ" -- see _ordinal's
 # docstring for the ordinal("A")=0 .. ordinal("Z")=25, ordinal("AA")=26
@@ -108,9 +112,9 @@ class Sequence(BaseModel):
                     f"got {len(self.values)}"
                 )
         elif self.kind == SequenceKind.CSV:
-            if not (_MIN_CSV_ROWS <= len(self.rows) <= _MAX_CSV_ROWS):
+            if not (_MIN_CSV_ROWS <= len(self.rows) <= MAX_CSV_ROWS):
                 raise ValueError(
-                    f"kind=csv requires {_MIN_CSV_ROWS}-{_MAX_CSV_ROWS} rows, "
+                    f"kind=csv requires {_MIN_CSV_ROWS}-{MAX_CSV_ROWS} rows, "
                     f"got {len(self.rows)}"
                 )
             columns = set(self.rows[0])

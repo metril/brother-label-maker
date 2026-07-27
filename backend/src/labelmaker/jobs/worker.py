@@ -3,9 +3,12 @@ lifespan, that dequeues job ids and drives each through render -> build ->
 print -> persist, broadcasting lifecycle events along the way.
 
 Every blocking driver/render call (render_definition, rasterize, preview_png,
-PyUsbTransport.open/close, print_images) runs via `anyio.to_thread.run_sync`
--- this coroutine must never block the event loop the rest of the API (and
-every other in-flight job's polling client) shares with it.
+PyUsbTransport.open/close, print_images) -- and, for a task 2.4 serialized
+job, the Sequence.model_validate/expand_definition re-expansion that
+precedes rendering (see _expand_and_render) -- runs via
+`anyio.to_thread.run_sync` -- this coroutine must never block the event loop
+the rest of the API (and every other in-flight job's polling client) shares
+with it.
 """
 
 from __future__ import annotations
@@ -95,24 +98,9 @@ async def _process_job(state, job_id: str) -> None:
 
     try:
         definition = job["definition"]
-        labels = definition["labels"]
         options = definition.get("options", {})
-        serialization = definition.get("serialization")
 
-        if serialization is not None:
-            # task 2.4: the snapshot holds exactly ONE template label (see
-            # router_print.py's create_print_job, which enforces that at
-            # POST time) plus the Sequence spec, UNEXPANDED -- re-expand
-            # HERE, at render time, not at POST time, so reprint is
-            # reproducible from the same (template, spec) pair without
-            # ever having persisted N separate label definitions.
-            seq = Sequence.model_validate(serialization)
-            bound = expand_definition(labels[0], seq)
-            definitions = [LabelDefinition.model_validate(raw) for raw in bound]
-        else:
-            definitions = [LabelDefinition.model_validate(label) for label in labels]
-
-        images = await anyio.to_thread.run_sync(_render_all, definitions)
+        images, definitions = await anyio.to_thread.run_sync(_expand_and_render, definition)
 
         strategy = get_strategy(config.printer_init_strategy)
         job_options = JobOptions(
@@ -157,6 +145,42 @@ async def _process_job(state, job_id: str) -> None:
     except Exception as exc:
         await db.update_job(job_id, status="failed", error=str(exc))
         await bus.broadcast({"event": "job.failed", "job_id": job_id, "error": str(exc)})
+
+
+def _expand_and_render(
+    definition: dict,
+) -> tuple[list[Image.Image], list[LabelDefinition]]:
+    """Off the event-loop thread (see this module's docstring) end to end:
+    validate `definition`'s labels -- re-expanding via Sequence.
+    model_validate + expand_definition first when a task 2.4 serialization
+    spec is present -- then render/rasterize every resulting label.
+
+    Review fix-up: the expansion step used to run directly on the event
+    loop, BEFORE the to_thread.run_sync call that did the rendering (a
+    max-cap, 1000-label expansion measured at ~19ms of event-loop-blocking
+    work). Folding it into this SAME to_thread.run_sync call keeps ALL of
+    a job's CPU-bound work off the event loop the rest of the API (and
+    every other in-flight job's polling client) shares with it -- the
+    guarantee this module's docstring already claims for render_definition/
+    rasterize now actually covers the expansion step too.
+    """
+    labels = definition["labels"]
+    serialization = definition.get("serialization")
+
+    if serialization is not None:
+        # task 2.4: the snapshot holds exactly ONE template label (see
+        # router_print.py's create_print_job, which enforces that at POST
+        # time) plus the Sequence spec, UNEXPANDED -- re-expand HERE, at
+        # render time, not at POST time, so reprint is reproducible from
+        # the same (template, spec) pair without ever having persisted N
+        # separate label definitions.
+        seq = Sequence.model_validate(serialization)
+        bound = expand_definition(labels[0], seq)
+        definitions = [LabelDefinition.model_validate(raw) for raw in bound]
+    else:
+        definitions = [LabelDefinition.model_validate(label) for label in labels]
+
+    return _render_all(definitions), definitions
 
 
 def _render_all(definitions: list[LabelDefinition]) -> list[Image.Image]:

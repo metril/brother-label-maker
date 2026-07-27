@@ -512,6 +512,28 @@ async def test_print_serialization_csv_unknown_column_rejected_before_queueing(c
     assert "missing" in resp.json()["detail"]
 
 
+async def test_print_serialization_pre_flight_422_names_the_failing_label_and_value(client):
+    # Review fix-up: a run can be up to 1000 labels -- a bare
+    # render_definition() error ("each line must be <= 200 chars, got 250")
+    # is useless without saying WHICH of them broke. text_label.py's
+    # TextLabelParams caps a line at 200 chars; only the THIRD value here
+    # (index 2) is over that, so the 422 must name index 2 and that exact
+    # value, not just repeat the underlying validation message.
+    too_long_value = "X" * 250
+    resp = await client.post(
+        "/api/print",
+        json={
+            "labels": [_serial_template("{seq}")],
+            "serialization": {"kind": "list", "values": ["A", "B", too_long_value]},
+        },
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "label 2" in detail
+    assert too_long_value in detail
+    assert "200" in detail  # the underlying TextLabelParams message survives intact
+
+
 # --- 6. Unknown job id: 404s ---
 
 

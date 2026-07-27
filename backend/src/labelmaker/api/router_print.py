@@ -18,7 +18,7 @@ from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_mes
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.render import render_definition
 from labelmaker.render.document import LabelDefinition
-from labelmaker.render.serialize import Sequence, expand_definition
+from labelmaker.render.serialize import Sequence, expand_definition, ordered_values
 
 router = APIRouter(prefix="/print", tags=["print"])
 
@@ -64,10 +64,25 @@ def _validate_serialized_print(template: LabelDefinition, serialization: Sequenc
     check _validate_render_side does), and returns the expanded bound
     definitions so the caller (create_print_job) gets an accurate
     label_count without a second expansion pass.
+
+    Review fix-up: a run can carry up to 1000 labels, so a bare
+    render_definition() failure ("each line must be <= 200 chars, got
+    214") is useless without saying WHICH of the 1000 it came from --
+    each per-label failure is re-raised prefixed with its 0-based index
+    and the sequence value that produced it (ordered_values(serialization)
+    is in the exact same order expand_definition's `bound` is), so the
+    caller can go straight to the offending row/value instead of
+    bisecting a 1000-label run by hand.
     """
     bound = expand_definition(template.model_dump(mode="json"), serialization)
-    for raw in bound:
-        render_definition(LabelDefinition.model_validate(raw))
+    values = ordered_values(serialization)
+    for i, (raw, value) in enumerate(zip(bound, values, strict=True)):
+        try:
+            render_definition(LabelDefinition.model_validate(raw))
+        except (KeyError, ValueError) as exc:
+            raise ValueError(
+                f"label {i} (sequence value {value!r}): {error_message(exc)}"
+            ) from exc
     return bound
 
 

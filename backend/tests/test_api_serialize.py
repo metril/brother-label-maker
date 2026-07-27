@@ -220,6 +220,23 @@ async def test_csv_upload_over_500_rows_returns_422(client):
     assert "500" in resp.json()["detail"]
 
 
+async def test_csv_upload_502_rows_rejected_via_early_bail(client):
+    # Review fix-up: the row cap used to be enforced AFTER the whole file
+    # was parsed into `rows` (a 2M-row upload drove RSS 115MB->910MB before
+    # the 422). It's now checked inside the parse loop, bailing as soon as
+    # row MAX_CSV_ROWS+1 is read -- this pins that the endpoint still
+    # rejects correctly (can't assert memory from a test; the loop-bail
+    # itself, exercised here, is the fix -- see router_labels.py's
+    # upload_serialize_csv).
+    lines = ["a"] + [str(i) for i in range(502)]
+    csv_text = "\n".join(lines) + "\n"
+    resp = await client.post(
+        "/api/serialize/csv", files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+    )
+    assert resp.status_code == 422
+    assert "500" in resp.json()["detail"]
+
+
 async def test_csv_upload_exactly_500_rows_accepted(client):
     lines = ["a"] + [str(i) for i in range(500)]
     csv_text = "\n".join(lines) + "\n"
@@ -237,3 +254,16 @@ async def test_csv_upload_blank_trailing_line_is_not_treated_as_ragged(client):
     )
     assert resp.status_code == 200
     assert resp.json()["row_count"] == 1
+
+
+async def test_csv_upload_strips_whitespace_from_row_values_like_headers(client):
+    # Header column names are already stripped -- row VALUES get the same
+    # treatment (a common spreadsheet-export artifact: " Alice" / "Bob "),
+    # so a {csv.name} substitution never carries stray leading/trailing
+    # whitespace through from an untrimmed cell.
+    csv_text = "port,name\n 1 , Alice \n"
+    resp = await client.post(
+        "/api/serialize/csv", files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["rows"] == [{"port": "1", "name": "Alice"}]

@@ -34,6 +34,7 @@ from labelmaker.render import (
 )
 from labelmaker.render.document import LabelDefinition, family_name
 from labelmaker.render.serialize import (
+    MAX_CSV_ROWS,
     Sequence,
     distinct_pairs,
     expand_definition,
@@ -47,10 +48,6 @@ router = APIRouter(tags=["labels"])
 
 # /render/expand's `samples` cap ("first 24 max, for UI chips" -- brief).
 _MAX_SAMPLES = 24
-# /serialize/csv's row cap -- mirrors Sequence's own kind=csv 1-500 row
-# range (serialize.py's _MAX_CSV_ROWS) so an upload that would fail
-# Sequence validation later fails loudly here instead.
-_MAX_CSV_UPLOAD_ROWS = 500
 
 
 @router.get("/label-types")
@@ -230,6 +227,17 @@ async def upload_serialize_csv(file: UploadFile) -> dict:
     for line_no, raw_row in enumerate(reader, start=2):
         if not raw_row:  # a genuinely blank line -- not a ragged row
             continue
+        if len(rows) >= MAX_CSV_ROWS:
+            # Bail as soon as row MAX_CSV_ROWS+1 is READ -- before
+            # validating or appending it, and long before `reader` would
+            # otherwise be drained to the end of the file. A large-enough
+            # upload (millions of rows) would otherwise balloon RSS well
+            # past the file's own size while `rows` grows unbounded, only
+            # to be rejected anyway once every row had already been
+            # parsed and appended.
+            raise HTTPException(
+                status_code=422, detail=f"CSV file has more than {MAX_CSV_ROWS} data rows"
+            )
         if len(raw_row) != len(header):
             raise HTTPException(
                 status_code=422,
@@ -237,14 +245,12 @@ async def upload_serialize_csv(file: UploadFile) -> dict:
                     f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"
                 ),
             )
-        rows.append(dict(zip(header, raw_row, strict=True)))
+        # Row values stripped the same way header column names are above --
+        # untrimmed whitespace around a CSV cell (common from spreadsheet
+        # exports) shouldn't become part of e.g. a {csv.port} substitution.
+        rows.append(dict(zip(header, (value.strip() for value in raw_row), strict=True)))
 
     if not rows:
         raise HTTPException(status_code=422, detail="CSV file has no data rows")
-    if len(rows) > _MAX_CSV_UPLOAD_ROWS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"CSV file has {len(rows)} data rows, maximum is {_MAX_CSV_UPLOAD_ROWS}",
-        )
 
     return {"columns": header, "rows": rows, "row_count": len(rows)}
