@@ -6,8 +6,11 @@ interface ArrayOfNumbersProps {
   label: string;
   help?: string;
   schema: JsonSchemaObject;
-  value: number[];
-  onChange: (value: number[]) => void;
+  /** An item can be `undefined` -- a genuinely cleared row, not a coerced 0
+   * -- same convention as MultipliersField's own `(number | undefined)[]`,
+   * see that component's `setItem`. */
+  value: (number | undefined)[];
+  onChange: (value: (number | undefined)[]) => void;
 }
 
 /** Generic repeatable-number-rows fallback -- same add/remove/reorder shape
@@ -24,7 +27,14 @@ export function ArrayOfNumbers({ label, help, schema, value, onChange }: ArrayOf
   const atMax = maxItems !== undefined && value.length >= maxItems;
 
   function setItem(i: number, next: number | undefined) {
-    if (next === undefined) return; // mid-edit/cleared -- NumberInput's own local buffer shows it
+    // `next` can genuinely be `undefined` (a cleared row) -- propagate it
+    // into params rather than swallowing it. The old `if (next ===
+    // undefined) return;` here left the BOX empty (NumberInput's own local
+    // text buffer, see ui/inputs.tsx) while `value` -- and therefore
+    // numberValidity's hasNumberOutOfRange walk -- still held the stale
+    // pre-clear number, so nothing gated submission on what the user was
+    // actually looking at. Mirrors MultipliersField.setItem, which never
+    // had this bug.
     onChange(value.map((item, idx) => (idx === i ? next : item)));
   }
   function addItem() {

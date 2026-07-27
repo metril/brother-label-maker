@@ -47,6 +47,13 @@ describe("hasNumberOutOfRange", () => {
     expect(hasNumberOutOfRange(schema, { padding_mm: 2, font_size_px: 500 })).toBe(true);
   });
 
+  it("is true when a Manual nullable number field is cleared (undefined) -- undefined is NOT treated as Auto", () => {
+    // Only an explicit `null` is Auto/skip-worthy. `undefined` is "Manual,
+    // currently empty" (see SchemaField.tsx's matching isAuto fix) and must
+    // gate submission exactly like a non-nullable cleared field does.
+    expect(hasNumberOutOfRange(schema, { padding_mm: 2, font_size_px: undefined })).toBe(true);
+  });
+
   it("recurses into array-of-object rows (patch_panel's blocks / breaker_box's breakers shape)", () => {
     const root: JsonSchemaObject = {
       type: "object",

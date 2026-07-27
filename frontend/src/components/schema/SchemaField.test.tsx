@@ -153,6 +153,35 @@ describe("SchemaField shapes", () => {
     expect(screen.getByLabelText("Lines 3")).toHaveValue("A");
   });
 
+  // Regression: ArrayOfNumbers used to swallow a cleared item entirely
+  // (`if (next === undefined) return;`) -- the box went visibly empty
+  // (NumberInput's own local text buffer, independent of the parent) while
+  // the array handed back up to params still held the pre-clear number, so
+  // nothing downstream (hasNumberOutOfRange, the preview request) ever saw
+  // anything wrong. Latent in the generic fallback today since patch_panel's
+  // `multipliers` uses its own MultipliersField override instead, but a
+  // future array-of-number field would have hit it directly.
+  it("array-of-number: clearing an item propagates undefined into the value instead of silently keeping the old number", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const schema: JsonSchemaObject = { type: "array", items: { type: "number", minimum: 0.1, maximum: 9.5 }, minItems: 1, maxItems: 3 };
+    render(
+      <SchemaField
+        fieldKey="widths"
+        schema={schema}
+        root={schema}
+        value={[1.5, 2]}
+        onChange={onChange}
+        path={["widths"]}
+        allParams={{}}
+      />,
+    );
+
+    await user.clear(screen.getByLabelText("Widths 1"));
+
+    expect(onChange).toHaveBeenCalledWith([undefined, 2]);
+  });
+
   it("array-of-object: rows recurse through SchemaField for their own nested fields (labels qualified by row, e.g. 'Breaker 1 Poles', so they don't collide across rows), get block-N DOM ids, and add/remove works", async () => {
     const user = userEvent.setup();
     const root: JsonSchemaObject = {
@@ -222,5 +251,43 @@ describe("SchemaField shapes", () => {
 
     await user.click(screen.getByRole("radio", { name: "Auto" }));
     expect(screen.queryByLabelText("Font size (px)")).not.toBeInTheDocument();
+  });
+
+  // Regression: clearing a Manual nullable number field used to unmount the
+  // control entirely. NumberInput emits `undefined` (never null) for a
+  // cleared box; SchemaField's nullable branch treated `undefined` the same
+  // as the field's own `null` ("Auto"), so `!isAuto` (gating FieldControl's
+  // very presence) flipped to false mid-edit -- two backspaces on a seeded
+  // Manual value yanked the input out from under the user's cursor, snapped
+  // the toggle back to "Auto", and showed no error at all.
+  it("nullable field: clearing a Manual value keeps the control mounted (does not snap back to Auto) and shows 'enter a value'", async () => {
+    const user = userEvent.setup();
+    const schema: JsonSchemaObject = {
+      anyOf: [{ type: "integer" }, { type: "null" }],
+      default: null,
+      description: "fixed font size in px; omit for auto-fit",
+    };
+    render(<Harness schema={schema} fieldKey="font_size_px" initial={null} />);
+
+    await user.click(screen.getByRole("radio", { name: "Manual" }));
+    const input = screen.getByLabelText("Font size (px)");
+    expect(input).toHaveValue(24);
+
+    await user.clear(input);
+
+    // Still mounted and still in Manual mode -- not unmounted, not reverted.
+    expect(screen.getByLabelText("Font size (px)")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Manual" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Auto" })).toHaveAttribute("aria-checked", "false");
+    expect(document.activeElement).toBe(screen.getByLabelText("Font size (px)")); // focus stayed put
+
+    // Gates like the non-nullable number path: a real inline alert, not a
+    // silent Auto fallback.
+    expect(screen.getByRole("alert")).toHaveTextContent("enter a value");
+
+    // The field is still genuinely editable -- backspace-and-retype works.
+    await user.type(input, "18");
+    expect(input).toHaveValue(18);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

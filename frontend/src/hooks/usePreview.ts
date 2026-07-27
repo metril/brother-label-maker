@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, pngDataUrl, postPreview } from "../api/client";
 import type { LabelDefinition, RenderWarning } from "../api/types";
@@ -62,6 +62,38 @@ export function usePreview(
     // selectors); comparing its serialized form is what actually matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(definition)]);
+
+  // Drop `debounced` the INSTANT the label TYPE itself changes, rather than
+  // waiting out the 300ms window above. Designer.tsx's heading reads
+  // `definition.type` directly (undebounced) -- without this, `debounced`
+  // (and therefore debouncedType/the query key/query.data below) keeps
+  // pointing at the OLD type for up to one full debounce window after the
+  // heading already switched, so the deck goes on rendering the previous
+  // type's png/lengthMm/warnings under the new type's heading.
+  //
+  // `useLayoutEffect`, not `useEffect`: both the heading and this hook's
+  // return value are produced by the SAME render (Designer.tsx re-renders
+  // once when `selectedType` changes, and calls usePreview() again in that
+  // same pass) -- a plain `useEffect` only fires after the browser paints,
+  // so it left a real (if brief -- ~15-40ms, one or two frames, measured
+  // live) window where the new heading was already on screen next to the
+  // old type's png. `useLayoutEffect` flushes synchronously before paint,
+  // landing the clear in the SAME commit the heading itself changed in, so
+  // there's no in-between frame to see.
+  //
+  // Scoped to `definition.type` alone (not the full JSON.stringify a param
+  // edit would change) so ordinary editing within one type is untouched --
+  // only an actual type switch resets debounced to undefined, which the
+  // query's own `enabled`/`placeholderData` logic below already turns into
+  // "no data, not fetching" until the debounce settles again on the new
+  // type.
+  const lastTypeRef = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (lastTypeRef.current !== undefined && lastTypeRef.current !== definition.type) {
+      setDebounced(undefined);
+    }
+    lastTypeRef.current = definition.type;
+  }, [definition.type]);
 
   // I2: gate strictly on the DEBOUNCED value's renderability, not the live
   // `definition` passed in on every keystroke. The query itself always

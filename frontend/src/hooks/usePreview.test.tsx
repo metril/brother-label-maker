@@ -232,4 +232,61 @@ describe("usePreview", () => {
     },
     10_000,
   );
+
+  // Regression (task 2.10 review, fix round 2): the ABOVE test only checks
+  // the state once the debounce has already settled onto the new type --
+  // it doesn't catch a bug where `debounced` (and therefore debouncedType/
+  // the query key) keeps pointing at the OLD type for the ~300ms BETWEEN
+  // the type switch and the debounce firing. Designer.tsx's heading reads
+  // `definition.type` directly (undebounced), so during that window the
+  // heading already reads the new type while the deck kept rendering the
+  // previous type's own last-successful png/lengthMm/warnings. This test
+  // asserts the state IMMEDIATELY after the type switch, before letting any
+  // time pass.
+  it("clears the previous type's png/lengthMm the instant the label TYPE changes, before the new debounce window elapses", async () => {
+    server.use(
+      http.post("/api/render/preview", async ({ request }) => {
+        const body = (await request.json()) as { definition: LabelDefinition };
+        if (body.definition.type === "barcode") {
+          return HttpResponse.json({
+            png_b64: TINY_PNG_B64,
+            png_width_px: 100,
+            png_height_px: 96,
+            length_mm: 12.0,
+            min_feed_mm: 24.5,
+            warnings: [],
+          });
+        }
+        return HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          png_width_px: 200,
+          png_height_px: 96,
+          length_mm: 25.4,
+          min_feed_mm: 24.5,
+          warnings: [],
+        });
+      }),
+    );
+
+    const alwaysRenderable = () => true;
+    const { result, rerender } = renderHook(({ definition }) => usePreview(definition, alwaysRenderable), {
+      initialProps: { definition: definitionWithText("HELLO") },
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.lengthMm).toBe(25.4));
+
+    const barcodeDefinition: LabelDefinition = {
+      type: "barcode",
+      tape: { width_mm: 24, family: "tze" },
+      params: { data: "X" },
+    };
+    rerender({ definition: barcodeDefinition });
+
+    // No waitFor, no timer advance -- still well inside the 300ms debounce
+    // window. The old ("text") readouts must already be gone, not lingering
+    // until `debounced` catches up.
+    expect(result.current.lengthMm).toBeNull();
+    expect(result.current.png).toBeNull();
+  });
 });

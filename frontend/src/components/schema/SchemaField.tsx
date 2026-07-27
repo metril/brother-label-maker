@@ -58,7 +58,21 @@ export function SchemaField({ fieldKey, schema, root, value, onChange, path, lab
   const id = `field-${path.join("-")}`;
 
   if (nullable) {
-    const isAuto = value === null || value === undefined;
+    // Only an explicit `null` means Auto. `undefined` means "Manual, but
+    // the box is currently empty" -- NumberInput emits `undefined` (never a
+    // coerced 0/null) for a genuinely cleared number, see ui/inputs.tsx.
+    // Treating undefined as Auto too (the pre-fix behavior) unmounted
+    // FieldControl the instant a Manual field got backspaced empty, since
+    // `!isAuto` below gates its very presence: two backspaces on a seeded
+    // Manual value made isAuto flip true mid-edit, yanking the input out
+    // from under the user's cursor and silently re-checking "Auto" with no
+    // error shown. MultipliersField (overrides/MultipliersField.tsx) never
+    // hit this because ITS field value is the whole array container, which
+    // this app's onChange calls only ever set to `null` or an array --
+    // never to `undefined` itself (only individual ITEMS inside it go
+    // undefined) -- so its identical-looking `value === null` check was
+    // already correct without needing this comment.
+    const isAuto = value === null;
     return (
       <div className="flex flex-col gap-2">
         <div>
@@ -227,7 +241,7 @@ function FieldControl({ fieldKey, schema, root, value, onChange, path, id, label
           label={label}
           help={help}
           schema={resolved}
-          value={Array.isArray(value) ? (value as number[]) : []}
+          value={Array.isArray(value) ? (value as (number | undefined)[]) : []}
           onChange={onChange}
         />
       );

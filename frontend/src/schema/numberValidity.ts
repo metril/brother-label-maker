@@ -61,7 +61,14 @@ export function hasNumberOutOfRange(
   for (const [key, propSchema] of Object.entries(properties)) {
     const { nullable, inner } = splitNullable(propSchema, root);
     const value = params[key];
-    if (nullable && (value === null || value === undefined)) continue;
+    // Only an explicit `null` is Auto (nothing to bound-check). `undefined`
+    // is Manual-but-cleared -- SAME as a non-nullable field's own cleared
+    // state -- and must fall through to isNumberFieldInvalid below so it
+    // gates submission exactly like the non-nullable path does (see
+    // SchemaField.tsx's matching `isAuto` fix -- this is the other half of
+    // it: the UI can show "enter a value" all it wants, but without this
+    // Print/preview would still have fired the request anyway).
+    if (nullable && value === null) continue;
     const resolved = resolveRef(inner, root);
     const kind = classifyField(resolved);
 
