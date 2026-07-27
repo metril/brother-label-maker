@@ -121,7 +121,7 @@ async def test_print_walking_skeleton_e2e_mock_mode(app_and_client):
     )
     assert stream_resp.content == expected.data
 
-    thumb_b64 = job["preview_png"]
+    thumb_b64 = job["thumbnail_png_b64"]
     assert thumb_b64 is not None
     thumb_img = Image.open(io.BytesIO(base64.b64decode(thumb_b64)))
     assert thumb_img.height == 128

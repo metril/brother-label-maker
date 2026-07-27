@@ -33,7 +33,7 @@ async def test_preview_returns_expected_scaled_png_byte_equal_to_direct_pipeline
 
     png_bytes = base64.b64decode(body["png_b64"])
     img = Image.open(io.BytesIO(png_bytes))
-    assert img.size == (body["width_px"], body["height_px"])
+    assert img.size == (body["png_width_px"], body["png_height_px"])
 
     defn = LabelDefinition.model_validate(_HELLO_DEFINITION)
     rendered = render_definition(defn)
@@ -51,7 +51,7 @@ async def test_preview_default_scale_is_2(client):
     body = resp.json()
     png_bytes = base64.b64decode(body["png_b64"])
     img = Image.open(io.BytesIO(png_bytes))
-    assert img.size == (body["width_px"], body["height_px"])
+    assert img.size == (body["png_width_px"], body["png_height_px"])
 
     defn = LabelDefinition.model_validate(_HELLO_DEFINITION)
     expected_png = preview_png(rasterize(render_definition(defn)), scale=2)
@@ -69,7 +69,8 @@ async def test_preview_warnings_pass_through_on_cramped_text(client):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert any("cramped" in w or "minimum" in w for w in body["warnings"])
+    assert any(w["code"] == "text_cramped" for w in body["warnings"])
+    assert all(w["severity"] == "warning" for w in body["warnings"])
 
 
 async def test_preview_unknown_type_returns_422_listing_valid_types(client):

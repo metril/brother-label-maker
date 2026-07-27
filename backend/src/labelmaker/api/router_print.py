@@ -74,9 +74,14 @@ async def create_print_job(body: PrintRequest, db: DbDep, queue: QueueDep, bus: 
 
 
 def _job_to_response(job: dict) -> dict:
+    """Renames the DB's `preview_png` column to `thumbnail_png_b64` in the
+    JSON response (the DB column name itself is unchanged -- see
+    db/database.py) and base64-encodes it. The old name read as a raw PNG
+    field when it was actually a base64 string; the new name says both what
+    it is (a thumbnail) and its encoding, in the field name itself."""
     body = dict(job)
     png = body.pop("preview_png", None)
-    body["preview_png"] = base64.b64encode(png).decode("ascii") if png else None
+    body["thumbnail_png_b64"] = base64.b64encode(png).decode("ascii") if png else None
     return body
 
 
