@@ -83,24 +83,30 @@ satisfied within a single render call (there's no wider tape to grow
 into) -- if even `_MIN_FONT_PX` doesn't fit it, this raises `ValueError`
 (surfaced as a 422) rather than silently rendering unreadable/off-tape
 text, mirroring barcode_label.py's fixed-dimension unfittable-code case.
-This check applies identically whether font_px came from auto-fit or was
-explicitly requested (font_size_px), since a font wider than the physical
-tape is unreadable/off-tape regardless of who chose the size -- unlike an
-over-wide EXPLICIT size in a fixed-length text_label.py, which can be
-clipped-and-warned without losing anything but its own tail, here the
-"clip" would eat into the perpendicular tape edge, not the end of the
-string. Falling back to `_MIN_FONT_PX` while still (barely) fitting
-attaches the same `text_cramped` warning text_label.py's own auto-fit
-floor case uses.
+Falling back to `_MIN_FONT_PX` while still (barely) fitting attaches the
+same `text_cramped` warning text_label.py's own auto-fit floor case uses.
 
-The length budget, by contrast, is never a hard failure: for auto-fit it's
-simply the other half of fit_font_size's search (a size that fails it is
-never returned unless NOTHING in range satisfies both, the min_px
-fallback); for an explicit font_size_px it is clamped down (with a
-`font_clamped` warning) exactly like text_label.py/divided_blocks.py's own
-explicit-size height clamp -- so by construction, a single instance's
-stack height never exceeds the length budget, and "-- Repeat --" below
-never needs to handle "not even one instance fits".
+Both budgets -- cross-tape AND length -- are clamped identically whether
+font_px came from auto-fit or an explicit `font_size_px`: an explicit size
+is run through the SAME `fit_font_size(..., cross_budget_px,
+length_budget_px, ...)` call auto-fit uses (min()'d with the requested
+size, `font_clamped` warned if reduced), NOT just the length half of it.
+This matters specifically because the cross-tape budget, unlike the length
+budget, is otherwise a hard failure -- an explicit size only marginally
+too wide for the tape is still a size a SMALLER font would satisfy, so it
+must be clamped down like any other over-large explicit size, not left to
+fall through to the unconditional ValueError below with "shorten or use
+wider tape" advice that would be factually wrong (a smaller font is
+exactly what fixes it, and the server can just pick one). The
+unconditional cross-tape check right after the if/else therefore only
+ever actually fires in the genuinely-unfittable case the brief describes:
+even `_MIN_FONT_PX` -- fit_font_size's own last-resort fallback -- doesn't
+satisfy the cross-tape budget, so there truly is no size left to clamp
+to. The length budget, by contrast, was never a hard-failure axis to begin
+with: for auto-fit it's simply the other half of the same search; for an
+explicit size, being included in that same clamped `fit_px` guarantees a
+single instance's stack height never exceeds it either -- so "-- Repeat
+--" below never needs to handle "not even one instance fits".
 
 -- Repeat --
 
@@ -126,7 +132,7 @@ from labelmaker.render.document import (
     _svg_document,
     _text_element,
 )
-from labelmaker.render.fonts import fit_font_size, font_path, list_fonts, measure_text
+from labelmaker.render.fonts import extent_ratio, fit_font_size, font_path, list_fonts, measure_text
 from labelmaker.render.types.base import LabelRenderer, register
 
 _LINE_SPACING = 1.15
@@ -214,16 +220,44 @@ def _wrap_length_mm(params: CableWrapParams) -> float:
     return math.pi * params.cable_diameter_mm + params.overlap_mm
 
 
+def _effective_line_spacing(family: str, bold: bool) -> float:
+    """max(_LINE_SPACING, extent_ratio(family, bold)) -- the per-line box
+    multiplier actually used for layout (both `_text_group`'s rendering and
+    `instance_len_px`'s tiling reservation below), NOT what's passed to
+    fit_font_size (which keeps using the plain `_LINE_SPACING` constant --
+    see its own docstring: fit_font_size already multiplies its internally-
+    computed extent_ratio BY the line_spacing it's given, so feeding it this
+    already-bumped value would double-count the ratio and needlessly shrink
+    the chosen font).
+
+    Why bump it at all: `_LINE_SPACING=1.15` is a fixed constant, not
+    derived from any particular font's real metrics. For a font whose real
+    (ascent+descent)/em -- `extent_ratio` -- exceeds 1.15 (Inter ~1.211,
+    JetBrains Mono ~1.32), a per-line box sized at `font_px * 1.15` is
+    SMALLER than that font's actual rendered glyph height, i.e. negative
+    leading: real ink for one line can extend past its own nominal box,
+    into where the tiling math assumes the NEXT instance's >=2mm gap
+    begins (measured directly: an adversarial case shrank the real
+    on-tape gap to ~1.83mm). Using max(1.15, extent_ratio) as the
+    multiplier instead guarantees `line_height_px >= real ascent+descent`
+    always, i.e. leading_px >= 0 -- eliminating that encroachment at the
+    root (the layout box itself), not just papering over its symptom."""
+    return max(_LINE_SPACING, extent_ratio(family, bold))
+
+
 def _text_group(
-    cx: float, cy: float, lines: list[str], family: str, font_px: int, bold: bool
+    cx: float, cy: float, lines: list[str], family: str, font_px: int, bold: bool,
+    line_spacing: float,
 ) -> str:
     """One instance's PRE-rotation SVG: `lines` centered (both axes) on
     (cx, cy) as ordinary horizontal text, using the same per-line
     ascent/descent baseline centering text_label.py/divided_blocks.py both
-    use for their own line stacks."""
+    use for their own line stacks. `line_spacing` is the caller's
+    `_effective_line_spacing(...)` (NOT the bare `_LINE_SPACING` constant)
+    -- see that function's docstring."""
     font_obj = ImageFont.truetype(str(font_path(family, bold)), font_px)
     ascent, descent = font_obj.getmetrics()
-    line_height_px = font_px * _LINE_SPACING
+    line_height_px = font_px * line_spacing
     block_height_px = len(lines) * line_height_px
     block_top = cy - block_height_px / 2
     leading_px = line_height_px - (ascent + descent)
@@ -280,24 +314,30 @@ class CableWrapRenderer(LabelRenderer):
                     )
                 )
         else:
-            # Explicit size clamped against the length budget only (mirrors
-            # text_label.py/divided_blocks.py's own explicit-size height
-            # clamp) -- the cross-tape budget is checked unconditionally
-            # below instead of clamped, since it can't be silently shrunk
-            # into without also disobeying the size the caller explicitly
-            # asked for; see module docstring.
-            length_fit_px = fit_font_size(
-                lines, params.font_family, None, length_budget_px, params.bold,
+            # Explicit size clamped against BOTH budgets (the same call
+            # auto-fit above makes) -- NOT just the length budget: an
+            # explicit size only marginally too wide for the cross-tape
+            # budget is still a size the server CAN satisfy by shrinking a
+            # little, so it must be clamped-and-warned here too, not left
+            # to fall through to the unconditional hard check below and
+            # 422 with "shorten or use wider tape" advice that's factually
+            # wrong (a smaller font would have fit fine). That hard check
+            # remains -- see module docstring -- but now only ever fires
+            # when even `_MIN_FONT_PX` (fit_font_size's own fallback when
+            # NOTHING in range satisfies both constraints) still doesn't
+            # satisfy the cross-tape budget, i.e. genuinely unfittable.
+            fit_px = fit_font_size(
+                lines, params.font_family, cross_budget_px, length_budget_px, params.bold,
                 line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
-            font_px = min(params.font_size_px, length_fit_px)
+            font_px = min(params.font_size_px, fit_px)
             if font_px < params.font_size_px:
                 warnings.append(
                     RenderWarning(
                         code="font_clamped",
                         message=(
                             f"font size {params.font_size_px}px was reduced to {font_px}px "
-                            "to fit the wrap length"
+                            "to fit this wrap"
                         ),
                     )
                 )
@@ -316,7 +356,8 @@ class CableWrapRenderer(LabelRenderer):
                 f"text too long for {tape.nominal_mm}mm tape -- shorten or use wider tape"
             )
 
-        line_height_px = font_px * _LINE_SPACING
+        line_spacing = _effective_line_spacing(params.font_family, params.bold)
+        line_height_px = font_px * line_spacing
         instance_len_px = len(lines) * line_height_px
         gap_px = mm_to_dots(_MIN_GAP_MM)
 
@@ -328,7 +369,9 @@ class CableWrapRenderer(LabelRenderer):
         cy = height_px / 2
         body_parts = []
         for cx in _tile_centers(n, instance_len_px, length_budget_px, padding_px):
-            group = _text_group(cx, cy, lines, params.font_family, font_px, params.bold)
+            group = _text_group(
+                cx, cy, lines, params.font_family, font_px, params.bold, line_spacing
+            )
             body_parts.append(
                 f'<g transform="rotate(-90, {_fmt_num(cx)}, {_fmt_num(cy)})">{group}</g>'
             )

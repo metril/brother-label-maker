@@ -29,6 +29,7 @@ from pydantic import ValidationError
 
 from labelmaker.driver.geometry import mm_to_dots
 from labelmaker.render.document import Tape
+from labelmaker.render.fonts import extent_ratio
 from labelmaker.render.rasterize import preview_png, rasterize
 from labelmaker.render.types import get_renderer, list_types
 from labelmaker.render.types.cable_flag import (
@@ -39,6 +40,7 @@ from labelmaker.render.types.cable_flag import (
 from labelmaker.render.types.cable_wrap import (
     CableWrapParams,
     CableWrapRenderer,
+    _effective_line_spacing,
     _tile_centers,
     _wrap_length_mm,
 )
@@ -221,7 +223,12 @@ def test_repeat_true_on_a_long_label_yields_multiple_instances():
 def test_repeat_true_instance_count_matches_hand_derived_tiling_formula():
     # font_size_px pinned (no auto-fit search to reason about) so the
     # instance length -- and therefore how many fit -- is exactly
-    # predictable: len(lines)*font_px*line_spacing.
+    # predictable: len(lines)*font_px*line_spacing, where line_spacing is
+    # max(_LINE_SPACING, extent_ratio(family, bold)) -- NOT the bare 1.15
+    # constant -- see _effective_line_spacing's docstring/the review fix:
+    # Inter's real extent_ratio (1.211) exceeds 1.15, so the real value
+    # governs here, hand-derived independently via fonts.extent_ratio
+    # (not by calling cable_wrap.py's own _effective_line_spacing).
     params = CableWrapParams(
         lines=["A"], font_size_px=10, cable_diameter_mm=90.0, overlap_mm=20.0
     )
@@ -231,11 +238,12 @@ def test_repeat_true_instance_count_matches_hand_derived_tiling_formula():
     width_px = mm_to_dots(math.pi * 90.0 + 20.0)
     padding_px = mm_to_dots(1.0)  # default padding_mm
     length_budget_px = width_px - 2 * padding_px
-    instance_len_px = 1 * 10 * 1.15  # n_lines * font_px * line_spacing
+    line_spacing = max(1.15, extent_ratio("Inter", False))
+    instance_len_px = 1 * 10 * line_spacing  # n_lines * font_px * line_spacing
     gap_px = mm_to_dots(2.0)
     expected_n = max(1, math.floor((length_budget_px + gap_px) / (instance_len_px + gap_px)))
 
-    assert label.svg.count("rotate(-90,") == expected_n == 84
+    assert label.svg.count("rotate(-90,") == expected_n == 82
 
 
 def test_gap_between_repeated_instances_is_at_least_2mm():
@@ -245,13 +253,64 @@ def test_gap_between_repeated_instances_is_at_least_2mm():
     label = CableWrapRenderer().render(params, _tape(24))
     cxs = [float(m.group(1)) for m in re.finditer(r"rotate\(-90, ([\d.]+),", label.svg)]
     assert len(cxs) > 1
-    instance_len_px = 1 * 10 * 1.15
+    instance_len_px = 1 * 10 * max(1.15, extent_ratio("Inter", False))
     edge_gaps = [
         (cxs[i + 1] - instance_len_px / 2) - (cxs[i] + instance_len_px / 2)
         for i in range(len(cxs) - 1)
     ]
     for gap in edge_gaps:
         assert gap >= mm_to_dots(2.0) - 0.1  # -0.1: _fmt_num's 2-decimal rounding noise
+
+
+def test_effective_line_spacing_uses_real_font_metrics_when_larger():
+    # All four bundled families' real extent_ratio exceeds the flat 1.15
+    # constant (Inter 1.211, Roboto Condensed 1.173, JetBrains Mono 1.32,
+    # DejaVu Sans 1.165) -- so _effective_line_spacing must return the
+    # real, larger ratio for every one of them, never silently falling
+    # back to 1.15.
+    for family in ("Inter", "Roboto Condensed", "JetBrains Mono", "DejaVu Sans"):
+        ratio = extent_ratio(family, False)
+        assert ratio > 1.15
+        assert _effective_line_spacing(family, False) == ratio == max(1.15, ratio)
+
+
+def test_real_rendered_ink_gap_at_least_2mm_for_tall_metric_font():
+    # Regression guard for the review finding: instance_len_px used to be
+    # computed from the flat 1.15 constant alone, which for a tall-metric
+    # font (JetBrains Mono, extent_ratio ~1.32) under-reserved space and
+    # let real rendered ink from adjacent instances encroach into the
+    # nominal >=2mm gap (measured ~1.83mm in the adversarial case that
+    # motivated this test). Verifies the REAL rasterized ink gap between
+    # two adjacent instances -- not just the coordinate-level tiling math
+    # test_gap_between_repeated_instances_is_at_least_2mm already covers --
+    # using 2 lines with ascenders/descenders (worst case for vertical
+    # extent) in the tallest-metric bundled font.
+    params = CableWrapParams(
+        lines=["AAAA", "gggg"],
+        font_family="JetBrains Mono",
+        font_size_px=20,
+        cable_diameter_mm=90.0,
+        overlap_mm=20.0,
+    )
+    label = CableWrapRenderer().render(params, _tape(24))
+    assert label.warnings == []
+    cxs = [float(m.group(1)) for m in re.finditer(r"rotate\(-90, ([\d.]+),", label.svg)]
+    assert len(cxs) >= 2
+
+    img = rasterize(label)
+    height_px = img.size[1]
+
+    def _ink_extent_near(cx: float, window: int = 40) -> tuple[int, int]:
+        lo, hi = int(cx) - window, int(cx) + window
+        ink_cols = [
+            x for x in range(lo, hi) if any(_ink(img, x, y) for y in range(height_px))
+        ]
+        return min(ink_cols), max(ink_cols)
+
+    _, hi0 = _ink_extent_near(cxs[0])
+    lo1, _ = _ink_extent_near(cxs[1])
+    real_gap_px = lo1 - hi0 - 1
+    assert real_gap_px >= mm_to_dots(2.0)
 
 
 def test_tile_centers_math_n1_centers_on_the_whole_budget():
@@ -298,6 +357,43 @@ def test_wrap_explicit_font_size_that_fits_has_no_warning():
         CableWrapParams(lines=["X"], font_size_px=10), _tape(24)
     )
     assert label.warnings == []
+
+
+def _auto_font_px(svg: str) -> int:
+    return int(re.search(r'font-size="(\d+)"', svg).group(1))
+
+
+def test_wrap_explicit_font_size_one_above_autofit_clamps_not_422():
+    # Review regression: an explicit font_size_px only ONE px above what
+    # auto-fit itself would have picked used to 422 with "shorten or use
+    # wider tape" advice that was factually wrong -- the explicit path
+    # only clamped against the length budget, never the cross-tape one, so
+    # a size that was merely slightly too WIDE for the tape (not
+    # genuinely unfittable) fell straight through to the hard check
+    # instead of being clamped down like any other over-large explicit
+    # size. Must now succeed (200) with a font_clamped warning, landing on
+    # the very size auto-fit itself would have chosen.
+    params = CableWrapParams(lines=["A" * 7])
+    tape = _tape(9)
+    auto_label = CableWrapRenderer().render(params, tape)
+    auto_px = _auto_font_px(auto_label.svg)
+
+    explicit_label = CableWrapRenderer().render(
+        params.model_copy(update={"font_size_px": auto_px + 1}), tape
+    )
+    assert [w.code for w in explicit_label.warnings] == ["font_clamped"]
+    assert _auto_font_px(explicit_label.svg) == auto_px
+
+
+def test_wrap_explicit_font_size_at_floor_still_unfittable_raises():
+    # The clamp above can't rescue a font_size_px that's unfittable even
+    # at _MIN_FONT_PX (6) -- there's no smaller size left to try, so this
+    # must still be the brief's genuine 422 case, both when the caller
+    # asks for the floor explicitly and when they ask for nothing (auto).
+    with pytest.raises(ValueError, match=r"text too long for 3\.5mm tape"):
+        CableWrapRenderer().render(
+            CableWrapParams(lines=["A" * 30], font_size_px=6), _tape(3.5)
+        )
 
 
 # --- 6. cable_flag: Params validation ---------------------------------------
@@ -475,6 +571,32 @@ def test_flag_explicit_font_size_that_fits_has_no_warning():
         CableFlagParams(lines=["X"], font_size_px=10), _tape(24)
     )
     assert label.warnings == []
+
+
+def test_flag_explicit_font_size_one_above_autofit_clamps_not_422():
+    # Same review regression as cable_wrap's own test above: the explicit
+    # path used to be clamped against each end's height/stack constraint
+    # only, never its width constraint -- a size only one px past what
+    # auto-fit itself would pick fell through to the hard 422 with
+    # "shorten text" advice, when a smaller font (which the server can
+    # just pick) was all that was needed.
+    params = CableFlagParams(lines=["A" * 9], flag_length_mm=8.0)
+    tape = _tape(6)
+    auto_label = CableFlagRenderer().render(params, tape)
+    auto_px = _auto_font_px(auto_label.svg)
+
+    explicit_label = CableFlagRenderer().render(
+        params.model_copy(update={"font_size_px": auto_px + 1}), tape
+    )
+    assert [w.code for w in explicit_label.warnings] == ["font_clamped"]
+    assert _auto_font_px(explicit_label.svg) == auto_px
+
+
+def test_flag_explicit_font_size_at_floor_still_unfittable_raises():
+    with pytest.raises(ValueError, match="text too long for a 5.0mm flag"):
+        CableFlagRenderer().render(
+            CableFlagParams(lines=["A" * 30], flag_length_mm=5.0, font_size_px=6), _tape(6)
+        )
 
 
 # --- 11. Schema fidelity: every field carries a description -----------------

@@ -49,15 +49,19 @@ idea as a paper tent-card printed once and folded in half: front and back
 both come out right-side up only because the back's text was printed
 upside-down relative to the front, before folding.
 
-# UNVERIFIED: this assumes Brother's own Cable Flag mode does the same
-# 180-degree ROTATION for the second end -- a MIRROR (horizontal flip)
-# instead is also physically plausible (it reads upright from the same
-# fold in a left/right sense, not a top/bottom one) and would look
-# different for any line that isn't left/right-symmetric. Verify against a
-# real Pro Label Tool / P-touch Cable Flag print at physical checkpoint 2;
-# if it turns out to be a mirror, swap `rotate(180, cx, cy)` below for
-# `scale(-1, 1)` composed with a translate that keeps it pinned to flag
-# B's own center.
+# GEOMETRY VERIFIED (review): a pixel-level simulated fold -- render both
+# ends, fold the bitmap at the gap's midpoint, overlay the two faces --
+# confirms ROTATE (not MIRROR) is the physically correct transform: the
+# rotate(180) implementation's two faces align to within threshold-noise
+# (51/815 differing px), while a mirror (scale(-1,1)) counterfactual does
+# NOT align (403/815 differing px). This settles the rotate-vs-mirror
+# GEOMETRY question on physical-folding grounds alone (a strip printed on
+# one side and folded over is a point reflection through the fold line, by
+# construction -- there is no second physically-consistent option),
+# independent of Brother's own firmware. Genuinely still open: whether
+# Brother's real Cable Flag mode agrees with this correct geometry, or
+# does something else -- verify against a real Pro Label Tool / P-touch
+# print at physical checkpoint 2.
 
 `text_orientation="vertical"`: both ends' text is rotated an ADDITIONAL 90
 degrees (same physical reasoning/direction as cable_wrap.py's own
@@ -93,15 +97,29 @@ end is fit against its own flag box (width = that flag's own pixel width
 minus padding, height = tape print height minus padding -- swapped for
 `text_orientation="vertical"`, the same `_avail`-style swap
 divided_blocks.py's VERTICAL/BACKBONE orientations use), and the SMALLER
-of the two results is used for both. Auto-fit hitting the floor attaches
-the standard `text_cramped` warning; text that still doesn't fit its own
-flag's WIDTH constraint even at the floor size raises ValueError (422) --
-mirrors cable_wrap.py's unfittable-text case (a flag's own length, like
+of the two results is used for both. This full (width AND height) fit is
+computed the SAME way whether font_size_px is None (auto) or explicit --
+an explicit size is min()'d against it (with a `font_clamped` warning if
+that reduces it), not just checked against the height/stack half of it:
+an explicit size only marginally too wide for a flag's own WIDTH
+constraint is still a size a smaller font satisfies, so it gets clamped
+down like any other over-large explicit size rather than falling straight
+through to the hard check below with "shorten text" advice that would be
+wrong when shrinking the font was all that was needed (see
+cable_wrap.py's own identical fix/reasoning).
+
+Auto-fit hitting the floor attaches the standard `text_cramped` warning;
+text that still doesn't fit its own flag's WIDTH constraint even at
+`_MIN_FONT_PX` -- the one case the clamp above can't paper over, since
+there's no smaller size left to try -- raises ValueError (422): mirrors
+cable_wrap.py's unfittable-text case (a flag's own length, like
 cable_wrap's overall length, is derived/fixed, never auto-grown to
-accommodate content) -- and this check applies identically whether font_px
-came from auto-fit or an explicit font_size_px, for the same reason
-cable_wrap.py's own hard width check does: an over-wide flag's text would
-bleed into the blank gap region, not just clip its own tail.
+accommodate content). This check applies identically whether font_px came
+from auto-fit or an explicit font_size_px (now that both are clamped the
+same way above, it only ever fires at the genuine floor case), for the
+same reason cable_wrap.py's own hard width check does: an over-wide
+flag's text would bleed into the blank gap region, not just clip its own
+tail.
 """
 
 from __future__ import annotations
@@ -306,20 +324,25 @@ class CableFlagRenderer(LabelRenderer):
                     )
                 )
         else:
-            # Explicit size clamped against each end's own STACK/height
-            # constraint only (mirrors divided_blocks.py's explicit-size
-            # height clamp) -- the WIDTH constraint is checked
-            # unconditionally below instead of clamped, same reasoning as
-            # cable_wrap.py's own hard width check.
-            height_fit_a = fit_font_size(
-                lines, params.font_family, None, avail_a[1], params.bold,
+            # Explicit size clamped against EACH end's full (width AND
+            # height) constraint pair -- the same calls the auto-fit branch
+            # above makes, not just the height/stack half of it. An
+            # explicit size only marginally too wide for a flag's own WIDTH
+            # constraint is still a size a smaller font would satisfy, so it
+            # must be clamped-and-warned here too (font_clamped), not left
+            # to fall through to the unconditional hard check below with
+            # "shorten text" advice that would be factually wrong when
+            # shrinking the font was all that was needed. See module
+            # docstring and cable_wrap.py's own identical fix.
+            fit_a = fit_font_size(
+                lines, params.font_family, *avail_a, params.bold,
                 line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
-            height_fit_b = fit_font_size(
-                lines, params.font_family, None, avail_b[1], params.bold,
+            fit_b = fit_font_size(
+                lines, params.font_family, *avail_b, params.bold,
                 line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
-            font_px = min(params.font_size_px, height_fit_a, height_fit_b)
+            font_px = min(params.font_size_px, fit_a, fit_b)
             if font_px < params.font_size_px:
                 warnings.append(
                     RenderWarning(
