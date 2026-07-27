@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from labelmaker.render.types.barcode_label import BarcodeLabelParams
 from labelmaker.render.types.breaker_box import BreakerBoxParams, BreakerSpec
+from labelmaker.render.types.cable_flag import CableFlagParams
+from labelmaker.render.types.cable_wrap import CableWrapParams
 from labelmaker.render.types.divided_blocks import (
     BlockSpec,
     DividedBlocksParams,
@@ -235,6 +237,39 @@ BARCODE_TYPE_FIXTURES: tuple[BarcodeTypeFixture, ...] = (
     BarcodeTypeFixture(
         name="barcode_datamatrix_short_nocaption_12mm",
         params=BarcodeLabelParams(symbology="datamatrix", data="T-01", caption="none"),
+        tape_mm=12,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class CableTypeFixture:
+    name: str  # golden file is tests/golden/render/{name}.png
+    type: str  # registered label type name -- rendered via get_renderer(type)
+    params: CableWrapParams | CableFlagParams
+    tape_mm: float
+    tape_family: str = "tze"
+
+
+# Task 2.6's two label types (cable_wrap/cable_flag) -- same
+# get_renderer(fixture.type).render(...) convention as
+# TYPE_CONFIG_FIXTURES/ELECTRICAL_TYPE_FIXTURES/BARCODE_TYPE_FIXTURES above.
+CABLE_TYPE_FIXTURES: tuple[CableTypeFixture, ...] = (
+    # (a) cable_wrap, 2-line switch-port ID, default diameter (6mm) and
+    # overlap (5mm) -- length = pi*6+5 ~= 23.85mm -- default repeat=True on
+    # a 12mm tape, several repeated instances tiled along the wrap.
+    CableTypeFixture(
+        name="cable_wrap_sw1p24_vlan40_d6_repeat_12mm",
+        type="cable_wrap",
+        params=CableWrapParams(lines=["SW1-P24", "VLAN 40"]),
+        tape_mm=12,
+    ),
+    # (b) cable_flag, single-line fiber run ID, default diameter (4mm) and
+    # flag_length_mm (20mm), default horizontal orientation, 12mm tape.
+    CableTypeFixture(
+        name="cable_flag_fiber07_d4_flag20_horizontal_12mm",
+        type="cable_flag",
+        params=CableFlagParams(lines=["FIBER-07"]),
         tape_mm=12,
     ),
 )
