@@ -47,9 +47,9 @@ Model, one term at a time (constants documented with their provenance):
 
 - cut_each: every label is its own independent job (job.py's _build_chained
   CUT_EACH branch: fresh preamble + page_header + page_end per image, its
-  own feed/cut every time). This model follows reading (C) -- features.
-  md:44's own "cost-estimate math" guidance -- and treats MIN_FEED_MM as an
-  ADDITIVE per-label leader, not a floor:
+  own feed/cut every time). This model follows reading (C) -- see
+  features.md:44's own "cost-estimate math" guidance -- and treats
+  MIN_FEED_MM as an ADDITIVE per-label leader, not a floor:
       per_label = label_len_mm + 2*margin_mm + MIN_FEED_MM
   summed over labels. This is symmetric with chain_ff's formula below
   (same three terms), just evaluated once per label instead of once for

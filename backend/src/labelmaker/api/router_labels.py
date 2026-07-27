@@ -154,14 +154,19 @@ def _render_and_encode(
     png_bytes = preview_png(img, scale=scale)
     length_mm_raw = dots_to_mm(rendered.width_px)
 
-    # task 2.9: the tape-usage estimator's floor, surfaced here too (SIMPLER
-    # option the brief chose over a full TapeEstimate on preview, since
-    # chain_mode isn't known yet at preview time -- the full estimate is
-    # POST /api/print/estimate's job, see router_print.py). `short_label` is
-    # appended to `warnings` (not a separate bool) so the frontend's
+    # task 2.9: a heads-up that this label is under the mechanical
+    # head-to-cutter feed constant (MIN_FEED_MM), surfaced here too
+    # (SIMPLER option the brief chose over a full TapeEstimate on preview,
+    # since chain_mode isn't known yet at preview time -- the full,
+    # mode-aware estimate is POST /api/print/estimate's job, see
+    # router_print.py; render.estimate.estimate() does NOT treat
+    # MIN_FEED_MM as a floor for cut_each -- see that module's docstring --
+    # so this warning deliberately says "at least", not "exactly", to avoid
+    # implying a number that endpoint won't actually return). `short_label`
+    # is appended to `warnings` (not a separate bool) so the frontend's
     # existing warning-chip rendering picks it up automatically -- compared
-    # against the UNROUNDED length so a value that only LOOKS >= the floor
-    # after rounding to 1 decimal still gets flagged correctly.
+    # against the UNROUNDED length so a value that only LOOKS >= the
+    # constant after rounding to 1 decimal still gets flagged correctly.
     warnings = list(rendered.warnings)
     if length_mm_raw < MIN_FEED_MM:
         warnings.append(
@@ -170,8 +175,9 @@ def _render_and_encode(
                 severity="info",
                 message=(
                     f"this label is {round(length_mm_raw, 1):g}mm long; the printer's "
-                    f"minimum feed is {MIN_FEED_MM:g}mm, so it will still consume "
-                    f"{MIN_FEED_MM:g}mm of tape."
+                    f"minimum feed is {MIN_FEED_MM:g}mm, so it will consume at least "
+                    f"{MIN_FEED_MM:g}mm of tape (see /api/print/estimate for the full "
+                    "job estimate)."
                 ),
             )
         )
