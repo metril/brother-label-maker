@@ -1,17 +1,24 @@
-"""GET /api/label-types, GET /api/fonts, GET /api/tapes, POST /api/render/preview.
+"""GET /api/label-types, GET /api/fonts, GET /api/tapes, POST /api/render/preview,
+POST /api/render/expand, POST /api/serialize/csv.
 
 Preview and print are the same bitmap (see labelmaker.render's module
-docstring) -- this endpoint runs the exact same render_definition ->
+docstring) -- /render/preview runs the exact same render_definition ->
 rasterize -> preview_png pipeline the print worker will later run for the
 same definition, just synchronously and without persisting a job.
+/render/expand and /serialize/csv (task 2.4) are pure data-shaping
+endpoints in support of BarTender-model serialization -- neither one
+renders anything; see labelmaker.render.serialize's module docstring for
+the expansion model itself.
 """
 
 from __future__ import annotations
 
 import base64
+import csv
+import io
 
 import anyio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -26,8 +33,24 @@ from labelmaker.render import (
     render_definition,
 )
 from labelmaker.render.document import LabelDefinition, family_name
+from labelmaker.render.serialize import (
+    Sequence,
+    distinct_pairs,
+    expand_definition,
+    expand_tokens,
+    ordered_values,
+    sequence_values,
+    total_labels,
+)
 
 router = APIRouter(tags=["labels"])
+
+# /render/expand's `samples` cap ("first 24 max, for UI chips" -- brief).
+_MAX_SAMPLES = 24
+# /serialize/csv's row cap -- mirrors Sequence's own kind=csv 1-500 row
+# range (serialize.py's _MAX_CSV_ROWS) so an upload that would fail
+# Sequence validation later fails loudly here instead.
+_MAX_CSV_UPLOAD_ROWS = 500
 
 
 @router.get("/label-types")
@@ -72,10 +95,31 @@ async def get_tapes() -> list[TapeInfo]:
 class PreviewRequest(BaseModel):
     definition: LabelDefinition
     scale: int = Field(default=2, ge=1, le=8)
+    # task 2.4: when set, `definition` is treated as the TEMPLATE and
+    # `index` selects which of serialization's expanded labels to render
+    # (see expand_definition) -- mirrors POST /api/print's template +
+    # serialization split (router_print.py), so a caller can preview any
+    # instance of a serialized run before committing to a print job.
+    serialization: Sequence | None = None
+    index: int = Field(default=0, ge=0)
 
 
-def _render_and_encode(definition: LabelDefinition, scale: int) -> dict:
-    rendered = render_definition(definition)
+def _render_and_encode(
+    definition: LabelDefinition, scale: int, serialization: Sequence | None, index: int
+) -> dict:
+    total_labels_: int | None = None
+    sequence_value: str | None = None
+    target = definition
+
+    if serialization is not None:
+        bound = expand_definition(definition.model_dump(mode="json"), serialization)
+        total_labels_ = len(bound)
+        if index >= total_labels_:
+            raise ValueError(f"index {index} is out of range for {total_labels_} label(s)")
+        sequence_value = ordered_values(serialization)[index]
+        target = LabelDefinition.model_validate(bound[index])
+
+    rendered = render_definition(target)
     img: Image.Image = rasterize(rendered)
     png_bytes = preview_png(img, scale=scale)
     return {
@@ -88,16 +132,119 @@ def _render_and_encode(definition: LabelDefinition, scale: int) -> dict:
         "png_height_px": img.height * scale,
         "length_mm": round(dots_to_mm(rendered.width_px), 1),
         "warnings": rendered.warnings,
+        "total_labels": total_labels_,
+        "sequence_value": sequence_value,
     }
 
 
 @router.post("/render/preview")
 async def render_preview(body: PreviewRequest) -> dict:
     try:
-        return await anyio.to_thread.run_sync(_render_and_encode, body.definition, body.scale)
+        return await anyio.to_thread.run_sync(
+            _render_and_encode, body.definition, body.scale, body.serialization, body.index
+        )
     except (KeyError, ValueError) as exc:
         # ValueError also catches pydantic.ValidationError (a subclass) from
         # renderer.Params.model_validate() inside render_definition -- an
         # invalid `params` payload for the chosen label type surfaces here
-        # the same way an unknown type/tape does.
+        # the same way an unknown type/tape does. Also covers
+        # expand_definition's own ValueErrors (ALPHA under/overflow,
+        # unknown {csv.<col>}) and the out-of-range `index` check above.
         raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+
+
+class ExpandRequest(BaseModel):
+    serialization: Sequence
+    sample: str | None = None
+
+
+def _expand_preview(serialization: Sequence, sample: str | None) -> dict:
+    result: dict = {
+        "values": sequence_values(serialization),
+        "total_labels": total_labels(serialization),
+        "samples": None,
+    }
+    if sample is not None:
+        # Distinct values only (NOT the copies_per_value-multiplied,
+        # collated run expand_definition produces) -- these are "what does
+        # each distinct value look like substituted in", for UI chips, not
+        # a preview of the full print run. Capped at _MAX_SAMPLES
+        # regardless of how many distinct values there are.
+        result["samples"] = [
+            expand_tokens(sample, value, row)
+            for value, row in distinct_pairs(serialization)[:_MAX_SAMPLES]
+        ]
+    return result
+
+
+@router.post("/render/expand")
+async def expand_sequence(body: ExpandRequest) -> dict:
+    try:
+        return _expand_preview(body.serialization, body.sample)
+    except (KeyError, ValueError) as exc:
+        # ValueError covers ALPHA under/overflow (sequence_values) and an
+        # unknown {csv.<col>} in `sample` (expand_tokens) -- Sequence's own
+        # structural constraints (bad kind-specific requirements, the
+        # total-labels cap, etc.) already 422 automatically via FastAPI's
+        # request-body validation before this handler even runs.
+        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+
+
+@router.post("/serialize/csv")
+async def upload_serialize_csv(file: UploadFile) -> dict:
+    """Stateless CSV echo for task 2.4's CSV-kind Sequence: parses an
+    uploaded CSV with stdlib `csv`, into the same {columns, rows, row_count}
+    shape the frontend (2.11) turns around and posts back as
+    Sequence(kind=csv, rows=...). Nothing is persisted here -- the frontend
+    holds the parsed rows client-side until the user submits a print/preview
+    request that embeds them.
+    """
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"CSV file is not valid UTF-8: {exc}") from exc
+
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header = [column.strip() for column in next(reader)]
+    except StopIteration:
+        raise HTTPException(status_code=422, detail="CSV file is empty") from None
+    if not header or any(column == "" for column in header):
+        raise HTTPException(
+            status_code=422, detail="CSV header row must have non-empty column names"
+        )
+
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for column in header:
+        if column in seen:
+            duplicates.add(column)
+        seen.add(column)
+    if duplicates:
+        raise HTTPException(
+            status_code=422, detail=f"duplicate CSV column(s): {sorted(duplicates)}"
+        )
+
+    rows: list[dict[str, str]] = []
+    for line_no, raw_row in enumerate(reader, start=2):
+        if not raw_row:  # a genuinely blank line -- not a ragged row
+            continue
+        if len(raw_row) != len(header):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"
+                ),
+            )
+        rows.append(dict(zip(header, raw_row, strict=True)))
+
+    if not rows:
+        raise HTTPException(status_code=422, detail="CSV file has no data rows")
+    if len(rows) > _MAX_CSV_UPLOAD_ROWS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"CSV file has {len(rows)} data rows, maximum is {_MAX_CSV_UPLOAD_ROWS}",
+        )
+
+    return {"columns": header, "rows": rows, "row_count": len(rows)}

@@ -18,6 +18,7 @@ from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_mes
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.render import render_definition
 from labelmaker.render.document import LabelDefinition
+from labelmaker.render.serialize import Sequence, expand_definition
 
 router = APIRouter(prefix="/print", tags=["print"])
 
@@ -31,6 +32,14 @@ class PrintOptions(BaseModel):
 class PrintRequest(BaseModel):
     labels: list[LabelDefinition] = Field(min_length=1, max_length=100)
     options: PrintOptions = Field(default_factory=PrintOptions)
+    # task 2.4: when set, `labels` must be exactly ONE template definition
+    # (checked in create_print_job below) -- the job snapshot stores that
+    # template + this spec UNEXPANDED (see create_print_job's db.
+    # create_print_job call), and jobs/worker.py expands via
+    # expand_definition() at render time. Reprint therefore re-derives the
+    # same N labels from the same (template, serialization) pair rather
+    # than replaying a persisted, already-expanded list.
+    serialization: Sequence | None = None
 
 
 def _validate_render_side(labels: list[LabelDefinition]) -> None:
@@ -44,12 +53,48 @@ def _validate_render_side(labels: list[LabelDefinition]) -> None:
         render_definition(defn)
 
 
+def _validate_serialized_print(template: LabelDefinition, serialization: Sequence) -> list[dict]:
+    """task 2.4's serialized-print pre-flight: expand `template` now (still
+    no resvg call) so an ALPHA run stepping below 'A'/beyond 'ZZZ' or an
+    unknown {csv.<col>} in the template comes back as an immediate 422,
+    the same "fail before the job is even queued" guarantee
+    _validate_render_side gives the non-serialized path -- rather than a
+    job that gets queued, dequeued, and only THEN fails. Also
+    render_definition()-validates every expanded label (same per-label
+    check _validate_render_side does), and returns the expanded bound
+    definitions so the caller (create_print_job) gets an accurate
+    label_count without a second expansion pass.
+    """
+    bound = expand_definition(template.model_dump(mode="json"), serialization)
+    for raw in bound:
+        render_definition(LabelDefinition.model_validate(raw))
+    return bound
+
+
 @router.post("", status_code=202)
 async def create_print_job(body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep) -> dict:
-    try:
-        await anyio.to_thread.run_sync(_validate_render_side, body.labels)
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+    if body.serialization is not None:
+        if len(body.labels) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "print requests with `serialization` must contain exactly one "
+                    f"template label, got {len(body.labels)}"
+                ),
+            )
+        try:
+            bound = await anyio.to_thread.run_sync(
+                _validate_serialized_print, body.labels[0], body.serialization
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        label_count = len(bound)
+    else:
+        try:
+            await anyio.to_thread.run_sync(_validate_render_side, body.labels)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        label_count = len(body.labels)
 
     tapes = {(label.tape.width_mm, label.tape.family) for label in body.labels}
     if len(tapes) > 1:
@@ -57,9 +102,14 @@ async def create_print_job(body: PrintRequest, db: DbDep, queue: QueueDep, bus: 
             status_code=422, detail="all labels in a print job must share the same tape"
         )
 
+    # `body.model_dump` snapshots `labels`/`serialization` exactly as
+    # posted -- for a serialized job that's [template] + the Sequence spec,
+    # UNEXPANDED (the brief's DECIDED contract: reprint re-expands from
+    # this snapshot via jobs/worker.py, rather than replaying an already-
+    # expanded list persisted at POST time).
     job = await db.create_print_job(
         definition=body.model_dump(mode="json"),
-        label_count=len(body.labels),
+        label_count=label_count,
         chain_mode=body.options.chain_mode.value,
     )
     job_id = job["id"]

@@ -29,6 +29,7 @@ from labelmaker.driver.transport import (
 )
 from labelmaker.render import preview_png, rasterize, render_definition
 from labelmaker.render.document import LabelDefinition
+from labelmaker.render.serialize import Sequence, expand_definition
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,23 @@ async def _process_job(state, job_id: str) -> None:
     await bus.broadcast({"event": "job.started", "job_id": job_id})
 
     try:
-        labels = job["definition"]["labels"]
-        options = job["definition"].get("options", {})
-        definitions = [LabelDefinition.model_validate(label) for label in labels]
+        definition = job["definition"]
+        labels = definition["labels"]
+        options = definition.get("options", {})
+        serialization = definition.get("serialization")
+
+        if serialization is not None:
+            # task 2.4: the snapshot holds exactly ONE template label (see
+            # router_print.py's create_print_job, which enforces that at
+            # POST time) plus the Sequence spec, UNEXPANDED -- re-expand
+            # HERE, at render time, not at POST time, so reprint is
+            # reproducible from the same (template, spec) pair without
+            # ever having persisted N separate label definitions.
+            seq = Sequence.model_validate(serialization)
+            bound = expand_definition(labels[0], seq)
+            definitions = [LabelDefinition.model_validate(raw) for raw in bound]
+        else:
+            definitions = [LabelDefinition.model_validate(label) for label in labels]
 
         images = await anyio.to_thread.run_sync(_render_all, definitions)
 

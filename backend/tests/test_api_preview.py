@@ -16,12 +16,21 @@ from PIL import Image
 from labelmaker.driver.geometry import dots_to_mm
 from labelmaker.render import preview_png, rasterize, render_definition
 from labelmaker.render.document import LabelDefinition
+from labelmaker.render.serialize import Sequence, expand_definition
 
 _HELLO_DEFINITION = {
     "type": "text",
     "tape": {"width_mm": 24, "family": "tze"},
     "params": {"lines": ["HELLO"]},
 }
+
+_SERIAL_TEMPLATE = {
+    "type": "text",
+    "tape": {"width_mm": 24, "family": "tze"},
+    "params": {"lines": ["Port {seq}"]},
+}
+
+_NUMERIC_1_TO_3 = {"kind": "numeric", "start": 1, "step": 1, "count": 3}
 
 
 async def test_preview_returns_expected_scaled_png_byte_equal_to_direct_pipeline(client):
@@ -119,3 +128,104 @@ async def test_preview_divided_blocks_engine_value_error_returns_422_with_messag
     detail = resp.json()["detail"]
     assert "1200.0mm" in detail
     assert "1000.0" in detail
+
+
+# --- task 2.4: `serialization` + `index` -----------------------------------
+
+
+async def test_preview_without_serialization_has_null_total_labels_and_sequence_value(client):
+    resp = await client.post(
+        "/api/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 1}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_labels"] is None
+    assert body["sequence_value"] is None
+
+
+async def test_preview_serialization_index_0_byte_parity(client):
+    resp = await client.post(
+        "/api/render/preview",
+        json={"definition": _SERIAL_TEMPLATE, "scale": 1, "serialization": _NUMERIC_1_TO_3},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_labels"] == 3
+    assert body["sequence_value"] == "1"
+
+    seq = Sequence.model_validate(_NUMERIC_1_TO_3)
+    bound = expand_definition(_SERIAL_TEMPLATE, seq)
+    expected_rendered = render_definition(LabelDefinition.model_validate(bound[0]))
+    expected_png = preview_png(rasterize(expected_rendered), scale=1)
+    assert base64.b64decode(body["png_b64"]) == expected_png
+
+
+async def test_preview_serialization_index_mid_matches_that_labels_value(client):
+    resp = await client.post(
+        "/api/render/preview",
+        json={
+            "definition": _SERIAL_TEMPLATE,
+            "scale": 1,
+            "serialization": _NUMERIC_1_TO_3,
+            "index": 1,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sequence_value"] == "2"
+
+    seq = Sequence.model_validate(_NUMERIC_1_TO_3)
+    bound = expand_definition(_SERIAL_TEMPLATE, seq)
+    expected_rendered = render_definition(LabelDefinition.model_validate(bound[1]))
+    expected_png = preview_png(rasterize(expected_rendered), scale=1)
+    assert base64.b64decode(body["png_b64"]) == expected_png
+
+
+async def test_preview_serialization_index_out_of_range_returns_422(client):
+    resp = await client.post(
+        "/api/render/preview",
+        json={
+            "definition": _SERIAL_TEMPLATE,
+            "scale": 1,
+            "serialization": _NUMERIC_1_TO_3,
+            "index": 3,
+        },
+    )
+    assert resp.status_code == 422
+    assert "3" in resp.json()["detail"]
+
+
+async def test_preview_serialization_default_index_is_0(client):
+    resp = await client.post(
+        "/api/render/preview",
+        json={"definition": _SERIAL_TEMPLATE, "scale": 1, "serialization": _NUMERIC_1_TO_3},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["sequence_value"] == "1"
+
+
+async def test_preview_serialization_with_csv_binds_row_columns(client):
+    template = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["{csv.name}"]},
+    }
+    serialization = {
+        "kind": "csv",
+        "rows": [{"name": "Alice"}, {"name": "Bob"}],
+    }
+    resp = await client.post(
+        "/api/render/preview",
+        json={"definition": template, "scale": 1, "serialization": serialization, "index": 1},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_labels"] == 2
+
+    seq = Sequence.model_validate(serialization)
+    bound = expand_definition(template, seq)
+    assert bound[1]["params"]["lines"] == ["Bob"]
+    expected_png = preview_png(
+        rasterize(render_definition(LabelDefinition.model_validate(bound[1]))), scale=1
+    )
+    assert base64.b64decode(body["png_b64"]) == expected_png

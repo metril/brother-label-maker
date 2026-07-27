@@ -26,6 +26,7 @@ from labelmaker.driver.strategies import get_strategy
 from labelmaker.driver.transport import MockPrinterTransport
 from labelmaker.render import rasterize, render_definition
 from labelmaker.render.document import LabelDefinition
+from labelmaker.render.serialize import Sequence, expand_definition
 
 # The mock transport always answers with REFERENCE_STATUS_BLOCK: 24mm,
 # undecoded media type -> print_images assumes TZe. Every label definition
@@ -402,6 +403,113 @@ async def test_print_rejects_invalid_label_definition_with_422(client):
 async def test_print_rejects_empty_labels_list_with_422(client):
     resp = await client.post("/api/print", json={"labels": []})
     assert resp.status_code == 422
+
+
+# --- 5b. task 2.4: serialization -- template + Sequence, server-side expansion ---
+
+
+def _serial_template(text: str = "Port {seq}") -> dict:
+    return {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": [text]},
+    }
+
+
+async def test_print_with_serialization_e2e_label_count_and_stream_byte_parity(app_and_client):
+    app, client = app_and_client
+    serialization = {"kind": "list", "values": ["A", "B", "C"], "copies_per_value": 1}
+
+    resp = await client.post(
+        "/api/print",
+        json={
+            "labels": [_serial_template()],
+            "serialization": serialization,
+            "options": {"chain_mode": "cut_each"},
+        },
+    )
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    job = await _wait_for_terminal_job(client, job_id)
+    assert job["status"] == "done", job["error"]
+    # label_count reflects the EXPANDED total (3 distinct x 1 copy), not
+    # the single template entry `labels` was posted with.
+    assert job["label_count"] == 3
+
+    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    assert stream_resp.status_code == 200
+
+    # Byte-parity against an in-test expand_definition() + render/rasterize
+    # + build_job() pipeline -- identical to what jobs/worker.py does, and
+    # to this file's own non-serialized parity tests (see module docstring)
+    # -- this also pins expand_definition's COPIES_ADJACENT/default
+    # collation ORDER, since build_job concatenates images in list order.
+    config = app.state.config
+    seq = Sequence.model_validate(serialization)
+    bound = expand_definition(_serial_template(), seq)
+    images = [rasterize(render_definition(LabelDefinition.model_validate(d))) for d in bound]
+    expected = build_job(
+        images,
+        _TAPE_24MM_TZE,
+        get_strategy(config.printer_init_strategy),
+        _expected_job_options(config, ChainMode.CUT_EACH),
+    )
+    assert stream_resp.content == expected.data
+
+    # The DB snapshot stores the TEMPLATE + spec UNEXPANDED (task 2.4's
+    # DECIDED contract), not the 3 already-expanded labels.
+    job_resp = await client.get(f"/api/print/jobs/{job_id}")
+    definition = job_resp.json()["definition"]
+    assert len(definition["labels"]) == 1
+    assert definition["labels"][0]["params"]["lines"] == ["Port {seq}"]
+    assert definition["serialization"]["kind"] == "list"
+    assert definition["serialization"]["values"] == ["A", "B", "C"]
+
+
+async def test_print_serialization_requires_exactly_one_template_label(client):
+    resp = await client.post(
+        "/api/print",
+        json={
+            "labels": [_text_label("ONE"), _text_label("TWO")],
+            "serialization": {"kind": "list", "values": ["A", "B"]},
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_print_serialization_alpha_underflow_rejected_before_queueing(client, app_and_client):
+    # A sequence that can't actually expand (ALPHA stepping below 'A') must
+    # fail the POST itself with a 422 -- never reach "queued" at all, the
+    # same "cheap validation happens before 202" guarantee
+    # _validate_render_side gives the non-serialized path.
+    app, _ = app_and_client
+    db = app.state.db
+    before = await db.list_jobs(page_size=1000)
+
+    resp = await client.post(
+        "/api/print",
+        json={
+            "labels": [_serial_template("{seq}")],
+            "serialization": {"kind": "alpha", "alpha_start": "A", "step": -1, "count": 2},
+        },
+    )
+    assert resp.status_code == 422
+
+    after = await db.list_jobs(page_size=1000)
+    assert after["total"] == before["total"]  # nothing was ever persisted
+
+
+async def test_print_serialization_csv_unknown_column_rejected_before_queueing(client):
+    resp = await client.post(
+        "/api/print",
+        json={
+            "labels": [_serial_template("{csv.missing}")],
+            "serialization": {"kind": "csv", "rows": [{"port": "1"}]},
+        },
+    )
+    assert resp.status_code == 422
+    assert "missing" in resp.json()["detail"]
 
 
 # --- 6. Unknown job id: 404s ---
