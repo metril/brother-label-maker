@@ -7,11 +7,16 @@ and general-purpose categories for label icons (task 2.7).
 - Source: [google/material-design-icons](https://github.com/google/material-design-icons),
   commit `528cb964c01fb2b09bc3b9208f82b6d8f8c1c1e2` (`master` at download
   time), path `symbols/web/<icon>/materialsymbolsoutlined/<icon>_24px.svg`.
-- License: **Apache License 2.0** (see the repo's own `LICENSE` file,
-  reproduced in full at that same commit;
+- License: **Apache License 2.0** (upstream's own `LICENSE` file at that
+  same commit:
   <https://github.com/google/material-design-icons/blob/528cb964c01fb2b09bc3b9208f82b6d8f8c1c1e2/LICENSE>).
-  Apache-2.0 requires only attribution + license inclusion, no copyleft --
-  this file plus this project's own top-level license serve that purpose.
+  Apache-2.0 §4(a) requires that any redistribution "must give any other
+  recipients ... a copy of this License" -- satisfied by
+  [`LICENSE-APACHE-2.0.txt`](./LICENSE-APACHE-2.0.txt) in this SAME
+  directory (the license text itself, fetched from that exact commit, byte
+  for byte), NOT a top-level project license (this repository does not
+  currently have one -- a coordinator review caught this file previously
+  claiming otherwise, a stale assumption from before that was checked).
 
 ## Normalization (why these files differ from the raw download)
 

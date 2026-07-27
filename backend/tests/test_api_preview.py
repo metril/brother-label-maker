@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import base64
 import io
+import uuid
 
+import pytest
 from PIL import Image
 
 from labelmaker.driver.geometry import dots_to_mm
@@ -268,10 +270,11 @@ async def test_preview_text_with_image_icon_resolves_via_app_data_dir(client):
 
 
 async def test_preview_text_with_unknown_image_icon_returns_422(client):
+    unknown_id = uuid.uuid4().hex  # well-formed (matches IMAGE_ID_RE), never uploaded
     definition = {
         "type": "text",
         "tape": {"width_mm": 24, "family": "tze"},
-        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": "no-such-id"}},
+        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": unknown_id}},
     }
     resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 422
@@ -287,6 +290,56 @@ async def test_preview_text_with_unknown_symbol_icon_returns_422(client):
     resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 422
     assert "unknown symbol id" in resp.json()["detail"]
+
+
+# --- SECURITY (coordinator-review-caught CRITICAL bug): a malformed/path- --
+# escaping image_id must 422, never 200 with an arbitrary local file
+# rendered into the response, never a raw 500. See render/images.py's
+# module docstring and test_images.py's section 7 for the full writeup;
+# these tests pin the fix through the REAL HTTP endpoint an attacker would
+# actually use (a bare request body, not necessarily anything POST
+# /api/images ever minted).
+
+
+@pytest.mark.parametrize(
+    "malicious_image_id",
+    [
+        "/etc/passwd",  # absolute path
+        "../../etc/passwd",  # relative traversal
+        "..",  # bare traversal segment
+        "a/b",  # embedded slash (symlink-ish / nested-path attempt)
+    ],
+)
+async def test_preview_text_with_malicious_image_icon_id_returns_422_not_200(
+    client, malicious_image_id
+):
+    definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["X"], "icon": {"kind": "image", "image_id": malicious_image_id}},
+    }
+    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    assert resp.status_code == 422
+    assert "invalid image_id" in resp.json()["detail"]
+
+
+async def test_preview_text_with_absolute_path_image_id_does_not_leak_file_contents(
+    client, tmp_path
+):
+    # Concrete proof, not just a status-code check: a real secret file
+    # placed OUTSIDE data_dir/uploads/ must never appear in the response.
+    secret = tmp_path / "secret.png"
+    Image.new("RGB", (5, 5), (1, 2, 3)).save(secret, format="PNG")
+    malicious_id = str(secret)[: -len(".png")]
+
+    definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["X"], "icon": {"kind": "image", "image_id": malicious_id}},
+    }
+    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    assert resp.status_code == 422
+    assert str(secret) not in resp.text
 
 
 def _png_bytes(width: int = 20, height: int = 10) -> bytes:

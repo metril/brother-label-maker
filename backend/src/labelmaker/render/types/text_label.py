@@ -302,9 +302,29 @@ class TextLabelRenderer(LabelRenderer):
         text_body = "".join(text_elements)
 
         if needs_clip:
+            # Coordinator review fix-up: this clip rect used to start at
+            # x=0 (the whole canvas) -- correct for LEFT-aligned overflow
+            # (anchor="start" at content_left_px only ever extends
+            # RIGHTWARD, so it can never bleed left of the content edge
+            # anyway), but WRONG for center/right-aligned overflow: a
+            # center anchor extends BOTH directions from its midpoint, and
+            # a right anchor (anchor="end") extends leftward from
+            # width_px-padding_px -- either can spill ink past
+            # content_left_px, INTO the icon's reserved square, with only
+            # this clip-path standing between "truncated text" and "text
+            # drawn on top of the icon" (measured directly: 590/749
+            # text-ink pixels landed inside the icon square before this
+            # fix, for a center-aligned overflow case). Starting the clip
+            # at content_left_px instead of 0 closes that gap -- and, since
+            # content_left_px reduces to padding_px exactly when there's no
+            # icon (see module docstring), this is a strict tightening of
+            # the SAME bug for the no-icon case too (center/right overflow
+            # could already bleed into the left padding margin), not a
+            # new icon-only special case.
             clip_defs = (
                 f'<defs><clipPath id="{_CLIP_ID}">'
-                f'<rect x="0" y="0" width="{width_px}" height="{height_px}"/>'
+                f'<rect x="{content_left_px}" y="0" '
+                f'width="{max(0, width_px - content_left_px)}" height="{height_px}"/>'
                 f"</clipPath></defs>"
             )
             text_body = f'{clip_defs}<g clip-path="url(#{_CLIP_ID})">{text_body}</g>'

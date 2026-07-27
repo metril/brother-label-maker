@@ -12,6 +12,7 @@ import asyncio
 import base64
 import io
 import logging
+import uuid
 
 import anyio
 import pytest
@@ -582,14 +583,46 @@ async def test_print_unknown_image_icon_rejected_before_queueing(client, app_and
     db = app.state.db
     before = await db.list_jobs(page_size=1000)
 
+    unknown_id = uuid.uuid4().hex  # well-formed (matches IMAGE_ID_RE), never uploaded
     label = {
         "type": "text",
         "tape": {"width_mm": 24, "family": "tze"},
-        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": "no-such-id"}},
+        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": unknown_id}},
     }
     resp = await client.post("/api/print", json={"labels": [label]})
     assert resp.status_code == 422
     assert "unknown image_id" in resp.json()["detail"]
+
+    after = await db.list_jobs(page_size=1000)
+    assert after["total"] == before["total"]  # nothing was ever persisted
+
+
+# --- SECURITY (coordinator-review-caught CRITICAL bug): a malformed/path- --
+# escaping image_id must 422 BEFORE a job is ever queued, never 200/202
+# with an arbitrary local file printed, never a raw 500. See
+# render/images.py's module docstring and test_images.py's section 7 for
+# the full writeup; pinned here through the REAL /api/print endpoint.
+
+
+@pytest.mark.parametrize(
+    "malicious_image_id",
+    ["/etc/passwd", "../../etc/passwd", "..", "a/b"],
+)
+async def test_print_with_malicious_image_icon_id_rejected_before_queueing(
+    client, app_and_client, malicious_image_id
+):
+    app, _ = app_and_client
+    db = app.state.db
+    before = await db.list_jobs(page_size=1000)
+
+    label = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["X"], "icon": {"kind": "image", "image_id": malicious_image_id}},
+    }
+    resp = await client.post("/api/print", json={"labels": [label]})
+    assert resp.status_code == 422
+    assert "invalid image_id" in resp.json()["detail"]
 
     after = await db.list_jobs(page_size=1000)
     assert after["total"] == before["total"]  # nothing was ever persisted

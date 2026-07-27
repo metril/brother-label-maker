@@ -44,7 +44,6 @@ codebase uses 413).
 from __future__ import annotations
 
 import io
-import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
@@ -53,7 +52,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from labelmaker.api.deps import AppConfigDep
-from labelmaker.render.images import image_path, uploads_dir
+from labelmaker.render.images import IMAGE_ID_RE, image_path, uploads_dir
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -61,15 +60,6 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 MAX_DECODED_PIXELS = 8_000_000  # 8MP
 _READ_CHUNK_BYTES = 1024 * 1024
 _ALLOWED_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
-
-# image_id is always a fresh uuid4().hex (see upload_image) -- validated on
-# every GET/DELETE lookup too, so a path-parameter value we did NOT
-# generate (a client can send anything as {image_id}) never gets treated as
-# anything other than "not found". FastAPI's default str path-param
-# matcher already can't contain '/' (so classic ../ traversal can't even
-# reach this handler as a single segment), but this is a second, explicit
-# belt-and-suspenders check independent of that routing behavior.
-_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 class ImageUploadResponse(BaseModel):
@@ -112,7 +102,15 @@ async def _read_capped(request: Request, file: UploadFile) -> bytes:
 
 
 def _validate_image_id(image_id: str) -> None:
-    if not _IMAGE_ID_RE.match(image_id):
+    """A path-parameter value we did NOT generate (a client can send
+    anything as {image_id}) is treated as "not found" here (404), not the
+    422 render/images.py's image_path() raises for the same shape mismatch
+    -- GET/DELETE lookups follow REST "the resource doesn't exist"
+    semantics, not "your request was malformed" ones. `IMAGE_ID_RE` itself
+    is imported from render.images (not redefined here) so this check and
+    image_path()'s own -- the actual filesystem-access guard, see that
+    module's docstring -- can never drift apart."""
+    if not IMAGE_ID_RE.match(image_id):
         raise HTTPException(status_code=404, detail="image not found")
 
 

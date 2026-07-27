@@ -6,6 +6,7 @@ is immediately what both the test assertions and the regen script use, with
 no second copy to remember to update.
 """
 
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,16 +33,27 @@ from labelmaker.render.types.text_label import ImageIcon, SymbolIcon, TextLabelP
 # than the raw device-dot bitmap), unrelated to any real API default.
 GOLDEN_SCALE = 4
 
-# task 2.7: `tests/fixtures/uploads/cam3_gradient.png` is a COMMITTED,
-# deterministically-generated (not random) synthetic diagonal gradient PNG
-# -- not something a real upload endpoint ever produced. Using this
-# directory AS a `data_dir` for image_object()'s `data_dir/uploads/
+# task 2.7: `tests/fixtures/uploads/{CAM3_GRADIENT_IMAGE_ID}.png` is a
+# COMMITTED, deterministically-generated (not random) synthetic diagonal
+# gradient PNG -- not something a real upload endpoint ever produced. Using
+# this directory AS a `data_dir` for image_object()'s `data_dir/uploads/
 # {image_id}.png` lookup (see render/images.py) means golden fixture (e)
 # below needs zero special-casing in image_object/text_label.py: it's just
 # an ordinary `icon.kind="image"` render pointed at a fixture "upload"
 # instead of a tmp_path one, which is what keeps the golden reproducible
 # (a real POST /api/images upload would mint a fresh random image_id every
 # run -- incompatible with a byte-locked golden).
+#
+# The id itself must be IMAGE_ID_RE-shaped (32 lowercase hex chars --
+# render/images.py's image_path() rejects anything else, a coordinator-
+# review-caught security fix: image_id is untrusted input on the render
+# path, see that module's docstring) -- generated once via a fixed,
+# reproducible uuid5 (NOT uuid4/random: this id is committed both as a
+# filename and in this source file, and must stay the same forever), not
+# something a human picked by hand.
+CAM3_GRADIENT_IMAGE_ID = uuid.uuid5(
+    uuid.NAMESPACE_URL, "labelmaker/tests/fixtures/cam3_gradient"
+).hex
 FIXTURES_DATA_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
@@ -85,12 +97,12 @@ FIXTURES: tuple[GoldenFixture, ...] = (
     # for render/images.py's mode="dither" + rasterize.py's per-ObjectRegion
     # Floyd-Steinberg mechanism (task 1.2's mechanism, exercised here for
     # the first time through an actual label type, not a synthetic SVG).
-    # `data_dir=FIXTURES_DATA_DIR` (see above) resolves image_id
-    # "cam3_gradient" against the committed fixture file, not a real upload.
+    # `data_dir=FIXTURES_DATA_DIR` (see above) resolves CAM3_GRADIENT_IMAGE_ID
+    # against the committed fixture file, not a real upload.
     GoldenFixture(
         name="text_cam3_dithered_icon_24mm",
         params=TextLabelParams(
-            lines=["CAM-3"], icon=ImageIcon(image_id="cam3_gradient", mode="dither")
+            lines=["CAM-3"], icon=ImageIcon(image_id=CAM3_GRADIENT_IMAGE_ID, mode="dither")
         ),
         tape_mm=24,
         data_dir=FIXTURES_DATA_DIR,

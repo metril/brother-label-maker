@@ -1,5 +1,6 @@
 """Tests for labelmaker.render.types.text_label: the "text" label type."""
 
+import uuid
 from pathlib import Path
 
 import pytest
@@ -508,20 +509,61 @@ def test_symbol_icon_wider_than_fixed_length_raises_value_error_not_silent_clip(
         )
 
 
-def test_symbol_icon_fixed_length_exactly_at_minimum_required_succeeds():
-    tape = _tape(24)  # print_dots == 128
+def _min_required_px_for_icon(tape) -> int:
+    """content_left_px + padding_px on `tape` with default padding_mm=2.0 --
+    the exact minimum `fixed_width_px` an icon-bearing label needs (icon +
+    its two padding gaps, with zero width left over for text)."""
     padding_px = mm_to_dots(2.0)
     icon_size_px = tape.print_dots - 2 * padding_px
     content_left_px = padding_px + icon_size_px + padding_px
-    min_required_px = content_left_px + padding_px  # icon + gap + right padding, zero text
-    # dots_to_mm is the exact (unrounded) inverse of mm_to_dots -- add a
-    # small margin so re-rounding length_mm back to dots via mm_to_dots
-    # (round-half-up) can never land one dot BELOW min_required_px.
-    length_mm = dots_to_mm(min_required_px) + 0.1
+    return content_left_px + padding_px
+
+
+def _exact_mm_for_dots(target_dots: int) -> float:
+    """The `length_mm` that `mm_to_dots()` maps back to EXACTLY
+    `target_dots` -- `dots_to_mm()` is `mm_to_dots()`'s precise (unrounded)
+    inverse, and (per direct verification, see test below) round-trips
+    exactly here, so tests can hit a specific dot-count boundary exactly
+    rather than padding with an arbitrary safety margin that might land on
+    the wrong side of a rounding boundary without anyone noticing."""
+    mm = dots_to_mm(target_dots)
+    assert mm_to_dots(mm) == target_dots, (
+        f"dots_to_mm/mm_to_dots did not round-trip exactly for {target_dots} dots -- "
+        "this test's premise (exact boundary hits) no longer holds"
+    )
+    return mm
+
+
+def test_symbol_icon_fixed_length_exactly_at_minimum_required_succeeds():
+    # Coordinator review fix-up: the original version of this test used
+    # dots_to_mm(min_required_px) + 0.1, a fudge margin that (after
+    # re-rounding through mm_to_dots) actually landed ONE DOT ABOVE the
+    # true minimum (143px, not 142px) -- it never actually exercised the
+    # boundary it claimed to. Now hits min_required_px exactly (self-
+    # verified by _exact_mm_for_dots' own round-trip assertion) and checks
+    # width_px == (not >=) the minimum.
+    tape = _tape(24)  # print_dots == 128
+    min_required_px = _min_required_px_for_icon(tape)
+    length_mm = _exact_mm_for_dots(min_required_px)
+
     label = TextLabelRenderer().render(
         TextLabelParams(lines=["X"], icon=SymbolIcon(id="bolt"), length_mm=length_mm), tape
     )
-    assert label.width_px >= min_required_px
+    assert label.width_px == min_required_px
+
+
+def test_symbol_icon_fixed_length_one_dot_below_minimum_required_raises():
+    # The other half of the boundary: one dot narrower than the exact
+    # minimum must still 422 (not silently succeed at a slightly smaller
+    # size -- there is no smaller icon to shrink to, see module docstring).
+    tape = _tape(24)
+    min_required_px = _min_required_px_for_icon(tape)
+    length_mm = _exact_mm_for_dots(min_required_px - 1)
+
+    with pytest.raises(ValueError, match="icon does not fit within the fixed label length"):
+        TextLabelRenderer().render(
+            TextLabelParams(lines=["X"], icon=SymbolIcon(id="bolt"), length_mm=length_mm), tape
+        )
 
 
 def test_symbol_icon_object_map_stays_empty():
@@ -543,11 +585,85 @@ def test_center_and_right_align_still_work_with_icon_present():
         assert f'text-anchor="{anchor}"' in label.svg
 
 
-def test_no_icon_render_is_byte_identical_to_pre_2_7_shape():
-    # icon=None must reduce every new content_left_px-based formula back to
-    # its original padding_px-only form exactly -- the whole existing golden
-    # suite already pins this indirectly, but this test makes the "no
-    # regression for the common case" property explicit and fast.
+# -- Coordinator review fix-up: overflowing center/right-aligned text used --
+# to render ON TOP of the icon (the fixed-length truncation clip-path
+# covered the whole canvas, x=0, not just the content region starting at
+# content_left_px -- center anchors extend both directions from their
+# midpoint, right anchors extend leftward, either could spill past the
+# icon's own reserved square with nothing stopping it). Measured directly
+# by the reviewer: 590/749 text-ink pixels landed inside the icon square
+# for a center-aligned overflow case. Verified here by comparing the exact
+# ink pattern INSIDE the icon's own reserved square between a render whose
+# text can't possibly overflow ("clean") and one that deliberately does
+# ("overflow") -- if the icon square is truly isolated from whatever the
+# text block does, those two sub-images must be pixel-IDENTICAL regardless
+# of alignment, since the icon's own rendering never depends on text
+# content. This is a stronger property than "zero ink" (works even for an
+# icon, like "bolt", that legitimately has ink close to its own edges) and
+# doesn't require hand-deriving which icon pixels are "the icon's own".
+
+
+def _icon_square_pixels(tape, icon, lines, h_align, font_size_px):
+    padding_px = mm_to_dots(2.0)
+    icon_size_px = tape.print_dots - 2 * padding_px
+    label = TextLabelRenderer().render(
+        TextLabelParams(
+            lines=lines,
+            icon=icon,
+            length_mm=40.0,
+            h_align=h_align,
+            font_size_px=font_size_px,
+        ),
+        tape,
+    )
+    img = rasterize(label)
+    pixels = [
+        img.getpixel((x, y))
+        for x in range(padding_px, padding_px + icon_size_px)
+        for y in range(padding_px, padding_px + icon_size_px)
+    ]
+    return pixels, label.warnings
+
+
+@pytest.mark.parametrize("h_align", ["center", "right"])
+def test_overflowing_text_never_draws_inside_the_icon_square(h_align):
+    tape = _tape(24)
+    icon = SymbolIcon(id="bolt")
+
+    clean_pixels, clean_warnings = _icon_square_pixels(
+        tape, icon, ["X"], h_align, font_size_px=20
+    )
+    assert clean_warnings == []
+
+    overflow_pixels, overflow_warnings = _icon_square_pixels(
+        tape, icon, ["A REALLY LONG OVERFLOWING LINE OF TEXT"], h_align, font_size_px=40
+    )
+    assert any(w.code == "text_truncated" for w in overflow_warnings)
+
+    assert overflow_pixels == clean_pixels, (
+        "icon square pixels changed when overflowing text was introduced -- "
+        "text is bleeding into the icon's reserved region"
+    )
+    # Also confirm this isn't a vacuous all-white comparison (the icon
+    # itself must actually have drawn some ink in its square).
+    assert any(p == 0 for p in clean_pixels)
+
+
+def test_no_icon_render_has_no_image_tag_and_empty_object_map():
+    # Coordinator review fix-up: this test's ORIGINAL name
+    # ("...is_byte_identical_to_pre_2_7_shape") overstated what it actually
+    # checked -- it never compared any bytes against anything, just these
+    # two structural properties. The REAL byte-identity guarantee for the
+    # no-icon case lives in test_golden_matches_committed_png:
+    # FIXTURES' first three entries (text_hello_inter_24mm,
+    # text_two_line_robotocondensed_bold_12mm,
+    # text_port01_jetbrainsmono_fixed40mm_left_24mm) are all icon=None and
+    # were committed BEFORE this task -- their golden PNGs are byte-
+    # unchanged (verified via `git status` showing zero diff to any
+    # pre-existing golden after this task's regen), which IS the
+    # machine-checked "icon=None reduces to the exact pre-2.7 pixels"
+    # proof; this test just adds a fast, non-golden sanity check of the
+    # two properties named above.
     tape = _tape(24)
     label = TextLabelRenderer().render(TextLabelParams(lines=["HELLO"]), tape)
     assert label.object_map == []
@@ -557,9 +673,13 @@ def test_no_icon_render_is_byte_identical_to_pre_2_7_shape():
 # -- image icon: layout + threshold/dither ------------------------------------
 
 
-def _put_upload(data_dir: Path, image_id: str, img: Image.Image) -> None:
+def _put_upload(data_dir: Path, img: Image.Image) -> str:
+    """Writes `img` under a fresh, validly-shaped image_id (uuid4().hex,
+    the same shape POST /api/images mints) and returns that id."""
+    image_id = uuid.uuid4().hex
     uploads_dir(data_dir).mkdir(parents=True, exist_ok=True)
     img.save(image_path(image_id, data_dir), format="PNG")
+    return image_id
 
 
 def _gradient(width: int, height: int) -> Image.Image:
@@ -572,10 +692,10 @@ def _gradient(width: int, height: int) -> Image.Image:
 
 
 def test_image_icon_threshold_mode_renders(tmp_path):
-    _put_upload(tmp_path, "logo", _gradient(40, 40))
+    image_id = _put_upload(tmp_path, _gradient(40, 40))
     tape = _tape(24)
     label = TextLabelRenderer().render(
-        TextLabelParams(lines=["CAM-3"], icon=ImageIcon(image_id="logo")),
+        TextLabelParams(lines=["CAM-3"], icon=ImageIcon(image_id=image_id)),
         tape,
         data_dir=tmp_path,
     )
@@ -584,12 +704,12 @@ def test_image_icon_threshold_mode_renders(tmp_path):
 
 
 def test_image_icon_dither_mode_adds_offset_object_region(tmp_path):
-    _put_upload(tmp_path, "logo", _gradient(40, 40))
+    image_id = _put_upload(tmp_path, _gradient(40, 40))
     tape = _tape(24)  # print_dots == 128
     padding_px = mm_to_dots(2.0)
     icon_size_px = tape.print_dots - 2 * padding_px
     label = TextLabelRenderer().render(
-        TextLabelParams(lines=["CAM-3"], icon=ImageIcon(image_id="logo", mode="dither")),
+        TextLabelParams(lines=["CAM-3"], icon=ImageIcon(image_id=image_id, mode="dither")),
         tape,
         data_dir=tmp_path,
     )
@@ -601,10 +721,10 @@ def test_image_icon_dither_mode_adds_offset_object_region(tmp_path):
 
 
 def test_image_icon_dither_mode_rasterizes_with_scattered_pixels(tmp_path):
-    _put_upload(tmp_path, "logo", _gradient(200, 200))
+    image_id = _put_upload(tmp_path, _gradient(200, 200))
     tape = _tape(24)
     label = TextLabelRenderer().render(
-        TextLabelParams(lines=["CAM-3"], icon=ImageIcon(image_id="logo", mode="dither")),
+        TextLabelParams(lines=["CAM-3"], icon=ImageIcon(image_id=image_id, mode="dither")),
         tape,
         data_dir=tmp_path,
     )
@@ -621,26 +741,66 @@ def test_image_icon_missing_data_dir_raises_clear_error():
     tape = _tape(24)
     with pytest.raises(ValueError, match="data_dir"):
         TextLabelRenderer().render(
-            TextLabelParams(lines=["HI"], icon=ImageIcon(image_id="logo")), tape
+            TextLabelParams(lines=["HI"], icon=ImageIcon(image_id=uuid.uuid4().hex)), tape
         )  # data_dir omitted entirely
 
 
 def test_image_icon_unknown_id_raises_value_error(tmp_path):
     tape = _tape(24)
+    unknown_id = uuid.uuid4().hex  # well-formed, but never uploaded
     with pytest.raises(ValueError, match="unknown image_id"):
         TextLabelRenderer().render(
-            TextLabelParams(lines=["HI"], icon=ImageIcon(image_id="no-such-id")),
+            TextLabelParams(lines=["HI"], icon=ImageIcon(image_id=unknown_id)),
             tape,
             data_dir=tmp_path,
         )
 
 
 def test_image_icon_is_forced_square_regardless_of_source_aspect_ratio(tmp_path):
-    _put_upload(tmp_path, "wide", Image.new("RGB", (400, 100), "black"))  # 4:1 source
+    image_id = _put_upload(tmp_path, Image.new("RGB", (400, 100), "black"))  # 4:1 source
     tape = _tape(24)
     padding_px = mm_to_dots(2.0)
     expected_icon_size = tape.print_dots - 2 * padding_px
     label = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], icon=ImageIcon(image_id="wide")), tape, data_dir=tmp_path
+        TextLabelParams(lines=["HI"], icon=ImageIcon(image_id=image_id)),
+        tape,
+        data_dir=tmp_path,
     )
     assert f'width="{expected_icon_size}" height="{expected_icon_size}"' in label.svg
+
+
+# -- SECURITY: image_id must never escape data_dir/uploads/ (coordinator- --
+# review-caught CRITICAL bug -- see render/images.py's module docstring
+# and test_images.py's section 7 for the full writeup) -- pinned again
+# HERE, through the actual label-type render() path an attacker-controlled
+# LabelDefinition would really go through.
+
+
+def test_image_icon_absolute_path_image_id_rejected_not_rendered(tmp_path):
+    secret = tmp_path / "outside" / "secret.png"
+    secret.parent.mkdir(parents=True)
+    Image.new("RGB", (5, 5), "red").save(secret, format="PNG")
+    malicious_id = str(secret)[: -len(".png")]
+
+    tape = _tape(24)
+    with pytest.raises(ValueError, match="invalid image_id"):
+        TextLabelRenderer().render(
+            TextLabelParams(lines=["HI"], icon=ImageIcon(image_id=malicious_id)),
+            tape,
+            data_dir=tmp_path / "data",
+        )
+
+
+def test_image_icon_dotdot_traversal_image_id_rejected_not_rendered(tmp_path):
+    secret = tmp_path / "secret.png"
+    Image.new("RGB", (5, 5), "red").save(secret, format="PNG")
+    data_dir = tmp_path / "data"
+    uploads_dir(data_dir).mkdir(parents=True)
+
+    tape = _tape(24)
+    with pytest.raises(ValueError, match="invalid image_id"):
+        TextLabelRenderer().render(
+            TextLabelParams(lines=["HI"], icon=ImageIcon(image_id="../../secret")),
+            tape,
+            data_dir=data_dir,
+        )
