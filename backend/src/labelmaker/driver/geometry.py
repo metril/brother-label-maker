@@ -72,19 +72,21 @@ _TZE_ROWS: tuple[tuple[float, int, int, int], ...] = (
 )
 
 # HSe status widths are all UNVERIFIED: confirm at physical checkpoint.
+# (applies to every row in both _HSE_2_1_ROWS and _HSE_3_1_ROWS below.)
 _HSE_2_1_ROWS: tuple[tuple[float, int, int, int], ...] = (
-    (5.8, 40, 28, 6),
-    (8.8, 62, 48, 9),
-    (11.7, 82, 66, 12),
-    (17.7, 126, 106, 18),
-    (23.6, 168, 128, 24),
+    (5.8, 40, 28, 6),  # UNVERIFIED: confirm at physical checkpoint
+    (8.8, 62, 48, 9),  # UNVERIFIED: confirm at physical checkpoint
+    (11.7, 82, 66, 12),  # UNVERIFIED: confirm at physical checkpoint
+    (17.7, 126, 106, 18),  # UNVERIFIED: confirm at physical checkpoint
+    (23.6, 168, 128, 24),  # UNVERIFIED: confirm at physical checkpoint
 )
 
+# HSe status widths are all UNVERIFIED: confirm at physical checkpoint.
 _HSE_3_1_ROWS: tuple[tuple[float, int, int, int], ...] = (
-    (5.2, 36, 20, 5),
-    (9.0, 64, 44, 9),
-    (11.2, 80, 50, 11),
-    (21.0, 148, 120, 21),
+    (5.2, 36, 20, 5),  # UNVERIFIED: confirm at physical checkpoint
+    (9.0, 64, 44, 9),  # UNVERIFIED: confirm at physical checkpoint
+    (11.2, 80, 50, 11),  # UNVERIFIED: confirm at physical checkpoint
+    (21.0, 148, 120, 21),  # UNVERIFIED: confirm at physical checkpoint
 )
 
 _ALL_TAPES: tuple[TapeSpec, ...] = tuple(
