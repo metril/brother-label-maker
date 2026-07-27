@@ -18,31 +18,26 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Callable
 
 from PIL import Image, ImageDraw
 
-from labelmaker.driver.geometry import (
-    MIN_FEED_MM,
-    MediaFamily,
-    TapeSpec,
-    all_tapes,
-    dots_to_mm,
-    find_tape,
+from labelmaker.driver.geometry import MIN_FEED_MM, MediaFamily, TapeSpec, all_tapes, dots_to_mm
+from labelmaker.driver.job import JobOptions, JobStream, build_job
+from labelmaker.driver.printer import (
+    PrinterBusyError,
+    TapeNotFoundError,
+    print_images,
+    resolve_tape,
 )
-from labelmaker.driver.job import ChainMode, JobOptions, JobStream, build_job
+from labelmaker.driver.protocol import ChainMode
 from labelmaker.driver.raster import BitOrder, RasterConfig
 from labelmaker.driver.status import (
     E720BT_MODEL_CODE,
-    STATUS_LEN,
     PrinterStatus,
     StatusTimeoutError,
-    StatusType,
-    media_family_for,
-    parse_status,
     request_status,
 )
-from labelmaker.driver.strategies import ClassicStrategy, E310BTStrategy, InitStrategy
+from labelmaker.driver.strategies import STRATEGIES, InitStrategy, get_strategy
 from labelmaker.driver.transport import (
     PrinterNotFoundError,
     PyUsbTransport,
@@ -172,15 +167,6 @@ def build_pattern(name: str, print_dots: int) -> list[Image.Image]:
 
 _PERMISSIONS_HINT = "check the printer is plugged in, powered on, and you have USB permissions"
 
-_STRATEGIES: dict[str, Callable[[], InitStrategy]] = {
-    "classic": ClassicStrategy,
-    "e310bt": E310BTStrategy,
-}
-_CHAIN_MODES: dict[str, ChainMode] = {
-    "cut_each": ChainMode.CUT_EACH,
-    "chain_ff": ChainMode.CHAIN_FF,
-    "strip_marks": ChainMode.STRIP_MARKS,
-}
 _BIT_ORDERS: dict[str, BitOrder] = {
     "msb": BitOrder.MSB_FIRST,
     "lsb": BitOrder.LSB_FIRST,
@@ -248,14 +234,17 @@ def _find_tze_by_nominal(nominal_mm: float) -> TapeSpec:
     raise ValueError(f"no TZe TapeSpec for nominal width {nominal_mm}mm")
 
 
-def _build_stream(args: argparse.Namespace, tape: TapeSpec) -> JobStream:
-    """The one place a job stream gets assembled -- shared by the USB print
-    path and both capture entry points (`capture` and `print-test --capture`).
+def _resolve_job_inputs(
+    args: argparse.Namespace, tape: TapeSpec
+) -> tuple[InitStrategy, JobOptions, list[Image.Image]]:
+    """Shared by the capture path (`_build_stream`, which then calls
+    build_job directly) and the USB print path (`_run_usb_print`, which
+    passes these to printer.print_images instead).
     """
-    strategy = _STRATEGIES[args.strategy]()
+    strategy = get_strategy(args.strategy)
     chain_mode_key = args.chain_mode or _DEFAULT_CHAIN_MODE[args.pattern]
     options = JobOptions(
-        chain_mode=_CHAIN_MODES[chain_mode_key],
+        chain_mode=ChainMode(chain_mode_key),
         auto_cut=not args.no_auto_cut,
         margin_mm=args.margin_mm,
         raster_config=RasterConfig(
@@ -264,6 +253,15 @@ def _build_stream(args: argparse.Namespace, tape: TapeSpec) -> JobStream:
         ),
     )
     images = build_pattern(args.pattern, tape.print_dots)
+    return strategy, options, images
+
+
+def _build_stream(args: argparse.Namespace, tape: TapeSpec) -> JobStream:
+    """The one place a job stream gets assembled for the capture entry
+    points (`capture` and `print-test --capture`) -- no USB transport
+    involved, so this calls build_job directly rather than printer.print_images.
+    """
+    strategy, options, images = _resolve_job_inputs(args, tape)
     return build_job(images, tape, strategy, options)
 
 
@@ -291,32 +289,14 @@ def _format_post_print_status(status: PrinterStatus) -> str:
     return line
 
 
-def _drain_post_print_status(transport: Transport) -> None:
-    """I1: after writing the job stream, best-effort drain up to 4 status
-    blocks the printer may push unsolicited (job completion, mid-print
-    errors). Purely informational -- the job bytes are already on the wire,
-    so nothing here changes the command's exit code, including a transport
-    failure on the drain reads themselves.
+def _print_post_print_statuses(statuses: list[PrinterStatus]) -> None:
+    """I1: print the (already-drained, see printer.print_images) post-print
+    status blocks, or a note if none arrived. Purely informational -- never
+    called in a way that changes the command's exit code.
     """
-    received_any = False
-    for _ in range(4):
-        try:
-            block = transport.read(STATUS_LEN, timeout_ms=2000)
-        except TransportError as err:
-            print(f"post-print status: read failed ({err})")
-            break
-        if len(block) != STATUS_LEN:
-            continue
-        received_any = True
-        try:
-            status = parse_status(block)
-        except ValueError as err:
-            print(f"post-print status: malformed block ({err})")
-            continue
+    for status in statuses:
         print(_format_post_print_status(status))
-        if status.status_type in (StatusType.ERROR_OCCURRED, StatusType.PRINTING_COMPLETED):
-            break
-    if not received_any:
+    if not statuses:
         print("no post-print status received (not necessarily an error)")
 
 
@@ -360,6 +340,17 @@ def _run_capture(args: argparse.Namespace, out_path: str) -> int:
 
 
 def _run_usb_print(args: argparse.Namespace) -> int:
+    """Thin shell around printer.print_images: open the transport, request
+    status once, format output (every stdout/stderr string here matches the
+    original inline implementation exactly), map errors to the established
+    exit codes, close the transport in finally.
+
+    Status is fetched here (not left to print_images' own internal fetch)
+    because build_pattern() needs the resolved tape's print_dots *before*
+    print_images can be called -- images are an input to print_images, not
+    an output of it. The same status is then handed to print_images via
+    status_before= so only one status request ever reaches the transport.
+    """
     try:
         transport, status = _open_and_get_status()
     except (PrinterNotFoundError, StatusTimeoutError, TransportError) as err:
@@ -376,12 +367,9 @@ def _run_usb_print(args: argparse.Namespace) -> int:
         # I4: bridge the decoded media type to a geometry family; fall back to
         # TZe (with a warning) when the media type is unknown/undecoded, e.g.
         # the still-undecoded 0x14 raw value (HANDOFF.md).
-        family = media_family_for(status.media_type)
-        if family is None:
+        tape, assumed_tze = resolve_tape(status)
+        if assumed_tze:
             print(f"media type unknown (0x{status.media_type_raw:02x}) — assuming TZe geometry")
-            family = MediaFamily.TZE
-
-        tape = find_tape(status.media_width_mm, family)
         if tape is None:
             print(
                 f"error: no TapeSpec for detected media width {status.media_width_mm}mm",
@@ -389,11 +377,29 @@ def _run_usb_print(args: argparse.Namespace) -> int:
             )
             return 1
 
-        stream = _build_stream(args, tape)
-        transport.write(stream.data)
-        _print_job_summary(stream, tape)
-        _drain_post_print_status(transport)
+        strategy, options, images = _resolve_job_inputs(args, tape)
+        result = print_images(
+            images,
+            strategy=strategy,
+            options=options,
+            transport=transport,
+            status_before=status,
+        )
+        _print_job_summary(result.job, result.tape)
+        _print_post_print_statuses(result.post_print_statuses)
         return 0
+    except PrinterBusyError as err:
+        # Structurally unreachable given the has_error check above (both use
+        # the same `status`) -- kept as a defensive fallback, not exercised
+        # by any test.
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    except TapeNotFoundError as err:
+        # Structurally unreachable given the tape-is-None check above (both
+        # use the same `status`) -- kept as a defensive fallback, not
+        # exercised by any test.
+        print(f"error: {err}", file=sys.stderr)
+        return 1
     except TransportError as err:
         return _handle_hardware_error(err)
     finally:
@@ -414,9 +420,11 @@ def _cmd_capture(args: argparse.Namespace) -> int:
 
 
 def _add_job_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--strategy", required=True, choices=sorted(_STRATEGIES))
+    parser.add_argument("--strategy", required=True, choices=sorted(STRATEGIES))
     parser.add_argument("--pattern", required=True, choices=_PATTERN_NAMES)
-    parser.add_argument("--chain-mode", choices=sorted(_CHAIN_MODES), default=None)
+    parser.add_argument(
+        "--chain-mode", choices=sorted(mode.value for mode in ChainMode), default=None
+    )
     parser.add_argument("--margin-mm", type=float, default=2.0)
     parser.add_argument("--no-auto-cut", action="store_true")
     parser.add_argument("--bit-order", choices=sorted(_BIT_ORDERS), default="msb")

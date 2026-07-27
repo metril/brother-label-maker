@@ -10,12 +10,12 @@ for the download link).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
 from labelmaker.driver.geometry import TapeSpec
+from labelmaker.driver.protocol import ChainMode
 from labelmaker.driver.raster import (
     BYTES_PER_LINE,
     ZERO_LINE,
@@ -30,11 +30,10 @@ if TYPE_CHECKING:
 
 _DEFAULT_RASTER_CONFIG = RasterConfig()
 
-
-class ChainMode(Enum):
-    CUT_EACH = auto()
-    CHAIN_FF = auto()
-    STRIP_MARKS = auto()
+# ChainMode now lives in protocol.py (str-valued, Task 1.3a) -- re-exported
+# here so existing `from labelmaker.driver.job import ChainMode` imports
+# keep working.
+__all__ = ["ChainMode", "JobOptions", "JobStream", "build_job"]
 
 
 @dataclass(frozen=True)

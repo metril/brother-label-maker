@@ -27,6 +27,22 @@ from labelmaker.driver.transport import Transport
 E720BT_MODEL_CODE = 0x81
 STATUS_LEN = 32
 
+# Real probe data (HANDOFF.md / task-0.4 reference block): 24mm laminated-family
+# tape, no errors, model 0x81. media_type_raw is the still-undecoded 0x14.
+# Single source of truth (Task 1.3a) -- test_status.py/test_cli.py import this
+# instead of each defining their own copy of the same literal, and
+# MockPrinterTransport (transport.py) defaults to it.
+REFERENCE_STATUS_BLOCK = bytes(
+    [
+        0x80, 0x20, 0x42, 0x30, 0x81, 0x30, 0x00, 0x00,
+        0x00, 0x00, 0x18, 0x14, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x90, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]
+)  # fmt: skip
+
+assert len(REFERENCE_STATUS_BLOCK) == STATUS_LEN
+
 _HEADER_BYTE0 = 0x80
 _HEADER_BYTE1 = 0x20
 _HEADER_BYTE2 = 0x42

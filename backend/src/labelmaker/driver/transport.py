@@ -1,13 +1,19 @@
-"""Wire transports for the PT-E720BT: real USB bulk transfer and an in-memory
-test double.
+"""Wire transports for the PT-E720BT: real USB bulk transfer and in-memory
+test doubles.
 
 `usb.core` / `usb.util` are imported lazily -- inside methods, never at
 module import time -- so that importing this module, using `CaptureTransport`
-(the test double and the `PRINTER_MODE=mock` backend), and running the test
-suite / CI never require libusb to be installed.
+/`MockPrinterTransport` (the test doubles and the `PRINTER_MODE=mock`
+backend), and running the test suite / CI never require libusb to be
+installed. `MockPrinterTransport`'s default status reply lazily imports
+`labelmaker.driver.status.REFERENCE_STATUS_BLOCK` for the same reason status
+already imports `Transport` from this module -- a module-level import here
+would be circular.
 """
 
 from typing import Protocol
+
+from labelmaker.driver.protocol import STATUS_REQUEST
 
 
 class PrinterNotFoundError(Exception):
@@ -61,6 +67,48 @@ class CaptureTransport:
 
     def close(self) -> None:
         pass
+
+
+class MockPrinterTransport(CaptureTransport):
+    """The `PRINTER_MODE=mock` backend transport: a CaptureTransport that
+    additionally behaves like a real printer's status-request cycle, so
+    request_status() never times out against it and post-print drains never
+    stall.
+
+    Every write() that ends with STATUS_REQUEST (`ESC i S`) arms a one-shot
+    reply: the *next* read() returns `status_reply` (32 bytes, the same
+    shape as a real status block) instead of the usual CaptureTransport
+    empty-queue b"". Any explicitly `queue_read()`-ed reply still takes
+    priority (FIFO, CaptureTransport behavior) -- this only fills in when
+    the queue is empty, so tests can still script specific replies (e.g. a
+    post-print ERROR_OCCURRED block) on top of the automatic status replies.
+    """
+
+    def __init__(self, status_reply: bytes | None = None) -> None:
+        super().__init__()
+        if status_reply is None:
+            from labelmaker.driver.status import REFERENCE_STATUS_BLOCK
+
+            status_reply = REFERENCE_STATUS_BLOCK
+        self._status_reply = status_reply
+        self._pending_status_reply = False
+        self.closed = False
+
+    def write(self, data: bytes, timeout_ms: int = 10000) -> None:
+        super().write(data, timeout_ms)
+        self._pending_status_reply = bytes(data).endswith(STATUS_REQUEST)
+
+    def read(self, n: int, timeout_ms: int = 500) -> bytes:
+        if self._read_queue:
+            return super().read(n, timeout_ms)
+        if self._pending_status_reply:
+            self._pending_status_reply = False
+            return self._status_reply
+        return b""
+
+    def close(self) -> None:
+        self.closed = True
+        super().close()
 
 
 def _usb_errors() -> tuple[type[Exception], type[Exception]]:

@@ -14,23 +14,17 @@ from PIL import ImageOps
 from labelmaker.driver import cli
 from labelmaker.driver.geometry import MediaFamily, find_tape
 from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
-from labelmaker.driver.status import StatusTimeoutError, StatusType
+from labelmaker.driver.status import REFERENCE_STATUS_BLOCK, StatusTimeoutError, StatusType
 from labelmaker.driver.transport import CaptureTransport, PrinterNotFoundError, TransportError
 
 # C2: request_status() writes this exact flush/init/request sequence, not
 # STATUS_REQUEST alone (matches HANDOFF.md:49-51's confirmed probe sequence).
 STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
-# Real probe data (HANDOFF.md / task-0.4 reference block): 24mm laminated-family
-# tape, no errors, model 0x81. media_type_raw is the still-undecoded 0x14.
-REFERENCE_STATUS_BLOCK = bytes(
-    [
-        0x80, 0x20, 0x42, 0x30, 0x81, 0x30, 0x00, 0x00,
-        0x00, 0x00, 0x18, 0x14, 0x01, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x90, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ]
-)  # fmt: skip
+# REFERENCE_STATUS_BLOCK (real probe data, HANDOFF.md / task-0.4 reference
+# block: 24mm laminated-family tape, no errors, model 0x81, media_type_raw
+# the still-undecoded 0x14) now lives in status.py itself (Task 1.3a) --
+# single source, imported above instead of redefined here.
 
 
 def _status_block(overrides: dict[int, int]) -> bytes:

@@ -14,11 +14,11 @@ the e-control-systems/ptouch-print fork.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from labelmaker.driver.geometry import TapeSpec, clamp_margin_mm, mm_to_dots
-from labelmaker.driver.job import ChainMode
-from labelmaker.driver.protocol import ESC_INIT, FLUSH
+from labelmaker.driver.protocol import ESC_INIT, FLUSH, ChainMode
 from labelmaker.driver.raster import Compression
 
 if TYPE_CHECKING:
@@ -123,3 +123,26 @@ class E310BTStrategy(InitStrategy):
         if is_first:
             header += MAGIC
         return header
+
+
+# --- Public strategy registry (Task 1.3a) -----------------------------------
+# Replaces cli.py's former private `_STRATEGIES` -- the CLI and (later) the
+# web app both resolve a strategy by name through here.
+
+STRATEGIES: dict[str, Callable[[], InitStrategy]] = {
+    "classic": ClassicStrategy,
+    "e310bt": E310BTStrategy,
+}
+
+
+def get_strategy(name: str) -> InitStrategy:
+    """Look up and instantiate a strategy by name.
+
+    Raises KeyError (message lists the valid names) for an unknown name.
+    """
+    try:
+        return STRATEGIES[name]()
+    except KeyError:
+        raise KeyError(
+            f"unknown strategy {name!r}; valid strategies: {sorted(STRATEGIES)}"
+        ) from None

@@ -18,7 +18,7 @@ Everything ever printed flows through this module. Protocol facts:
 """
 
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import StrEnum
 
 import packbits
 from PIL import Image
@@ -32,14 +32,21 @@ _FRAME_MARKER = 0x47  # 'G'
 _ZERO_LINE_MARKER = b"Z"  # 0x5A, PACKBITS-only shorthand for an all-zero line
 
 
-class Compression(Enum):
-    PACKBITS = auto()
-    RAW = auto()
+class Compression(StrEnum):
+    """str-valued so JSON/SQLite round-trips are free (Task 1.3a). Values
+    only -- member names are unchanged, and no byte stream ever encodes
+    these values (see raster.py's framing docstring above)."""
+
+    PACKBITS = "packbits"
+    RAW = "raw"
 
 
-class BitOrder(Enum):
-    MSB_FIRST = auto()
-    LSB_FIRST = auto()
+class BitOrder(StrEnum):
+    """str-valued so JSON/SQLite round-trips are free (Task 1.3a). Values
+    only -- member names are unchanged."""
+
+    MSB_FIRST = "msb_first"
+    LSB_FIRST = "lsb_first"
 
 
 @dataclass(frozen=True)

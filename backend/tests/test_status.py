@@ -11,7 +11,7 @@ from labelmaker.driver.geometry import MediaFamily, find_tape
 from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
 from labelmaker.driver.status import (
     E720BT_MODEL_CODE,
-    STATUS_LEN,
+    REFERENCE_STATUS_BLOCK,
     MediaType,
     StatusTimeoutError,
     StatusType,
@@ -25,17 +25,9 @@ from labelmaker.driver.transport import CaptureTransport
 # (matches HANDOFF.md:49-51's confirmed probe sequence), not STATUS_REQUEST alone.
 STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
-# Real probe data (HANDOFF.md): 24mm laminated-family tape, no errors, model 0x81.
-REFERENCE_STATUS_BLOCK = bytes(
-    [
-        0x80, 0x20, 0x42, 0x30, 0x81, 0x30, 0x00, 0x00,
-        0x00, 0x00, 0x18, 0x14, 0x01, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x90, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ]
-)  # fmt: skip
-
-assert len(REFERENCE_STATUS_BLOCK) == STATUS_LEN
+# REFERENCE_STATUS_BLOCK (real probe data, HANDOFF.md: 24mm laminated-family
+# tape, no errors, model 0x81) now lives in status.py itself (Task 1.3a) --
+# single source, imported above instead of redefined here.
 
 
 def _status_block(overrides: dict[int, int]) -> bytes:
