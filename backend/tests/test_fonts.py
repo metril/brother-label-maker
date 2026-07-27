@@ -3,9 +3,11 @@
 import pytest
 from PIL import ImageFont
 
+from labelmaker.render import fonts as fonts_module
 from labelmaker.render.fonts import (
     FONTS_DIR,
     FontInfo,
+    ensure_fonts_dir,
     fit_font_size,
     font_path,
     list_fonts,
@@ -59,6 +61,39 @@ def test_font_path_default_is_not_bold():
 def test_font_path_unknown_family_raises_with_valid_list():
     with pytest.raises(ValueError, match="Inter"):
         font_path("Comic Sans")
+
+
+# --- 2b. ensure_fonts_dir(): missing FONTS_DIR fails loudly, not silently ---
+#
+# Without this guard, a missing/misplaced fonts directory doesn't raise
+# anywhere in this module -- font_path() would happily return a Path to a
+# file that doesn't exist, and resvg (in rasterize.py) would silently render
+# a blank label rather than erroring. See fonts.ensure_fonts_dir()'s
+# docstring and rasterize.py's module docstring for the full failure mode.
+
+
+def test_ensure_fonts_dir_raises_when_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", tmp_path / "does-not-exist")
+    with pytest.raises(RuntimeError, match="fonts directory not found"):
+        ensure_fonts_dir()
+
+
+def test_ensure_fonts_dir_passes_when_present():
+    ensure_fonts_dir()  # FONTS_DIR is the real bundled directory -- no raise
+
+
+def test_font_path_raises_runtime_error_when_fonts_dir_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", tmp_path / "does-not-exist")
+    with pytest.raises(RuntimeError, match="fonts directory not found"):
+        font_path("Inter")
+
+
+def test_ensure_fonts_dir_raises_when_fonts_dir_is_a_file(monkeypatch, tmp_path):
+    not_a_dir = tmp_path / "fonts-but-actually-a-file"
+    not_a_dir.write_text("oops")
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", not_a_dir)
+    with pytest.raises(RuntimeError, match="fonts directory not found"):
+        ensure_fonts_dir()
 
 
 # --- 3. All 8 files exist, are nonempty, and load with their declared family ---

@@ -36,7 +36,7 @@ class TextLabelParams(BaseModel):
     font_size_px: int | None = None
     h_align: Literal["left", "center", "right"] = "center"
     length_mm: float | None = None
-    padding_mm: float = 2.0
+    padding_mm: float = Field(default=2.0, ge=0)
 
     @field_validator("lines")
     @classmethod

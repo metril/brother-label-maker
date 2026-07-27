@@ -64,7 +64,29 @@ def list_fonts() -> list[FontInfo]:
     return list(_BUNDLED_FONTS)
 
 
+def ensure_fonts_dir() -> None:
+    """Raise loudly if FONTS_DIR doesn't exist.
+
+    Without this, a missing/misplaced fonts directory degrades silently:
+    resvg raises nothing and draws nothing for a font_dirs entry that
+    doesn't exist (or for a font-family with no matching loaded font) --
+    the caller gets a blank all-white bitmap back, not an error. That's the
+    failure mode this guards against, so it's checked at first use (here,
+    and by rasterize.py before ever invoking resvg) rather than only once
+    at import time -- callers/tests can point FONTS_DIR elsewhere and the
+    check still fires on the next call, instead of only ever running against
+    whatever FONTS_DIR resolved to when this module first loaded.
+    """
+    if not FONTS_DIR.is_dir():
+        raise RuntimeError(
+            f"fonts directory not found: {FONTS_DIR} -- expected backend/assets/fonts "
+            "alongside backend/src/ (see labelmaker.render.fonts.FONTS_DIR's docstring "
+            "for the layout assumption this depends on)"
+        )
+
+
 def font_path(family: str, bold: bool = False) -> Path:
+    ensure_fonts_dir()
     key = (family, bold)
     if key not in _FILES:
         valid = sorted({f for f, _ in _FILES})

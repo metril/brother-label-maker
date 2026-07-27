@@ -102,6 +102,15 @@ def test_params_invalid_h_align_rejected():
         TextLabelParams(lines=["HELLO"], h_align="justify")
 
 
+def test_params_negative_padding_mm_rejected():
+    with pytest.raises(ValidationError):
+        TextLabelParams(lines=["HELLO"], padding_mm=-1.0)
+
+
+def test_params_zero_padding_mm_accepted():
+    TextLabelParams(lines=["HELLO"], padding_mm=0.0)
+
+
 # --- 3. Geometry: height_px == print_dots; auto length grows; fixed length exact ---
 
 

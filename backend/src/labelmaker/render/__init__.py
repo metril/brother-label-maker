@@ -14,6 +14,7 @@ from labelmaker.render.document import LabelDefinition, ObjectRegion, RenderedLa
 from labelmaker.render.fonts import (
     FONTS_DIR,
     FontInfo,
+    ensure_fonts_dir,
     fit_font_size,
     font_path,
     list_fonts,
@@ -38,6 +39,7 @@ __all__ = [
     "ObjectRegion",
     "RenderedLabel",
     "Tape",
+    "ensure_fonts_dir",
     "fit_font_size",
     "font_path",
     "get_renderer",

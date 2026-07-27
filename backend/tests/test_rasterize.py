@@ -9,6 +9,7 @@ import io
 import pytest
 from PIL import Image
 
+from labelmaker.render import fonts as fonts_module
 from labelmaker.render.document import ObjectRegion, RenderedLabel
 from labelmaker.render.rasterize import preview_png, rasterize
 
@@ -44,6 +45,46 @@ def test_rasterize_mismatched_declared_size_raises():
     label = RenderedLabel(svg=svg, width_px=99, height_px=99)
     with pytest.raises(ValueError, match="99"):
         rasterize(label)
+
+
+# --- 1b. Font guards: missing FONTS_DIR / unbundled font-family both fail
+# loudly (RuntimeError / ValueError), never degrade to a silent blank
+# bitmap -- resvg itself raises nothing for either case. ---
+
+
+def test_rasterize_missing_fonts_dir_raises_runtime_error(monkeypatch, tmp_path):
+    svg = _svg(20, 10, '<rect width="20" height="10" fill="white"/>')
+    label = RenderedLabel(svg=svg, width_px=20, height_px=10)
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", tmp_path / "does-not-exist")
+    with pytest.raises(RuntimeError, match="fonts directory not found"):
+        rasterize(label)
+
+
+def test_rasterize_unbundled_font_family_raises_not_blank_bitmap():
+    # Verified failure mode this guards against: without it, resvg silently
+    # renders this as a blank canvas (skip_system_fonts=True means it won't
+    # even fall back to a host "Arial" -- it just draws nothing) and
+    # rasterize() would happily hand back an all-white bitmap with no error.
+    body = (
+        '<rect width="100" height="40" fill="white"/>'
+        '<text x="5" y="30" font-family="Arial" font-size="24">HELLO</text>'
+    )
+    svg = _svg(100, 40, body)
+    label = RenderedLabel(svg=svg, width_px=100, height_px=40)
+    with pytest.raises(ValueError, match="Arial"):
+        rasterize(label)
+
+
+def test_rasterize_bundled_font_family_in_text_does_not_raise():
+    body = (
+        '<rect width="100" height="40" fill="white"/>'
+        '<text x="5" y="30" font-family="Inter" font-size="24">HI</text>'
+    )
+    svg = _svg(100, 40, body)
+    label = RenderedLabel(svg=svg, width_px=100, height_px=40)
+    img = rasterize(label)
+    # actual text rendered -- not a blank bitmap
+    assert img.getextrema() != (255, 255)
 
 
 # --- 2. All-white SVG -> all-white bitmap; black rect -> those pixels black ---

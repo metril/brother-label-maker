@@ -14,9 +14,12 @@ resvg/fontdb versions.
 
 All four downloads succeeded from their official upstream GitHub release
 sources (not vendored copies) — the system DejaVu fallback described in the
-task brief was not needed, though the installed `fonts-dejavu-core` package
-on this machine happens to already be the same 2.37 version, confirming the
-downloaded copy matches what's locally installed.
+task brief was not needed. The installed `fonts-dejavu-core` package on this
+machine happens to already be the same 2.37 upstream version, but it is
+**not** byte-identical to the copy bundled here (`cmp` confirms they differ,
+first byte at offset 17) — Debian repackages/rehints the upstream TTFs
+rather than shipping them verbatim, so "same version" does not mean "same
+bytes."
 
 Declared family/style names (verified via `PIL.ImageFont.truetype(...).getname()`
 against the actual files in this directory, not assumed from filenames):
