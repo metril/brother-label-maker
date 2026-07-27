@@ -16,11 +16,13 @@ seam (see PyUsbTransport's docstring) that never requires a real pyusb object.
 
 import subprocess
 import sys
+import threading
 
 import pytest
 
 from labelmaker.driver import transport as transport_module
 from labelmaker.driver.transport import (
+    USB_LOCK,
     CaptureTransport,
     PrinterNotFoundError,
     PyUsbTransport,
@@ -304,3 +306,54 @@ def test_fake_device_close_swallows_reattach_errors(monkeypatch):
     transport.close()  # must not raise
 
     assert fake.attach_calls == [0]
+
+
+# --- 5. USB_LOCK: the process-wide lock primitive itself (C1) ---
+#
+# USB_LOCK is a module-level singleton shared by the WHOLE test session (not
+# just this file) -- jobs/worker.py and api/router_printer.py both take it
+# in production code, and other tests (test_usb_lock.py) exercise it through
+# those call sites. Every test here is careful to release anything it
+# acquires, even on assertion failure, so it can never leave the lock held
+# and deadlock an unrelated later test.
+
+
+def test_usb_lock_is_a_real_lock_free_by_default():
+    # A fresh acquire must succeed immediately -- nothing else in the test
+    # session should be holding it at rest.
+    acquired = USB_LOCK.acquire(timeout=1)
+    try:
+        assert acquired is True
+    finally:
+        if acquired:
+            USB_LOCK.release()
+
+
+def test_usb_lock_timeout_acquire_fails_while_held_then_succeeds_after_release():
+    held = threading.Event()
+    release = threading.Event()
+
+    def _holder() -> None:
+        USB_LOCK.acquire()
+        held.set()
+        release.wait(timeout=5)
+        USB_LOCK.release()
+
+    holder_thread = threading.Thread(target=_holder)
+    holder_thread.start()
+    try:
+        assert held.wait(timeout=2), "holder thread never acquired USB_LOCK"
+        # Short timeout, held lock -> must return False promptly, not block.
+        assert USB_LOCK.acquire(timeout=0.2) is False
+    finally:
+        release.set()
+        holder_thread.join(timeout=2)
+        assert not holder_thread.is_alive()
+
+    # Released now -- a fresh acquire must succeed.
+    acquired = USB_LOCK.acquire(timeout=1)
+    try:
+        assert acquired is True
+    finally:
+        if acquired:
+            USB_LOCK.release()

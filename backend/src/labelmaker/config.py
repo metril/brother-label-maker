@@ -29,6 +29,11 @@ class AppConfig(BaseSettings):
     # RasterConfig docstring for the same caveat.
     printer_bit_order: Literal["msb_first", "lsb_first"] = "msb_first"
     printer_flip_pins: bool = False
+    # M3: pydantic-settings parses list-typed fields as JSON, not a bare
+    # comma-separated string -- the env var value must be a JSON array,
+    # quoted so the shell/compose file passes the brackets/quotes through
+    # literally, e.g.: CORS_ORIGINS='["https://labels.example.com"]'
+    # (multiple origins: '["https://a.example.com","https://b.example.com"]').
     cors_origins: list[str] = ["http://localhost:5173"]
 
 

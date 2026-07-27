@@ -89,3 +89,38 @@ def test_ws_observes_job_queued_started_done_in_order(tmp_path):
 
     queued_event = next(e for e in events if e["event"] == "job.queued")
     assert queued_event["job_id"] == job_id
+
+
+# --- I6: a binary frame from the client must not kill the connection ---
+
+
+def test_ws_tolerates_a_binary_frame_and_still_delivers_a_later_event(tmp_path):
+    config = AppConfig(printer_mode="mock", data_dir=tmp_path / "data")
+    app = create_app(config)
+
+    with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+        # A stray binary frame -- ws.py's old `receive_text()` loop would
+        # raise on this (unexpected message type) and tear the connection
+        # down; the fixed `receive()` loop must just ignore it.
+        ws.send_bytes(b"\x00\x01\x02\xff")
+
+        resp = client.post(
+            "/api/print",
+            json={
+                "labels": [
+                    {
+                        "type": "text",
+                        "tape": {"width_mm": 24, "family": "tze"},
+                        "params": {"lines": ["HELLO"]},
+                    }
+                ],
+                "options": {"chain_mode": "cut_each"},
+            },
+        )
+        assert resp.status_code == 202
+
+        # The connection must still be alive and still receive broadcasts --
+        # this would time out (test_ws_receive_json_bounded's pytest.fail)
+        # if the binary frame had killed it.
+        event = _receive_json_bounded(ws)
+        assert event["event"] == "job.queued"

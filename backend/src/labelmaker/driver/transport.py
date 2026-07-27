@@ -11,9 +11,23 @@ already imports `Transport` from this module -- a module-level import here
 would be circular.
 """
 
+import threading
 from typing import Protocol
 
 from labelmaker.driver.protocol import STATUS_REQUEST
+
+# C1: one process-wide lock shared by EVERY code path that opens the USB
+# transport -- jobs/worker.py's print path and api/router_printer.py's
+# status path both take it around the transport's full open -> ... -> close
+# lifetime (this module deliberately does NOT take it inside
+# PyUsbTransport.open() itself -- see that method's docstring -- so the
+# caller controls exactly how much of its own work happens under the lock).
+# A single real USB device only supports one in-flight conversation at a
+# time; without this, a status poll landing mid-print corrupts both.
+# Plain threading.Lock (not RLock): every acquire/release pair here is used
+# from a single `anyio.to_thread.run_sync`-run synchronous call, never
+# re-entered.
+USB_LOCK = threading.Lock()
 
 
 class PrinterNotFoundError(Exception):
