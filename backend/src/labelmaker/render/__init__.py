@@ -18,6 +18,7 @@ from labelmaker.render.document import (
     Tape,
     family_name,
 )
+from labelmaker.render.estimate import TapeEstimate, estimate
 from labelmaker.render.fonts import (
     FONTS_DIR,
     FontInfo,
@@ -48,7 +49,9 @@ __all__ = [
     "RenderWarning",
     "RenderedLabel",
     "Tape",
+    "TapeEstimate",
     "ensure_fonts_dir",
+    "estimate",
     "extent_ratio",
     "family_name",
     "fit_font_size",
