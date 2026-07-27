@@ -14,6 +14,8 @@ export const labelTypesHandler = http.get("/api/label-types", () =>
     {
       type: "text",
       title: "Text",
+      category: "general",
+      min_tape_mm: null,
       params_schema: { type: "object", properties: {} },
     },
   ]),

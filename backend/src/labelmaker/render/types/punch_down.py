@@ -27,9 +27,13 @@ There is no user-facing `separator` param for this type (Brother's own tool
 doesn't expose one for Punch-Down Block, unlike Patch Panel) -- fixed to
 Separator.LINE below.
 
-font_family/bold/font_size_px/padding_mm are pure passthrough, same
-convention as patch_panel.py (see its module docstring) -- not
+font_family/bold/font_size_px are pure passthrough, same convention as
+patch_panel.py (see its module docstring for the full reasoning) -- not
 re-validated here, DividedBlocksParams is the single source of truth.
+padding_mm gets its own `ge=0` Field bound though (also per patch_panel.py's
+docstring: a bound cheap enough to express declaratively is, even when the
+engine would also catch it) -- so is `build_divided_blocks_params`'s
+outer-type-name error-message substitution (see divided_blocks.py).
 """
 
 from typing import Literal
@@ -44,6 +48,7 @@ from labelmaker.render.types.divided_blocks import (
     DividedBlocksParams,
     Orientation,
     Separator,
+    build_divided_blocks_params,
     render_divided_blocks,
 )
 
@@ -79,7 +84,7 @@ class PunchDownParams(BaseModel):
     font_family: str = "Inter"
     bold: bool = False
     font_size_px: int | None = None
-    padding_mm: float = 1.0
+    padding_mm: float = Field(default=1.0, ge=0)
 
 
 def _block_lines(params: PunchDownParams, index: int) -> list[str]:
@@ -93,7 +98,8 @@ def _block_lines(params: PunchDownParams, index: int) -> list[str]:
 
 def _to_engine_params(params: PunchDownParams) -> DividedBlocksParams:
     orientation = Orientation.BACKBONE if params.sequence == "backbone" else Orientation.HORIZONTAL
-    return DividedBlocksParams(
+    return build_divided_blocks_params(
+        "PunchDownParams",
         blocks=[
             BlockSpec(lines=_block_lines(params, i)) for i in range(params.n_blocks)
         ],

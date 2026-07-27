@@ -16,9 +16,13 @@ ACTUAL tape's max_length_mm (500mm for HSe, 1000mm for TZe) at render time
 via layout_blocks' own ValueError -- e.g. a 1000mm total on a 500mm-max HSe
 tape passes this Params-level check but still 422s from the engine.
 
-font_family/bold/font_size_px/padding_mm are pure passthrough, same
-convention as patch_panel.py (see its module docstring) -- not
+font_family/bold/font_size_px are pure passthrough, same convention as
+patch_panel.py (see its module docstring for the full reasoning) -- not
 re-validated here, DividedBlocksParams is the single source of truth.
+padding_mm gets its own `ge=0` Field bound though (also per patch_panel.py's
+docstring: a bound cheap enough to express declaratively is, even when the
+engine would also catch it) -- so is `build_divided_blocks_params`'s
+outer-type-name error-message substitution (see divided_blocks.py).
 """
 
 from pydantic import BaseModel, Field, model_validator
@@ -31,6 +35,7 @@ from labelmaker.render.types.divided_blocks import (
     DividedBlocksParams,
     Orientation,
     Separator,
+    build_divided_blocks_params,
     render_divided_blocks,
 )
 
@@ -48,13 +53,13 @@ class FaceplateParams(BaseModel):
     n_blocks: int = Field(2, ge=1, le=_MAX_BLOCKS)
     # Fewer entries than n_blocks is padded with blank blocks (see
     # _pad_blocks_to_n_blocks below); more than n_blocks is rejected.
-    blocks: list[BlockText] = Field(default_factory=list)
+    blocks: list[BlockText] = Field(default_factory=list, max_length=_MAX_BLOCKS)
     separator: Separator = Separator.NONE
     orientation: Orientation = Orientation.HORIZONTAL
     font_family: str = "Inter"
     bold: bool = False
     font_size_px: int | None = None
-    padding_mm: float = 1.0
+    padding_mm: float = Field(default=1.0, ge=0)
 
     @model_validator(mode="after")
     def _pad_blocks_to_n_blocks(self) -> "FaceplateParams":
@@ -71,7 +76,8 @@ class FaceplateParams(BaseModel):
 
 
 def _to_engine_params(params: FaceplateParams) -> DividedBlocksParams:
-    return DividedBlocksParams(
+    return build_divided_blocks_params(
+        "FaceplateParams",
         blocks=[BlockSpec(lines=block.lines) for block in params.blocks],
         total_length_mm=params.total_length_mm,
         separator=params.separator,

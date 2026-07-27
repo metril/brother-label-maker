@@ -33,10 +33,10 @@ _separator_body's docstring and each Separator member's pixel geometry.
 
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from PIL import ImageFont
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from labelmaker.driver.geometry import MIN_LABEL_MM, TapeSpec, mm_to_dots
 from labelmaker.render.document import (
@@ -138,6 +138,26 @@ class DividedBlocksParams(BaseModel):
         if (self.block_length_mm is None) == (self.total_length_mm is None):
             raise ValueError("exactly one of block_length_mm/total_length_mm must be set")
         return self
+
+
+def build_divided_blocks_params(caller_type_name: str, **kwargs: Any) -> DividedBlocksParams:
+    """`DividedBlocksParams(**kwargs)`, except a `pydantic.ValidationError`
+    raised by IT (e.g. an unknown `font_family` a thin config passed through
+    unvalidated -- see patch_panel.py/punch_down.py/faceplate.py's module
+    docstrings) gets `caller_type_name` substituted for this class's own
+    name ("DividedBlocksParams") in the error text before re-raising.
+
+    Every task 2.2/2.3 thin config calls this (passing its own Params
+    class's `__name__`) instead of constructing DividedBlocksParams
+    directly, specifically so a 422 surfaced from inside render() names the
+    caller's own type -- "1 validation error for PatchPanelParams" -- not
+    this internal engine implementation detail a caller of the public API
+    was never told about and can't do anything with.
+    """
+    try:
+        return DividedBlocksParams(**kwargs)
+    except ValidationError as exc:
+        raise ValueError(str(exc).replace("DividedBlocksParams", caller_type_name)) from exc
 
 
 class BlockLayout(NamedTuple):

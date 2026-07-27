@@ -12,14 +12,24 @@ blocks, Separator style Tic/Dash/Line/Bold/Frame/None, Orientation
 horizontal/vertical/backbone, a Reverse toggle, and an optional per-block
 width-multiplier list (0.1-9.5x).
 
-font_family/bold/font_size_px/padding_mm are pure passthrough: this module
-does not re-validate them (no font-family allowlist, no font-size-range
-check) -- DividedBlocksParams is the single source of truth for what's
-legal there, and an invalid value still surfaces as a 422 (a
-pydantic.ValidationError raised while constructing DividedBlocksParams
-inside render() is a ValueError subclass, caught the same way
-render_definition's other ValueErrors are -- see api/router_labels.py).
+font_family/bold/font_size_px are pure passthrough: this module does not
+re-validate them (no font-family allowlist, no font-size-range check) --
+DividedBlocksParams is the single source of truth for what's legal there.
+padding_mm DOES get its own `ge=0` bound here (matching
+DividedBlocksParams' own), even though it's otherwise passthrough too --
+Field(...) bounds (not validator-body logic) are what a future
+params_schema-driven form generator can actually see, so every bound cheap
+enough to express declaratively is, even when the engine would also catch
+it. Either way, an invalid value still surfaces as a 422:
+build_divided_blocks_params (divided_blocks.py) re-raises any
+pydantic.ValidationError from the DividedBlocksParams construction inside
+render() with THIS module's own Params class name substituted in for
+"DividedBlocksParams", then that (a ValueError subclass) is caught the
+same way render_definition's other ValueErrors are -- see
+api/router_labels.py.
 """
+
+from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -31,6 +41,7 @@ from labelmaker.render.types.divided_blocks import (
     DividedBlocksParams,
     Orientation,
     Separator,
+    build_divided_blocks_params,
     render_divided_blocks,
 )
 
@@ -52,33 +63,32 @@ class PatchPanelParams(BaseModel):
     orientation: Orientation = Orientation.HORIZONTAL
     reverse: bool = False
     # None = every block the same width (multiplier 1.0); when set, must
-    # have exactly one entry per block (see _check_multipliers below).
-    multipliers: list[float] | None = None
+    # have exactly one entry per block (length checked below -- per-item
+    # 0.1-9.5 range is on the annotation itself, not a validator body, so
+    # the bound reaches params_schema AND each out-of-range item gets its
+    # own error `loc` instead of one opaque message for the whole list).
+    multipliers: (
+        list[Annotated[float, Field(ge=_MIN_MULTIPLIER, le=_MAX_MULTIPLIER)]] | None
+    ) = None
     font_family: str = "Inter"
     bold: bool = False
     font_size_px: int | None = None
-    padding_mm: float = 1.0
+    padding_mm: float = Field(default=1.0, ge=0)
 
     @model_validator(mode="after")
-    def _check_multipliers(self) -> "PatchPanelParams":
-        if self.multipliers is None:
-            return self
-        if len(self.multipliers) != len(self.blocks):
+    def _check_multipliers_length(self) -> "PatchPanelParams":
+        if self.multipliers is not None and len(self.multipliers) != len(self.blocks):
             raise ValueError(
                 f"multipliers length {len(self.multipliers)} must match "
                 f"blocks length {len(self.blocks)}"
             )
-        for i, m in enumerate(self.multipliers):
-            if not (_MIN_MULTIPLIER <= m <= _MAX_MULTIPLIER):
-                raise ValueError(
-                    f"multipliers[{i}] must be in [{_MIN_MULTIPLIER}, {_MAX_MULTIPLIER}], got {m}"
-                )
         return self
 
 
 def _to_engine_params(params: PatchPanelParams) -> DividedBlocksParams:
     multipliers = params.multipliers or [1.0] * len(params.blocks)
-    return DividedBlocksParams(
+    return build_divided_blocks_params(
+        "PatchPanelParams",
         blocks=[
             BlockSpec(lines=block.lines, width_multiplier=m)
             for block, m in zip(params.blocks, multipliers, strict=True)

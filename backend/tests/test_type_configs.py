@@ -474,7 +474,96 @@ def test_faceplate_render_height_equals_print_dots():
         assert label.height_px == expected_dots
 
 
-# --- 8. Golden PNGs: byte-locked against committed files --------------------
+# --- 8. Schema fidelity: bounds live in Field(...), not validator bodies ---
+#
+# A future params_schema-driven form generator (2.10) can only see what
+# JSON Schema exposes -- a `ge`/`le` on the Field() itself, not a
+# raise-inside-a-validator-function. Every numeric bound cheap enough to
+# express declaratively must be a Field constraint (see each module's
+# docstring), and this is pinned here so a future edit that quietly moves a
+# bound back into a validator body regresses loudly.
+
+
+@pytest.mark.parametrize(
+    "params_cls", [PatchPanelParams, PunchDownParams, FaceplateParams], ids=lambda c: c.__name__
+)
+def test_padding_mm_schema_carries_minimum_zero(params_cls):
+    props = params_cls.model_json_schema()["properties"]
+    assert props["padding_mm"]["minimum"] == 0
+
+
+def test_patch_panel_multipliers_schema_items_carry_minimum_and_maximum():
+    props = PatchPanelParams.model_json_schema()["properties"]
+    # multipliers: list[...] | None -> anyOf [array-of-bounded-number, null].
+    array_variant = next(v for v in props["multipliers"]["anyOf"] if v.get("type") == "array")
+    assert array_variant["items"]["minimum"] == 0.1
+    assert array_variant["items"]["maximum"] == 9.5
+
+
+def test_faceplate_blocks_schema_has_max_length_50_matching_patch_panel():
+    faceplate_props = FaceplateParams.model_json_schema()["properties"]
+    patch_panel_props = PatchPanelParams.model_json_schema()["properties"]
+    assert faceplate_props["blocks"]["maxItems"] == 50
+    assert patch_panel_props["blocks"]["maxItems"] == 50
+
+
+def test_patch_panel_multiplier_out_of_range_error_loc_points_at_the_item():
+    # Field-level bounds (not a validator-body loop) give each out-of-range
+    # item its own error `loc` -- (multipliers, <index>) -- instead of one
+    # opaque message naming the whole list.
+    with pytest.raises(ValidationError) as exc_info:
+        PatchPanelParams(
+            blocks=[PatchPanelBlockText(), PatchPanelBlockText()],
+            multipliers=[1.0, 20.0],
+        )
+    errors = exc_info.value.errors()
+    assert any(err["loc"] == ("multipliers", 1) for err in errors)
+
+
+# --- 8b. build_divided_blocks_params: 422 names the CALLER's type ----------
+#
+# divided_blocks.py's build_divided_blocks_params re-raises any
+# pydantic.ValidationError from the internal DividedBlocksParams
+# construction with the caller's own Params class name substituted in --
+# so a 422 for e.g. an unvalidated-at-this-layer font_family names
+# "PatchPanelParams", not the internal engine type "DividedBlocksParams"
+# a caller of the public API was never told about.
+
+
+@pytest.mark.parametrize(
+    "make_bad_params,renderer_cls,expected_name",
+    [
+        (
+            lambda: PatchPanelParams(
+                blocks=[PatchPanelBlockText(lines=["A"])], font_family="Comic Sans"
+            ),
+            PatchPanelRenderer,
+            "PatchPanelParams",
+        ),
+        (
+            lambda: PunchDownParams(font_family="Comic Sans"),
+            PunchDownRenderer,
+            "PunchDownParams",
+        ),
+        (
+            lambda: FaceplateParams(font_family="Comic Sans"),
+            FaceplateRenderer,
+            "FaceplateParams",
+        ),
+    ],
+)
+def test_engine_value_error_names_the_callers_own_type_not_divided_blocks_params(
+    make_bad_params, renderer_cls, expected_name
+):
+    bad_params = make_bad_params()
+    with pytest.raises(ValueError) as exc_info:
+        renderer_cls().render(bad_params, _tape(24))
+    message = str(exc_info.value)
+    assert expected_name in message
+    assert "DividedBlocksParams" not in message
+
+
+# --- 9. Golden PNGs: byte-locked against committed files --------------------
 #
 # Fixture definitions live in golden_fixtures.py (shared with
 # scripts/regen_goldens.py) -- visually inspect any new/changed golden
