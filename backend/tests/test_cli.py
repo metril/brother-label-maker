@@ -418,6 +418,11 @@ def test_print_test_usb_heat_shrink_2_1_media_type_resolves_without_warning(monk
     assert rc == 0
     out = capsys.readouterr().out
     assert "media type unknown" not in out
+    # Pin the CLI's actually-resolved geometry: HSe 8.8mm (nominal_mm=8.8), not
+    # TZe 9mm -- catches a regression where find_tape() silently drops the
+    # family arg and falls through to the TZe default (which would print
+    # "tape=9mm" instead, and still pass every other assertion here).
+    assert "tape=8.8mm" in out
     # sanity: the family really did resolve to the HSe (not TZe) 8.8mm spec.
     tape = find_tape(9, MediaFamily.HSE_2_1)
     assert tape is not None and tape.print_dots == 48
