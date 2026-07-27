@@ -1,14 +1,16 @@
 """Tests for labelmaker.driver.job: chain-mode assembly into complete,
 wire-ready byte streams.
 
-Expected full-stream literals are assembled by hand from protocol-byte
-constants (see task-0.5-brief.md) plus frame bytes obtained by calling
-`labelmaker.driver.raster.encode_line` directly on hand-derived 16-byte pin
-lines. `raster.py` and `geometry.py` are already-merged, independently-tested
-dependencies (task 0.2/0.3) -- using them as trusted oracles here is not
-"deriving expected bytes by calling the code under test": the code under
-test in this file is `job.build_job`, not the raster/geometry layer it
-wraps. Never call `strategies.py`/`job.py` itself to build an expectation.
+Expected full-stream literals are assembled entirely by hand: protocol-byte
+constants (see task-0.5-brief.md) plus frame-byte literals whose PackBits/RAW
+derivation is commented at the point of definition below. No frame byte in
+this file is obtained by calling `raster.encode_line`/`packbits.encode` (or
+`strategies.py`/`job.py`, the code under test) -- every expected byte is a
+literal, so a wrong 'G' marker, wrong LE-u16 length, wrong 'Z' shorthand, or a
+PackBits payload error in `job.build_job`'s wiring would be caught here.
+`raster.py` and `geometry.py` are already-merged, independently-tested
+dependencies (task 0.2/0.3), used only for `BYTES_PER_LINE`/`ZERO_LINE`
+constants and `find_tape`, never to compute an expectation.
 """
 
 import pytest
@@ -16,7 +18,7 @@ from PIL import Image
 
 from labelmaker.driver.geometry import MediaFamily, find_tape
 from labelmaker.driver.job import ChainMode, JobOptions, build_job
-from labelmaker.driver.raster import BYTES_PER_LINE, ZERO_LINE, Compression, encode_line
+from labelmaker.driver.raster import BYTES_PER_LINE, ZERO_LINE
 from labelmaker.driver.strategies import CTRL_Z, FF, MAGIC, ClassicStrategy, E310BTStrategy
 
 TAPE_24MM = find_tape(24, MediaFamily.TZE)  # left_pin=0, print_dots=128
@@ -37,12 +39,41 @@ def _blank_line(index: int, mask: int) -> bytes:
 LINE_ROW0 = _blank_line(15, 0x01)
 LINE_ROW127 = _blank_line(0, 0x80)
 
-# Frame bytes: obtained via raster.encode_line (trusted merged dependency), not
-# by calling strategies.py/job.py (the code under test in this file).
-FRAME_ROW0_PB = encode_line(LINE_ROW0, Compression.PACKBITS)
-FRAME_ROW127_PB = encode_line(LINE_ROW127, Compression.PACKBITS)
-FRAME_ROW0_RAW = encode_line(LINE_ROW0, Compression.RAW)
-FRAME_ROW127_RAW = encode_line(LINE_ROW127, Compression.RAW)
+# --- Frame bytes: hand-written literals -- NOT computed by calling encode_line ---
+#
+# RAW frame format (raster.py docstring): 0x47 + LE u16 length(=16) + the 16
+# raw pin bytes verbatim.
+FRAME_ROW0_RAW = b"\x47\x10\x00" + b"\x00" * 15 + b"\x01"
+FRAME_ROW127_RAW = b"\x47\x10\x00" + b"\x80" + b"\x00" * 15
+
+# PACKBITS frame format: 0x47 + LE u16 payload-length + PackBits payload.
+# PackBits header semantics (Apple/TIFF PackBits, as implemented by the
+# `packbits` pip dependency raster.py wraps): a header byte 0<=n<=127 means
+# "copy the following n+1 bytes literally"; a header byte read as a signed
+# value in -1..-127 means "repeat the following single byte (1-n) times"
+# (as an unsigned byte: header = 257 - count, for 2 <= count <= 128).
+#
+# LINE_ROW0 = 15 zero bytes then one 0x01 byte:
+#   repeat-run of 15 zeros: header = 257-15 = 242 = 0xF2, repeated byte 0x00
+#   literal-run of 1 byte:  header = 1-1 = 0, literal byte 0x01
+#   payload = F2 00 00 01 (4 bytes) -> frame = 47 04 00 F2 00 00 01
+FRAME_ROW0_PB = b"\x47\x04\x00\xf2\x00\x00\x01"
+
+# LINE_ROW127 = one 0x80 byte then 15 zero bytes:
+#   literal-run of 1 byte:  header = 0, literal byte 0x80
+#   repeat-run of 15 zeros: header = 0xF2, repeated byte 0x00
+#   payload = 00 80 F2 00 (4 bytes) -> frame = 47 04 00 00 80 F2 00
+FRAME_ROW127_PB = b"\x47\x04\x00\x00\x80\xf2\x00"
+
+# Cut-mark line (all 16 bytes = 0xF0, derivation in test 5 below):
+# repeat-run of 16 identical bytes: header = 257-16 = 241 = 0xF1, repeated
+# byte 0xF0 -> payload = F1 F0 (2 bytes) -> frame = 47 02 00 F1 F0
+CUT_MARK_FRAME_PB = b"\x47\x02\x00\xf1\xf0"
+
+# All-zero line PACKBITS frame: raster.py's documented 'Z' (0x5A) shorthand
+# for an all-zero 16-byte line -- a direct protocol fact (task 0.3), not a
+# PackBits computation.
+ZERO_FRAME_PB = b"Z"
 
 
 def _two_col_image() -> Image.Image:
@@ -238,9 +269,20 @@ def test_strip_marks_two_images_full_stream():
     gap = [ZERO_LINE] * 4
     dashes = [cut_mark_line] * 4
     combined_lines = [LINE_ROW0, LINE_ROW127, *gap, *dashes, *gap, LINE_ROW0, LINE_ROW127]
-    assert len(combined_lines) == 16
+    assert len(combined_lines) == 16  # 2 (img1) + 4 (gap) + 4 (cutmark) + 4 (gap) + 2 (img2)
 
-    combined_frames = b"".join(encode_line(line, Compression.PACKBITS) for line in combined_lines)
+    # Frame bytes are the hand-derived literals defined above (FRAME_ROW0_PB,
+    # FRAME_ROW127_PB, ZERO_FRAME_PB, CUT_MARK_FRAME_PB) -- not computed via
+    # encode_line -- concatenated in the same 2+4+4+4+2 line order asserted above.
+    combined_frames = (
+        FRAME_ROW0_PB
+        + FRAME_ROW127_PB
+        + ZERO_FRAME_PB * 4
+        + CUT_MARK_FRAME_PB * 4
+        + ZERO_FRAME_PB * 4
+        + FRAME_ROW0_PB
+        + FRAME_ROW127_PB
+    )
 
     z_16lines = b"\x1b\x69\x7a\x84\x00\x18\x00\x10\x00\x00\x00\x00\x00"
     preamble = (
