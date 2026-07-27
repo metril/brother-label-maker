@@ -28,6 +28,15 @@ def _utcnow() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE's own wildcard characters (`%`, `_`) -- and the escape
+    character itself -- in a user-supplied substring, so a literal '%' or
+    '_' typed by a caller (e.g. a preset named "50% Off Labels") searches
+    for that literal character instead of matching as a wildcard. Pair with
+    `LIKE ? ESCAPE '\\'` in the calling SQL (list_presets/list_jobs)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class Database:
     """Async wrapper around a single aiosqlite connection.
 
@@ -214,17 +223,30 @@ class Database:
         row = await cur.fetchone()
         return self._preset_row_to_dict(row) if row is not None else None
 
-    async def list_presets(self, label_type: str | None = None) -> list[dict]:
+    async def list_presets(self, label_type: str | None = None, q: str | None = None) -> list[dict]:
+        """`label_type` and `q` combine with AND when both are given. `q` is
+        a substring match against `name` -- SQLite's LIKE is already
+        case-insensitive for ASCII by default (no COLLATE/LOWER() needed).
+        LIKE's own `%`/`_` wildcard characters are escaped in `q` itself
+        first (via `_escape_like`) so a literal '%' or '_' typed by the
+        user searches for that literal character, not an unintended
+        wildcard.
+        """
+        clauses = []
+        params: list[Any] = []
         if label_type is not None:
-            cur = await self._conn.execute(
-                "SELECT * FROM presets WHERE label_type = ? "
-                "ORDER BY favorite DESC, updated_at DESC, rowid DESC",
-                (label_type,),
-            )
-        else:
-            cur = await self._conn.execute(
-                "SELECT * FROM presets ORDER BY favorite DESC, updated_at DESC, rowid DESC"
-            )
+            clauses.append("label_type = ?")
+            params.append(label_type)
+        if q is not None:
+            clauses.append("name LIKE ? ESCAPE '\\'")
+            params.append(f"%{_escape_like(q)}%")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        cur = await self._conn.execute(
+            f"SELECT * FROM presets {where} "
+            "ORDER BY favorite DESC, updated_at DESC, rowid DESC",
+            params,
+        )
         rows = await cur.fetchall()
         return [self._preset_row_to_dict(row) for row in rows]
 
@@ -385,7 +407,20 @@ class Database:
         row = await cur.fetchone()
         return self._job_row_to_dict(row) if row is not None else None
 
-    async def list_jobs(self, page: int = 1, page_size: int = 20) -> dict:
+    async def list_jobs(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        q: str | None = None,
+    ) -> dict:
+        """`status`/`q` (task 2.8, backing GET /api/history's own filters --
+        see api/router_history.py) combine with AND when both are given.
+        `q` is deliberately unfancy: a raw, case-insensitive substring
+        match against the serialized `definition` JSON TEXT column, not a
+        field-aware search -- the simple option the brief allowed as an
+        alternative to skipping `q` entirely.
+        """
         # Phase-1 review triage: page_size=-1 previously reached the SQL
         # LIMIT clause unvalidated -- SQLite treats `LIMIT -1` as "no limit
         # at all", turning one malformed query param into an unbounded
@@ -396,17 +431,29 @@ class Database:
             raise ValueError(f"page must be >= 1, got {page}")
         if not (1 <= page_size <= 100):
             raise ValueError(f"page_size must be between 1 and 100, got {page_size}")
+        if status is not None and status not in _VALID_JOB_STATUSES:
+            raise ValueError(f"invalid status: {status!r}")
 
-        cur = await self._conn.execute("SELECT COUNT(*) FROM print_jobs")
+        clauses = []
+        params: list[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if q is not None:
+            clauses.append("definition LIKE ? ESCAPE '\\'")
+            params.append(f"%{_escape_like(q)}%")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        cur = await self._conn.execute(f"SELECT COUNT(*) FROM print_jobs {where}", params)
         row = await cur.fetchone()
         total = row[0]
 
         offset = (page - 1) * page_size
         cur = await self._conn.execute(
             "SELECT id, created_at, status, error, definition, label_count, chain_mode, "
-            "strategy, tape_width_mm, media_raw_byte, tape_used_mm "
-            "FROM print_jobs ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
-            (page_size, offset),
+            f"strategy, tape_width_mm, media_raw_byte, tape_used_mm FROM print_jobs {where} "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+            [*params, page_size, offset],
         )
         rows = await cur.fetchall()
         items = []
@@ -415,6 +462,17 @@ class Database:
             d["definition"] = json.loads(d["definition"])
             items.append(d)
         return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+    async def delete_job(self, job_id: str) -> bool:
+        """Deletes the print_jobs row only -- its on-disk stream .bin file
+        (data_dir/jobs/{id}.bin, written by jobs/worker.py) is NOT this
+        module's concern (this module never touches the filesystem outside
+        the sqlite file itself); the caller (api/router_history.py's DELETE
+        /api/history/{id}) removes that file separately. The thumbnail has
+        no such separate file -- it's the `preview_png` BLOB column on this
+        same row, so it's gone the instant this DELETE commits."""
+        cur = await self._conn.execute("DELETE FROM print_jobs WHERE id = ?", (job_id,))
+        return cur.rowcount > 0
 
     @staticmethod
     def _job_row_to_dict(row: aiosqlite.Row) -> dict:

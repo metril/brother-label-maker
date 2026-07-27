@@ -257,6 +257,106 @@ export interface PrintJob {
   thumbnail_png_b64: string | null;
 }
 
+// --- Presets (task 2.8) -----------------------------------------------------
+// Mirrors backend/api/router_presets.py + db/database.py's presets table.
+// A preset's `definition` is the label TYPE's own `params` shape (e.g.
+// TextLabelParams for label_type="text") -- NOT a full LabelDefinition
+// (type+tape+params). `label_type` and `tape_width_mm` are separate,
+// independently-settable fields: `label_type` says which type `definition`
+// is validated against, `tape_width_mm` is an OPTIONAL tape-width hint
+// (null = "any tape") -- presets don't track a tape family at all, so
+// POST /api/presets/{id}/print can only build a job when it's set (422
+// otherwise), and always assumes family "tze" when it does.
+
+export interface Preset {
+  id: string;
+  name: string;
+  label_type: string;
+  definition: Record<string, unknown>;
+  tape_width_mm: number | null;
+  favorite: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** POST /api/presets' request body -- 201 with the created Preset. */
+export interface PresetCreateRequest {
+  name: string;
+  label_type: string;
+  definition: Record<string, unknown>;
+  tape_width_mm?: number | null;
+  favorite?: boolean;
+}
+
+/** PUT /api/presets/{id}'s request body: every field optional (a true
+ * partial update -- an OMITTED field is left untouched server-side, but an
+ * explicit `null` for `tape_width_mm` DOES clear it back to "any tape"). */
+export interface PresetUpdateRequest {
+  name?: string;
+  label_type?: string;
+  definition?: Record<string, unknown>;
+  tape_width_mm?: number | null;
+  favorite?: boolean;
+}
+
+/** POST /api/presets/{id}/print's request body -- both fields optional (the
+ * whole body may be omitted entirely); mirrors PrintRequest's own
+ * options/serialization split minus `labels` (built server-side from the
+ * preset). Same 202 `{job_id}` contract as POST /api/print. */
+export interface PresetPrintRequest {
+  options?: Partial<PrintOptions>;
+  serialization?: Sequence | null;
+}
+
+// --- History (task 2.8) ------------------------------------------------------
+// Mirrors backend/api/router_history.py.
+
+/** GET /api/history's list item -- a deliberately LIGHT shape (Phase-1
+ * review's "split the job resource" note): no `definition` (can be large --
+ * up to 1000 expanded labels' worth for a serialized run) and no inline
+ * base64 thumbnail bytes. `thumbnail_url`, when non-null, is a fetchable
+ * GET /api/history/{id}/thumbnail path (raw PNG bytes, not JSON). */
+export interface HistoryItem {
+  id: string;
+  created_at: string;
+  status: JobStatus;
+  error: string | null;
+  label_count: number;
+  chain_mode: string;
+  strategy: string | null;
+  tape_width_mm: number | null;
+  tape_used_mm: number | null;
+  thumbnail_url: string | null;
+}
+
+export interface HistoryListResponse {
+  items: HistoryItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+/** GET /api/history's query params -- all optional. `q` is a raw,
+ * case-insensitive substring match against the stored definition JSON (no
+ * field-aware search -- see db/database.py's list_jobs docstring). */
+export interface HistoryListParams {
+  page?: number;
+  page_size?: number;
+  status?: JobStatus;
+  q?: string;
+}
+
+/** GET /api/history/{id}'s response: the FULL job resource, same shape as
+ * GET /api/print/jobs/{id} (both handlers share router_print.py's
+ * `_job_to_response`) -- includes `definition` and the inline base64
+ * thumbnail, unlike GET /api/history's light list items above. */
+export type HistoryJob = PrintJob;
+
+/** POST /api/history/{id}/reprint's response -- same 202 `{job_id}` shape
+ * as POST /api/print; the new job gets its own id and a COPIED definition,
+ * re-rendered from the original's stored snapshot. */
+export type ReprintResponse = PrintJobResponse;
+
 export interface PrinterStatusDetail {
   model_code: number;
   series_code: number;

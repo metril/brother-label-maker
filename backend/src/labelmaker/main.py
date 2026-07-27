@@ -14,7 +14,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from labelmaker.api import router_images, router_labels, router_print, router_printer, ws
+from labelmaker.api import (
+    router_history,
+    router_images,
+    router_labels,
+    router_presets,
+    router_print,
+    router_printer,
+    ws,
+)
 from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
 from labelmaker.jobs.events import EventBus
@@ -82,6 +90,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(router_images.router, prefix="/api")
     app.include_router(router_print.router, prefix="/api")
     app.include_router(router_printer.router, prefix="/api")
+    app.include_router(router_presets.router, prefix="/api")
+    app.include_router(router_history.router, prefix="/api")
     app.include_router(ws.router, prefix="/api")
 
     # Mounted last (after every /api/* route is registered) so it only ever

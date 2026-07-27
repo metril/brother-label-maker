@@ -131,6 +131,29 @@ async def test_preset_crud_and_list_ordering(monkeypatch):
         await db.close()
 
 
+async def test_list_presets_q_filters_name_substring_case_insensitively():
+    db = await Database.open(":memory:")
+    try:
+        rack = await db.create_preset("Rack Label", "address", {})
+        port = await db.create_preset("Port Sticker", "address", {})
+        await db.create_preset("Shipping Tag", "shipping", {})
+
+        listed = await db.list_presets(q="ack")  # substring, mixed case below
+        assert {p["id"] for p in listed} == {rack["id"]}
+
+        listed = await db.list_presets(q="STICKER")
+        assert {p["id"] for p in listed} == {port["id"]}
+
+        listed = await db.list_presets(q="nonexistent-substring")
+        assert listed == []
+
+        # q combines (AND) with label_type, not OR.
+        listed = await db.list_presets(label_type="shipping", q="rack")
+        assert listed == []
+    finally:
+        await db.close()
+
+
 # --- 4. Print jobs ---
 
 
@@ -273,6 +296,64 @@ async def test_print_job_pagination_newest_first_excludes_preview():
         for item in page1["items"] + page2["items"]:
             assert "preview_png" not in item
             assert isinstance(item["definition"], dict)
+    finally:
+        await db.close()
+
+
+async def test_list_jobs_status_and_q_filters():
+    """task 2.8: `status` and `q` back GET /api/history's own filters (see
+    api/router_history.py). `q` is deliberately unfancy -- a raw
+    case-insensitive substring match against the serialized `definition`
+    JSON text, not a field-aware search (the brief's "skip q if it
+    complicates" escape hatch; this is the simple option, documented)."""
+    db = await Database.open(":memory:")
+    try:
+        done = await db.create_print_job(
+            {"labels": [{"params": {"lines": ["PORT-07"]}}]},
+            label_count=1,
+            chain_mode="cut_each",
+        )
+        await db.update_job(done["id"], status="done")
+
+        failed = await db.create_print_job(
+            {"labels": [{"params": {"lines": ["RACK-A1"]}}]},
+            label_count=1,
+            chain_mode="cut_each",
+        )
+        await db.update_job(failed["id"], status="failed", error="tape jam")
+
+        result = await db.list_jobs(status="done")
+        assert [item["id"] for item in result["items"]] == [done["id"]]
+
+        result = await db.list_jobs(status="failed")
+        assert [item["id"] for item in result["items"]] == [failed["id"]]
+
+        result = await db.list_jobs(q="port-07")  # case-insensitive substring
+        assert [item["id"] for item in result["items"]] == [done["id"]]
+
+        result = await db.list_jobs(q="nonexistent-substring")
+        assert result["items"] == []
+        assert result["total"] == 0
+
+        # status and q combine (AND).
+        result = await db.list_jobs(status="done", q="rack")
+        assert result["items"] == []
+
+        with pytest.raises(ValueError):
+            await db.list_jobs(status="not-a-real-status")
+    finally:
+        await db.close()
+
+
+async def test_delete_job_removes_row_and_reports_missing():
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+
+        assert await db.delete_job(job["id"]) is True
+        assert await db.get_job(job["id"]) is None
+        assert await db.delete_job(job["id"]) is False
+        assert await db.delete_job("nonexistent-id") is False
     finally:
         await db.close()
 
