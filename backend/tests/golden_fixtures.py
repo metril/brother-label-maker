@@ -211,8 +211,15 @@ class BarcodeTypeFixture:
 # rendered via get_renderer("barcode").render(...), same convention as
 # TYPE_CONFIG_FIXTURES/ELECTRICAL_TYPE_FIXTURES above.
 BARCODE_TYPE_FIXTURES: tuple[BarcodeTypeFixture, ...] = (
-    # (a) QR, a URL, 24mm tape, default caption="below" (data itself as the
-    # caption text).
+    # (a) QR, a URL, 24mm tape, default caption="below" requested -- but the
+    # URL is still ~1.6x too wide for this compact QR's own width even
+    # shrunk to the 8px floor (see test_barcode_type.py's
+    # test_caption_wider_than_label_auto_length_shrinks_then_drops), so this
+    # renders QR-ONLY: the caption is dropped (auto-length mode never
+    # silently overflows one), the code re-sizes against the tape's full
+    # print height, and a caption_omitted warning is attached. Filename kept
+    # as -caption- (not renamed) since it documents the PARAM as requested,
+    # not the rendered outcome -- see this fixture's own history for why.
     BarcodeTypeFixture(
         name="barcode_qr_url_caption_24mm",
         params=BarcodeLabelParams(symbology="qr", data="https://example.com/a/000-001"),

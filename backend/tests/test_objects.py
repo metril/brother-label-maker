@@ -184,6 +184,18 @@ def test_qr_large_code_warns():
     assert "barcode_large" in [w.code for w in result.warnings]
 
 
+@pytest.mark.parametrize("module_px", [1, 2, 3, 5])
+def test_qr_rect_geometry_is_exact_multiples_of_module_px(module_px):
+    # "module boundaries exact multiples of module_px" (task brief) --
+    # every rect's x/y/width/height, not just integer (section 0 already
+    # covers that), but an exact multiple of module_px specifically: a
+    # module-grid cell can never start or end mid-module.
+    result = qr_object("TEST", module_px=module_px)
+    for x, y, width, height in _RECT_RE.findall(result.svg_group):
+        for value in (x, y, width, height):
+            assert int(value) % module_px == 0
+
+
 # --- 2. Code128 -----------------------------------------------------------
 
 
@@ -212,6 +224,14 @@ def test_code128_rects_confined_to_declared_height():
     result = code128_object("ASSET-0042", x_dim_px=3, height_px=17)
     heights = {int(h) for h in re.findall(r'height="(\d+)"', result.svg_group)}
     assert heights == {17}
+
+
+@pytest.mark.parametrize("x_dim", [1, 2, 3, 5])
+def test_code128_bar_geometry_is_exact_multiples_of_x_dim(x_dim):
+    result = code128_object("ASSET-0042", x_dim_px=x_dim, height_px=40)
+    for x, _y, width, _height in _RECT_RE.findall(result.svg_group):
+        assert int(x) % x_dim == 0
+        assert int(width) % x_dim == 0
 
 
 # --- 3. Code39 --------------------------------------------------------------
@@ -251,6 +271,14 @@ def test_code39_bar_structure_width_matches_hand_derivation():
 def test_code39_x_dim_1_warns_small_module():
     result = code39_object("ASSET-0042", x_dim_px=1, height_px=40)
     assert "barcode_small_module" in [w.code for w in result.warnings]
+
+
+@pytest.mark.parametrize("x_dim", [1, 2, 3, 5])
+def test_code39_bar_geometry_is_exact_multiples_of_x_dim(x_dim):
+    result = code39_object("ASSET-0042", x_dim_px=x_dim, height_px=40)
+    for x, _y, width, _height in _RECT_RE.findall(result.svg_group):
+        assert int(x) % x_dim == 0
+        assert int(width) % x_dim == 0
 
 
 # --- 4. DataMatrix ----------------------------------------------------------
@@ -294,3 +322,45 @@ def test_datamatrix_module_px_1_warns_small_module():
 def test_datamatrix_module_px_2_has_no_small_module_warning():
     result = datamatrix_object("T-01", module_px=2)
     assert "barcode_small_module" not in [w.code for w in result.warnings]
+
+
+@pytest.mark.parametrize("module_px", [1, 2, 3, 5])
+def test_datamatrix_rect_geometry_is_exact_multiples_of_module_px(module_px):
+    # "module boundaries exact multiples of module_px" (task brief) -- same
+    # convention as test_qr_rect_geometry_is_exact_multiples_of_module_px.
+    result = datamatrix_object("T-01", module_px=module_px)
+    for x, y, width, height in _RECT_RE.findall(result.svg_group):
+        for value in (x, y, width, height):
+            assert int(value) % module_px == 0
+
+
+# --- 5. Scannability regression guard: decode a rendered code with a real -
+# reader (zxing-cpp, a DEV-only dependency -- see pyproject.toml's
+# [dependency-groups] dev). Everything above proves the SVG geometry is
+# pixel-snapped/well-formed; it does NOT prove a real scanner could read the
+# result -- that's what this section guards, permanently, against any
+# future change to objects.py's rect emission. `pytest.importorskip`
+# per-test (not module-level) so only THESE two tests skip in an
+# environment without zxing-cpp's wheel installed (verified available for
+# linux x86_64/aarch64, macOS, and Windows, cp310-cp314, at the time this
+# dependency was added) -- every other test in this file still runs.
+
+
+def test_qr_object_decodes_back_to_its_data_at_device_resolution():
+    zxingcpp = pytest.importorskip("zxingcpp")
+    result = qr_object("https://example.com/a/000-001", module_px=2)
+    img = _rasterize_result(result)
+    barcode_read = zxingcpp.read_barcode(img.convert("L"))
+    assert barcode_read is not None, "zxing-cpp could not decode the rendered QR at all"
+    assert barcode_read.text == "https://example.com/a/000-001"
+    assert barcode_read.format == zxingcpp.BarcodeFormat.QRCode
+
+
+def test_code128_object_decodes_back_to_its_data_at_device_resolution():
+    zxingcpp = pytest.importorskip("zxingcpp")
+    result = code128_object("ASSET-0042", x_dim_px=2, height_px=40)
+    img = _rasterize_result(result)
+    barcode_read = zxingcpp.read_barcode(img.convert("L"))
+    assert barcode_read is not None, "zxing-cpp could not decode the rendered Code128 at all"
+    assert barcode_read.text == "ASSET-0042"
+    assert barcode_read.format == zxingcpp.BarcodeFormat.Code128

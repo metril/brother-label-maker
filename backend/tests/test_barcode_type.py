@@ -306,13 +306,46 @@ def test_caption_none_omits_any_text_element():
     assert "<text" not in label.svg
 
 
-def test_caption_wider_than_label_warns_truncated():
+def test_caption_wider_than_label_auto_length_shrinks_then_drops():
     # A long URL caption under a compact QR code -- see golden fixture (a).
+    # Auto-length mode: width is sized to the CODE, so an over-wide caption
+    # is the flexible element -- it's tried at shrinking sizes down to the
+    # 8px floor (still ~1.6x too wide even there, hand-checked against
+    # fonts.measure_text independently below) and, failing that, dropped
+    # entirely -- never silently rendered overflowing.
+    from labelmaker.render.fonts import measure_text
+
+    url = "https://example.com/a/000-001"
+    # Independent check that shrinking genuinely can't rescue this case: the
+    # QR itself (v3, 29 modules + 8 quiet = 37 total, hand-derived earlier
+    # in this file) at auto module_px=2 (98px available height // 37) is
+    # only 74px wide -- narrower than the caption's own text even at the
+    # 8px floor (120px, measured directly, independent of barcode_label.py).
+    total_modules = _qr_total_modules(url)
+    assert total_modules == 37
+    code_width_px = total_modules * 2  # module_px = 98 // 37 = 2
+    assert measure_text(url, "Inter", 8, False)[0] > code_width_px
+
+    params = BarcodeLabelParams(symbology="qr", data=url, caption="below")
+    label = BarcodeLabelRenderer().render(params, _tape(24))
+    assert "caption_omitted" in [w.code for w in label.warnings]
+    assert "caption_truncated" not in [w.code for w in label.warnings]
+    assert "<text" not in label.svg  # dropped, not rendered overflowing
+
+
+def test_caption_wider_than_fixed_length_warns_truncated_not_dropped():
+    # Fixed length_mm: width IS the caller's own pinned hard constraint (the
+    # same role tape height plays for size_mode) -- an over-wide caption is
+    # clipped-and-warned instead, exactly text_label.py's fixed-length
+    # text_truncated behavior, never shrunk or dropped.
+    url = "https://example.com/a/000-001"
     params = BarcodeLabelParams(
-        symbology="qr", data="https://example.com/a/000-001", caption="below"
+        symbology="qr", data=url, caption="below", length_mm=20.0
     )
     label = BarcodeLabelRenderer().render(params, _tape(24))
     assert "caption_truncated" in [w.code for w in label.warnings]
+    assert "caption_omitted" not in [w.code for w in label.warnings]
+    assert "<text" in label.svg  # still rendered (just visually cut off)
 
 
 def test_short_caption_that_fits_has_no_truncation_warning():
@@ -355,17 +388,58 @@ def test_caption_omitted_warning_when_caption_alone_blocks_a_fitting_code():
     assert "<text" not in label.svg  # caption really was dropped, not just warned about
 
 
-def test_size_mode_module_never_drops_caption():
-    # size_mode="module" is fully manual -- caption is never auto-dropped,
-    # even in a combination that would trigger the auto-mode drop above.
+def test_size_mode_module_never_drops_caption_but_raises_when_impossible():
+    # size_mode="module" is fully manual -- caption is NEVER auto-dropped,
+    # even in the exact combination that triggers the auto-mode drop above
+    # (same tape/data/available_height_px as
+    # test_caption_omitted_warning_when_caption_alone_blocks_a_fitting_code:
+    # 38px available, needs 41). Since the caller pinned module_px=1
+    # (already the smallest legal value) AND the caption, and the two
+    # together are impossible to satisfy, this raises rather than silently
+    # dropping something the caller explicitly asked for.
     tape = _tape(9)
     data = "T" * 70
     params = BarcodeLabelParams(
         symbology="qr", data=data, caption="below", size_mode="module", module_px=1
     )
+    with pytest.raises(ValueError, match="even at module_px=1"):
+        BarcodeLabelRenderer().render(params, tape)
+
+
+def test_size_mode_module_clamps_module_px_never_drops_caption_never_overflows():
+    # The reviewer's own regression case: module_px=8 requested for QR
+    # "TEST" (29 total modules) on a 24mm tape with the default caption --
+    # 29*8=232px doesn't fit the 98px band left after the caption. Before
+    # the fix, this silently centered a 232px-tall code in a 98px band
+    # (code_y negative, top/bottom sliced off canvas -- undecodable even
+    # though only a warning fired). Now: module_px is CLAMPED down to
+    # whatever fits (98 // 29 == 3), a module_clamped warning fires, the
+    # caption is NOT dropped, and the code's own vertical placement is
+    # non-negative (i.e. actually fits its band, nothing sliced).
+    tape = _tape(24)
+    total_modules = _qr_total_modules("TEST")
+    assert total_modules == 29
+    caption_block_px = _caption_block_px(tape.print_dots)
+    available_height_px = tape.print_dots - caption_block_px
+    expected_clamped_module_px = available_height_px // total_modules
+    assert expected_clamped_module_px == 3
+    assert expected_clamped_module_px < 8  # confirms the request really was too big
+
+    params = BarcodeLabelParams(
+        symbology="qr", data="TEST", caption="below", size_mode="module", module_px=8
+    )
     label = BarcodeLabelRenderer().render(params, tape)
+    assert "module_clamped" in [w.code for w in label.warnings]
     assert "caption_omitted" not in [w.code for w in label.warnings]
     assert "<text" in label.svg
+
+    expected_code_height_px = total_modules * expected_clamped_module_px
+    translate_match = re.search(r'<g transform="translate\((-?\d+),(-?\d+)\)">', label.svg)
+    assert translate_match
+    code_y = int(translate_match.group(2))
+    # Non-negative AND fully within the available band -- neither edge sliced.
+    assert code_y >= 0
+    assert code_y + expected_code_height_px <= available_height_px
 
 
 # --- 7. Fixed length_mm: center, 422 if the code doesn't fit ---------------
