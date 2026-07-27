@@ -7,13 +7,16 @@ describe("App", () => {
     render(<App />);
 
     expect(screen.getByText("Label Studio")).toBeInTheDocument();
-    expect(screen.getByText("Designer")).toBeInTheDocument();
+
+    // Initial queries (msw-mocked, real fixtured label-types schema) resolve
+    // without throwing -- the Designer panel's own heading names the active
+    // type ("Text", the first type registered by the backend).
+    expect(await screen.findByRole("heading", { name: "Text" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Print" })).toBeInTheDocument();
 
-    // Initial queries (msw-mocked) resolve without throwing -- scoped to
-    // the printer status badge specifically, since "24mm" could otherwise
-    // also match a TapeSelector button in the designer form.
+    // Scoped to the printer status badge specifically, since "24mm" could
+    // otherwise also match a TapeSelector button in the designer form.
     const statusBadge = screen.getByRole("status", { name: "Printer status" });
-    expect(await within(statusBadge).findByText("24mm")).toBeInTheDocument();
+    expect(await within(statusBadge).findByText("connected · 24mm TZe · laminated")).toBeInTheDocument();
   });
 });

@@ -1,26 +1,81 @@
 @import "tailwindcss";
 
+/* -- Design system (task 2.10, locked -- see
+   .superpowers/sdd/we-re-going-to-build-eager-cloud/frontend-design-system.md).
+   The subject is a thermal-transfer industrial label printer -- the palette
+   is warm graphite (brown-shifted greys), NOT neutral near-black: it reads
+   as the machine's own charcoal housing, not a generic dark-mode SaaS app. */
 @theme {
-  --color-ink-950: #0a0a0a;
-  --color-ink-900: #121212;
-  --color-ink-800: #1a1a1a;
-  --color-ink-700: #242424;
-  --color-ink-600: #333333;
-  --color-ink-500: #4a4a4a;
-  --color-ink-400: #6b6b6b;
-  --color-ink-300: #9a9a9a;
-  --color-ink-200: #c4c4c4;
-  --color-ink-100: #e8e8e8;
+  --color-deck-950: #12100e; /* app background */
+  --color-deck-900: #1b1815; /* panels, cards */
+  --color-deck-800: #262119; /* raised controls, inputs */
+  --color-deck-700: #332c22; /* hover states */
+  --color-deck-600: #4a4137; /* hairlines, borders */
+  --color-deck-400: #8a7e6e; /* muted text, labels */
+  --color-deck-200: #d6cfc2; /* body text */
 
-  --color-amber-500: #d97a1f;
-  --color-amber-400: #ea9c3f;
-  --color-amber-300: #f4b968;
-  --color-amber-600: #b8631a;
-  --color-amber-950: #2a1a0a;
+  --color-tape: #f2efe6; /* the label substrate ONLY */
 
-  --font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-amber-500: #e8a33d; /* primary accent, focus rings, active nav */
+  --color-amber-300: #f2c57c; /* accent hover/emphasis */
+  --color-rust-500: #c4553d; /* errors, destructive, cut marks */
+  --color-sage-400: #7e9b7a; /* connected/success (muted, never neon) */
+
+  --font-condensed: "Roboto Condensed", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* -- Fonts: copied from backend/assets/fonts/ into public/fonts/ at build
+   time (scripts/copy-fonts.mjs, wired into predev/prebuild) -- never fetched
+   from the API at runtime. Six files back the design doc's three families x
+   two weight callouts each (Roboto Condensed 400/700, Inter 400/600,
+   JetBrains Mono 400/500): Inter and JetBrains Mono only ship a Regular and
+   a Bold (400/700) TTF, so each Bold face below is declared over a widened
+   weight RANGE (e.g. 600-700) -- Tailwind's font-semibold (600) and
+   font-bold (700) both resolve to the one real bold file this way, instead
+   of a synthesized fake bold the browser would otherwise fake from Regular. */
+@font-face {
+  font-family: "Roboto Condensed";
+  src: url("/fonts/RobotoCondensed-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Roboto Condensed";
+  src: url("/fonts/RobotoCondensed-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter-Bold.ttf") format("truetype");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 500 700;
+  font-style: normal;
+  font-display: swap;
 }
 
 html {
@@ -29,9 +84,11 @@ html {
 
 body {
   margin: 0;
-  background-color: var(--color-ink-950);
-  color: var(--color-ink-100);
+  background-color: var(--color-deck-950);
+  color: var(--color-deck-200);
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -39,22 +96,36 @@ body {
   min-height: 100vh;
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
+/* Quality floor: keyboard focus must always be visible, amber, 2px --
+   never `outline: none` without this replacement. */
+:focus-visible {
+  outline: 2px solid var(--color-amber-500);
+  outline-offset: 2px;
+}
+
+/* Quality floor: transitions <=150ms, disabled entirely under
+   prefers-reduced-motion (Tailwind's own transition utilities already
+   default to 150ms; this is the belt for anything that isn't). */
+* {
+  transition-duration: 150ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
-.shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--color-ink-700) 25%,
-    var(--color-ink-600) 37%,
-    var(--color-ink-700) 63%
-  );
-  background-size: 400% 100%;
-  animation: shimmer 1.4s ease infinite;
+/* Quality floor: "No skeleton-shimmer everywhere: use a quiet mono ···
+   placeholder for pending values" -- see components/ui/Pending.tsx, the
+   one place this class is used. */
+.pending-ellipsis {
+  font-family: var(--font-mono);
+  color: var(--color-deck-400);
+  letter-spacing: 0.1em;
 }

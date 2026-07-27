@@ -68,6 +68,25 @@ beforeAll(() => {
   // resolves to for the rest of the suite.
   server.listen({ onUnhandledRequest: "error" });
   vi.stubGlobal("WebSocket", MockWebSocket);
+
+  // jsdom doesn't implement matchMedia at all -- usePrefersReducedMotion
+  // (FeedDeck/Designer) needs SOME implementation to avoid throwing.
+  // Always reports "no preference" (matches: false); tests that care about
+  // the reduced-motion branch specifically stub window.matchMedia
+  // themselves for that one case.
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
 });
 
 afterEach(() => {

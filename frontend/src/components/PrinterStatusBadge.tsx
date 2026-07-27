@@ -1,4 +1,7 @@
+import type { ReactNode } from "react";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
+import { describeMedia } from "../lib/printerStatus";
+import { Pending } from "./ui/Pending";
 
 interface DotProps {
   colorClass: string;
@@ -8,39 +11,36 @@ function Dot({ colorClass }: DotProps) {
   return <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${colorClass}`} />;
 }
 
-/** Top-bar printer connectivity readout: a dot + short text (connected +
- * media width, or the error string), plus a "mock" tag when the backend is
+/** Status bar's instrument readout: connected dot (sage/rust -- never
+ * amber, that's reserved for the primary accent) + "connected · 24mm TZe ·
+ * laminated" in JetBrains Mono, plus a "mock" tag when the backend is
  * running in mock printer mode (config.py's AppConfig.printer_mode). */
 export function PrinterStatusBadge() {
   const { data, isLoading, isError } = usePrinterStatus();
 
-  let dotClass = "bg-ink-500";
-  let label = "checking…";
+  let dotClass = "bg-deck-400";
+  let label: ReactNode = <Pending />;
 
   if (!isLoading) {
     if (isError || !data) {
-      dotClass = "bg-red-500";
+      dotClass = "bg-rust-500";
       label = "unreachable";
     } else if (!data.connected) {
-      dotClass = "bg-red-500";
+      dotClass = "bg-rust-500";
       label = data.error ?? "disconnected";
     } else {
-      dotClass = "bg-emerald-500";
-      const widthMm = data.status?.media_width_mm;
-      label = widthMm != null ? `${widthMm}mm` : "connected";
+      dotClass = "bg-sage-400";
+      const media = describeMedia(data.status);
+      label = media ? `connected · ${media}` : "connected";
     }
   }
 
   return (
-    <div
-      role="status"
-      aria-label="Printer status"
-      className="flex items-center gap-2 rounded-md border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-xs text-ink-200"
-    >
+    <div role="status" aria-label="Printer status" className="flex items-center gap-2 font-mono text-[12px] text-deck-200">
       <Dot colorClass={dotClass} />
       <span>{label}</span>
       {data?.printer_mode === "mock" && (
-        <span className="rounded border border-ink-600 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-400">
+        <span className="rounded border border-deck-600 px-1.5 py-0.5 font-condensed text-[10px] font-bold uppercase tracking-wide text-amber-400">
           mock
         </span>
       )}

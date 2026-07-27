@@ -2,6 +2,7 @@ import type {
   ApiErrorBody,
   FontInfo,
   HealthResponse,
+  ImageUploadResponse,
   LabelTypeInfo,
   PreviewRequest,
   PreviewResponse,
@@ -10,6 +11,7 @@ import type {
   PrintJobResponse,
   PrintRequest,
   PrinterStatusResponse,
+  SymbolInfo,
   TapeInfo,
   ValidationIssue,
 } from "./types";
@@ -96,6 +98,42 @@ export function getFonts(): Promise<FontInfo[]> {
 
 export function getTapes(): Promise<TapeInfo[]> {
   return request<TapeInfo[]>("/tapes");
+}
+
+export function getSymbols(): Promise<SymbolInfo[]> {
+  return request<SymbolInfo[]>("/symbols");
+}
+
+/** GET /api/symbols/{id} serves raw SVG bytes (not JSON) -- callers set an
+ * <img src> to this URL directly rather than fetching it through here. */
+export function symbolSvgUrl(symbolId: string): string {
+  return `${API_BASE}/symbols/${symbolId}`;
+}
+
+/** POST /api/images (multipart upload, task 2.7) -- bypasses request()'s
+ * JSON Content-Type (the browser sets multipart/form-data's own boundary
+ * automatically; setting Content-Type by hand would drop it). */
+export async function postImage(file: File): Promise<ImageUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/images`, { method: "POST", body: form });
+  if (!res.ok) {
+    const fallback = `image upload failed: ${res.status} ${res.statusText}`;
+    let detail = fallback;
+    try {
+      detail = extractErrorDetail(await res.json(), fallback);
+    } catch {
+      // non-JSON error body -- keep the fallback.
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as ImageUploadResponse;
+}
+
+/** GET /api/images/{id} serves raw PNG bytes -- an <img src> URL, same
+ * convention as symbolSvgUrl above. */
+export function imagePngUrl(imageId: string): string {
+  return `${API_BASE}/images/${imageId}`;
 }
 
 export function postPreview(body: PreviewRequest): Promise<PreviewResponse> {

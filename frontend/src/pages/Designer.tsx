@@ -1,30 +1,77 @@
-import {
-  buildDefinition,
-  hasRenderableContent,
-  tapeMismatchWarning,
-  useDesignerStore,
-} from "../stores/designer";
-import { usePreview } from "../hooks/usePreview";
-import { usePrinterStatus } from "../hooks/usePrinterStatus";
+import { useEffect, useRef, useState } from "react";
+import { HighlightContext } from "../components/schema/HighlightContext";
+import { SchemaForm } from "../components/schema/SchemaForm";
+import { FeedDeck } from "../components/FeedDeck";
+import { JobTray } from "../components/JobTray";
 import { TapeSelector } from "../components/TapeSelector";
-import { TextLabelForm } from "../components/TextLabelForm";
-import { LabelPreview } from "../components/LabelPreview";
-import { PrintButton } from "../components/PrintButton";
+import { Pending } from "../components/ui/Pending";
+import { panel, panelHeading, typeHeading } from "../components/ui/styles";
+import { usePreview } from "../hooks/usePreview";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { useLabelTypes } from "../hooks/useLabelTypes";
+import { usePrinterStatus } from "../hooks/usePrinterStatus";
+import { useTapes } from "../hooks/useTapes";
+import { hasRenderableContent } from "../schema/renderable";
+import { buildDefinition, tapeMismatchWarning, useDesignerStore } from "../stores/designer";
+import type { LabelDefinition } from "../api/types";
 
-const panel = "rounded-xl border border-ink-800 bg-ink-900/40 p-6";
-const panelHeading = "mb-4 text-sm font-semibold uppercase tracking-wide text-ink-400";
+const HIGHLIGHT_MS = 2000;
 
+/** The designer page: per the design doc's layout, a full-width feed deck
+ * (the hero) on top, then a parametric form (left, scrolls) beside a
+ * sticky job tray (right) below it. The left TYPES rail lives one level up
+ * in AppShell, not here -- this page only reacts to whichever type it
+ * says is selected. */
 export function Designer() {
+  const { data: labelTypes } = useLabelTypes();
+  const { data: tapes } = useTapes();
   const tape = useDesignerStore((s) => s.tape);
-  const params = useDesignerStore((s) => s.params);
+  const selectedType = useDesignerStore((s) => s.selectedType);
+  const paramsByType = useDesignerStore((s) => s.paramsByType);
   const setTapeWidthMm = useDesignerStore((s) => s.setTapeWidthMm);
+  const setTapeFamily = useDesignerStore((s) => s.setTapeFamily);
+  const setParams = useDesignerStore((s) => s.setParams);
 
-  const hasContent = hasRenderableContent(params);
-  const definition = buildDefinition(tape, params);
-  const preview = usePreview(definition);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reducedMotion = usePrefersReducedMotion();
 
-  // I1: preflight guardrail (not a hard block -- see tapeMismatchWarning's
-  // docstring for why printing itself stays enabled on a mismatch).
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+
+  const selectType = useDesignerStore((s) => s.selectType);
+  // Bootstrap: select the first type once the catalog loads, if nothing's
+  // selected yet (first visit / a full reload). Owned here (not TypeRail)
+  // so this page works whether or not the rail happens to be mounted
+  // alongside it (e.g. under test).
+  useEffect(() => {
+    if (selectedType == null && labelTypes && labelTypes.length > 0) {
+      selectType(labelTypes[0]!.type, labelTypes[0]!.params_schema);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedType, labelTypes]);
+
+  const typeInfo = labelTypes?.find((t) => t.type === selectedType) ?? null;
+  const params = (selectedType && paramsByType[selectedType]) || {};
+  // A fallback empty schema keeps every hook below callable on the very
+  // first render too, before GET /api/label-types resolves -- the "still
+  // loading" return happens AFTER every hook call in this component, never
+  // before (Rules of Hooks: same hooks, same order, every render).
+  const schema = typeInfo?.params_schema ?? { type: "object", properties: {} };
+  const definition = buildDefinition(selectedType ?? "text", tape, params);
+  // Gated on `typeInfo` explicitly (not just the fallback schema's shape)
+  // so usePreview/usePrintEstimate below stay disabled -- never firing a
+  // request against the placeholder "text"/{} definition -- until the real
+  // type and its schema have actually loaded.
+  const isRenderable = (def: LabelDefinition) => typeInfo !== null && hasRenderableContent(schema, def.params);
+  const hasContent = isRenderable(definition);
+
+  const preview = usePreview(definition, isRenderable);
+  const tapeInfo = tapes?.find((t) => t.family === tape.family && t.nominal_mm === tape.width_mm) ?? null;
+
   const printerStatus = usePrinterStatus();
   const tapeWarning = tapeMismatchWarning(
     tape.width_mm,
@@ -32,43 +79,79 @@ export function Designer() {
     printerStatus.data?.status?.media_width_mm,
   );
 
+  function handleFocusObject(objectId: string) {
+    setHighlightId(objectId);
+    const el = document.getElementById(objectId);
+    el?.focus();
+    el?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightId(null), HIGHLIGHT_MS);
+  }
+
+  if (!selectedType || !typeInfo) {
+    return (
+      <div className={panel}>
+        <Pending />
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 lg:flex-row lg:items-start">
-      <section className={`${panel} flex-1`}>
-        <h2 className={panelHeading}>Text label</h2>
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <section className={panel}>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <h2 className={typeHeading}>{typeInfo.title}</h2>
+          <TapeSelector
+            tape={tape}
+            onChange={(next) => {
+              if (next.family !== tape.family) setTapeFamily(next.family);
+              if (next.width_mm !== tape.width_mm) setTapeWidthMm(next.width_mm);
+            }}
+          />
+        </div>
         {tapeWarning && (
-          <div
-            role="alert"
-            className="mb-4 rounded-md border border-amber-600/50 bg-amber-950 px-3 py-2 text-xs text-amber-300"
-          >
+          <div role="alert" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-300">
             {tapeWarning}
           </div>
         )}
-        <div className="mb-6">
-          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-400">
-            Tape
-          </span>
-          <TapeSelector valueMm={tape.width_mm} onChange={setTapeWidthMm} />
-        </div>
-        <TextLabelForm />
+        <FeedDeck
+          tape={tape}
+          tapeInfo={tapeInfo}
+          hasContent={hasContent}
+          png={preview.png}
+          lengthMm={preview.lengthMm}
+          minFeedMm={preview.minFeedMm}
+          warnings={preview.warnings}
+          isFetching={preview.isFetching}
+          error={preview.error}
+          onFocusObject={handleFocusObject}
+        />
       </section>
 
-      <section className="flex w-full flex-col gap-6 lg:w-96">
-        <div className={panel}>
-          <h2 className={panelHeading}>Preview</h2>
-          <LabelPreview
-            tapeWidthMm={tape.width_mm}
-            hasContent={hasContent}
-            png={preview.png}
-            lengthMm={preview.lengthMm}
-            warnings={preview.warnings}
-            isFetching={preview.isFetching}
-            error={preview.error}
-          />
-        </div>
-        <PrintButton definition={definition} disabled={!hasContent} />
-        {tapeWarning && <p className="text-xs text-amber-400">{tapeWarning}</p>}
-      </section>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        {/* Mobile: the Job tray (chain mode, estimate, Print) comes right
+            after the feed deck, before the parametric form -- so the
+            primary action is reachable without scrolling past a
+            potentially long form first. Desktop: back to the design doc's
+            own left-form/right-tray order via lg:order-*. */}
+        <section className={`${panel} order-2 min-w-0 flex-1 lg:order-1`}>
+          <h2 className={panelHeading}>Parameters</h2>
+          <HighlightContext.Provider value={highlightId}>
+            <SchemaForm
+              labelType={selectedType}
+              schema={schema}
+              params={params}
+              onChange={(next) => setParams(selectedType, next)}
+            />
+          </HighlightContext.Provider>
+        </section>
+
+        <section className={`${panel} order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-80 lg:shrink-0`}>
+          <h2 className={panelHeading}>Job</h2>
+          {tapeWarning && <p className="mb-3 text-[12px] text-amber-400">{tapeWarning}</p>}
+          <JobTray definition={definition} hasContent={hasContent} isRenderable={isRenderable} />
+        </section>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,107 @@
+[
+  {
+    "nominal_mm": 3.5,
+    "family": "tze",
+    "print_dots": 24,
+    "print_mm": 3.4,
+    "max_length_mm": 1000
+  },
+  {
+    "nominal_mm": 6,
+    "family": "tze",
+    "print_dots": 32,
+    "print_mm": 4.5,
+    "max_length_mm": 1000
+  },
+  {
+    "nominal_mm": 9,
+    "family": "tze",
+    "print_dots": 50,
+    "print_mm": 7.1,
+    "max_length_mm": 1000
+  },
+  {
+    "nominal_mm": 12,
+    "family": "tze",
+    "print_dots": 70,
+    "print_mm": 9.9,
+    "max_length_mm": 1000
+  },
+  {
+    "nominal_mm": 18,
+    "family": "tze",
+    "print_dots": 112,
+    "print_mm": 15.8,
+    "max_length_mm": 1000
+  },
+  {
+    "nominal_mm": 24,
+    "family": "tze",
+    "print_dots": 128,
+    "print_mm": 18.1,
+    "max_length_mm": 1000
+  },
+  {
+    "nominal_mm": 5.8,
+    "family": "hse_2_1",
+    "print_dots": 28,
+    "print_mm": 4,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 8.8,
+    "family": "hse_2_1",
+    "print_dots": 48,
+    "print_mm": 6.8,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 11.7,
+    "family": "hse_2_1",
+    "print_dots": 66,
+    "print_mm": 9.3,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 17.7,
+    "family": "hse_2_1",
+    "print_dots": 106,
+    "print_mm": 15,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 23.6,
+    "family": "hse_2_1",
+    "print_dots": 128,
+    "print_mm": 18.1,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 5.2,
+    "family": "hse_3_1",
+    "print_dots": 20,
+    "print_mm": 2.8,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 9,
+    "family": "hse_3_1",
+    "print_dots": 44,
+    "print_mm": 6.2,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 11.2,
+    "family": "hse_3_1",
+    "print_dots": 50,
+    "print_mm": 7.1,
+    "max_length_mm": 500
+  },
+  {
+    "nominal_mm": 21,
+    "family": "hse_3_1",
+    "print_dots": 120,
+    "print_mm": 16.9,
+    "max_length_mm": 500
+  }
+]

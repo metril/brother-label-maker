@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Copied at build time by scripts/copy-fonts.mjs (predev/prebuild) -- see
+# frontend README's Fonts section. Not committed: source of truth is
+# backend/assets/fonts/.
+public/fonts

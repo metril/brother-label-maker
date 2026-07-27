@@ -1,103 +1,54 @@
 import { create } from "zustand";
-import type { HAlign, LabelDefinition, Tape, TextLabelParams } from "../api/types";
+import type { LabelDefinition, Tape, TapeFamily } from "../api/types";
+import { buildDefaultParams } from "../schema/defaults";
+import type { JsonSchemaObject } from "../schema/jsonSchema";
 
-// TZe tape widths and font families used to be hardcoded here (kept in
-// lockstep by hand with backend/driver/geometry.py's _TZE_ROWS and
-// backend/render/fonts.py's bundled set -- two drift risks). B2 replaced
-// both with live data: TapeSelector reads GET /api/tapes (via useTapes),
-// TextLabelForm's font select reads GET /api/fonts (via useFonts).
-
-export const MAX_LINES = 4;
-export const MIN_LINES = 1;
+// Was a text-only store (setLine/addLine/setFontFamily/... one setter per
+// TextLabelParams field) through task 2.9 -- task 2.10's schema-driven form
+// engine covers all 9 label types with ONE generic setParams, so the store
+// only needs to remember: which tape, which type is selected, and each
+// type's own params (kept PER TYPE, not just for the active one, so
+// switching from "text" to "barcode" and back doesn't lose what you typed).
 
 interface DesignerState {
   tape: Tape;
-  params: TextLabelParams;
+  selectedType: string | null;
+  paramsByType: Record<string, Record<string, unknown>>;
 
   setTapeWidthMm: (widthMm: number) => void;
-  setLine: (index: number, text: string) => void;
-  addLine: () => void;
-  removeLine: (index: number) => void;
-  setFontFamily: (family: string) => void;
-  setBold: (bold: boolean) => void;
-  setFontSizeMode: (mode: "auto" | "manual") => void;
-  setFontSizePx: (px: number) => void;
-  setHAlign: (align: HAlign) => void;
-  setLengthMode: (mode: "auto" | "manual") => void;
-  setLengthMm: (mm: number) => void;
-  setPaddingMm: (mm: number) => void;
+  setTapeFamily: (family: TapeFamily) => void;
+  /** Makes `type` the active type, seeding its params from `schema`'s own
+   * defaults (schema/defaults.ts) the FIRST time it's selected -- a later
+   * re-selection (switching back to a type visited earlier this session)
+   * keeps whatever was already there. */
+  selectType: (type: string, schema: JsonSchemaObject) => void;
+  setParams: (type: string, params: Record<string, unknown>) => void;
 }
-
-const initialParams: TextLabelParams = {
-  lines: [""],
-  font_family: "Inter",
-  bold: false,
-  font_size_px: null,
-  h_align: "center",
-  length_mm: null,
-  padding_mm: 2.0,
-};
 
 export const useDesignerStore = create<DesignerState>((set) => ({
   tape: { width_mm: 24, family: "tze" },
-  params: initialParams,
+  selectedType: null,
+  paramsByType: {},
 
-  setTapeWidthMm: (widthMm) =>
-    set((state) => ({ tape: { ...state.tape, width_mm: widthMm } })),
+  setTapeWidthMm: (widthMm) => set((state) => ({ tape: { ...state.tape, width_mm: widthMm } })),
 
-  setLine: (index, text) =>
+  setTapeFamily: (family) => set((state) => ({ tape: { ...state.tape, family } })),
+
+  selectType: (type, schema) =>
     set((state) => {
-      const lines = [...state.params.lines];
-      lines[index] = text;
-      return { params: { ...state.params, lines } };
+      if (state.paramsByType[type]) return { selectedType: type };
+      return {
+        selectedType: type,
+        paramsByType: { ...state.paramsByType, [type]: buildDefaultParams(schema) },
+      };
     }),
 
-  addLine: () =>
-    set((state) => {
-      if (state.params.lines.length >= MAX_LINES) return state;
-      return { params: { ...state.params, lines: [...state.params.lines, ""] } };
-    }),
-
-  removeLine: (index) =>
-    set((state) => {
-      if (state.params.lines.length <= MIN_LINES) return state;
-      const lines = state.params.lines.filter((_, i) => i !== index);
-      return { params: { ...state.params, lines } };
-    }),
-
-  setFontFamily: (family) => set((state) => ({ params: { ...state.params, font_family: family } })),
-
-  setBold: (bold) => set((state) => ({ params: { ...state.params, bold } })),
-
-  setFontSizeMode: (mode) =>
-    set((state) => ({
-      params: { ...state.params, font_size_px: mode === "auto" ? null : (state.params.font_size_px ?? 24) },
-    })),
-
-  setFontSizePx: (px) => set((state) => ({ params: { ...state.params, font_size_px: px } })),
-
-  setHAlign: (align) => set((state) => ({ params: { ...state.params, h_align: align } })),
-
-  setLengthMode: (mode) =>
-    set((state) => ({
-      params: { ...state.params, length_mm: mode === "auto" ? null : (state.params.length_mm ?? 40) },
-    })),
-
-  setLengthMm: (mm) => set((state) => ({ params: { ...state.params, length_mm: mm } })),
-
-  setPaddingMm: (mm) => set((state) => ({ params: { ...state.params, padding_mm: mm } })),
+  setParams: (type, params) =>
+    set((state) => ({ paramsByType: { ...state.paramsByType, [type]: params } })),
 }));
 
-/** True when the form has at least one non-whitespace line -- the backend
- * (TextLabelParams._check_lines) 422s on an all-blank `lines` list, so the
- * UI gates preview/print requests on this instead of round-tripping a 422
- * for the empty-textarea case every user hits on first load. */
-export function hasRenderableContent(params: TextLabelParams): boolean {
-  return params.lines.some((line) => line.trim() !== "");
-}
-
-export function buildDefinition(tape: Tape, params: TextLabelParams): LabelDefinition {
-  return { type: "text", tape, params };
+export function buildDefinition(type: string, tape: Tape, params: Record<string, unknown>): LabelDefinition {
+  return { type, tape, params };
 }
 
 /** I1: tape-mismatch preflight guardrail message, or null when there's

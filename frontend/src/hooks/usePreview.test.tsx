@@ -19,6 +19,14 @@ function definitionWithText(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
 }
 
+/** Mirrors text_label.py's own "at least one non-blank line" gate --
+ * usePreview is type-generic now (task 2.10), so callers supply their own
+ * predicate instead of it importing a text-only hasRenderableContent. */
+function isRenderable(definition: LabelDefinition): boolean {
+  const lines = (definition.params as { lines: string[] }).lines;
+  return lines.some((line) => line.trim() !== "");
+}
+
 describe("usePreview", () => {
   it("debounces rapid definition changes into a single request, not one per keystroke", async () => {
     const requestSpy = vi.fn();
@@ -30,6 +38,7 @@ describe("usePreview", () => {
           png_width_px: 200,
           png_height_px: 96,
           length_mm: 25.4,
+          min_feed_mm: 24.5,
           warnings: [],
         });
       }),
@@ -37,7 +46,7 @@ describe("usePreview", () => {
 
     vi.useFakeTimers();
     try {
-      const { rerender } = renderHook(({ definition }) => usePreview(definition), {
+      const { rerender } = renderHook(({ definition }) => usePreview(definition, isRenderable), {
         initialProps: { definition: definitionWithText("H") },
         wrapper: createWrapper(),
       });
@@ -57,7 +66,7 @@ describe("usePreview", () => {
     await waitFor(() => expect(requestSpy).toHaveBeenCalledTimes(1));
   });
 
-  it("returns a decoded png data URL and surfaces warnings from the response", async () => {
+  it("returns a decoded png data URL, min_feed_mm, and warnings from the response", async () => {
     server.use(
       http.post("/api/render/preview", () =>
         HttpResponse.json({
@@ -65,6 +74,7 @@ describe("usePreview", () => {
           png_width_px: 200,
           png_height_px: 96,
           length_mm: 25.4,
+          min_feed_mm: 24.5,
           warnings: [
             {
               code: "text_truncated",
@@ -77,13 +87,14 @@ describe("usePreview", () => {
       ),
     );
 
-    const { result } = renderHook(() => usePreview(definitionWithText("HELLO")), {
+    const { result } = renderHook(() => usePreview(definitionWithText("HELLO"), isRenderable), {
       wrapper: createWrapper(),
     });
 
     await waitFor(() => expect(result.current.png).not.toBeNull());
     expect(result.current.png).toBe(`data:image/png;base64,${TINY_PNG_B64}`);
     expect(result.current.lengthMm).toBe(25.4);
+    expect(result.current.minFeedMm).toBe(24.5);
     expect(result.current.warnings).toEqual([
       {
         code: "text_truncated",
@@ -119,6 +130,7 @@ describe("usePreview", () => {
           png_width_px: 200,
           png_height_px: 96,
           length_mm: 25.4,
+          min_feed_mm: 24.5,
           warnings: [],
         });
       }),
@@ -126,7 +138,7 @@ describe("usePreview", () => {
 
     vi.useFakeTimers();
     try {
-      const { rerender } = renderHook(({ definition }) => usePreview(definition), {
+      const { rerender } = renderHook(({ definition }) => usePreview(definition, isRenderable), {
         initialProps: { definition: definitionWithText("") },
         wrapper: createWrapper(),
       });

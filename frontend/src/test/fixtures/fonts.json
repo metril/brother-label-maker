@@ -1,0 +1,26 @@
+[
+  {
+    "family": "Inter",
+    "display_name": "Inter",
+    "monospace": false,
+    "has_bold": true
+  },
+  {
+    "family": "Roboto Condensed",
+    "display_name": "Roboto Condensed",
+    "monospace": false,
+    "has_bold": true
+  },
+  {
+    "family": "JetBrains Mono",
+    "display_name": "JetBrains Mono",
+    "monospace": true,
+    "has_bold": true
+  },
+  {
+    "family": "DejaVu Sans",
+    "display_name": "DejaVu Sans",
+    "monospace": false,
+    "has_bold": true
+  }
+]

@@ -2,17 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, getPrintJob, postPrint } from "../api/client";
 import { useJobEvent } from "../hooks/useJobEvents";
-import type { LabelDefinition } from "../api/types";
+import type { LabelDefinition, PrintOptions } from "../api/types";
 
 const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 30_000;
 const DONE_FLASH_MS = 2000;
+
+const DEFAULT_OPTIONS: PrintOptions = { chain_mode: "cut_each", margin_mm: 2.0, auto_cut: true };
 
 type Phase = "idle" | "printing" | "done" | "failed";
 
 interface PrintButtonProps {
   definition: LabelDefinition;
   disabled?: boolean;
+  /** Job Tray's chosen chain mode/margin/auto-cut -- defaults to the
+   * classic single-label cut-each behavior when the caller doesn't (yet)
+   * offer a choice. */
+  options?: PrintOptions;
 }
 
 /** POST /api/print, then track the job to a terminal state two ways at
@@ -20,7 +26,7 @@ interface PrintButtonProps {
  * of GET /api/print/jobs/{id} as a fallback -- whichever source reports
  * "done"/"failed" first wins. A REAL timer (not query data) enforces the
  * 30s cap -- see its effect below for why. */
-export function PrintButton({ definition, disabled }: PrintButtonProps) {
+export function PrintButton({ definition, disabled, options = DEFAULT_OPTIONS }: PrintButtonProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [jobId, setJobId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -34,7 +40,7 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
     mutationFn: (def: LabelDefinition) =>
       postPrint({
         labels: [def],
-        options: { chain_mode: "cut_each", margin_mm: 2.0, auto_cut: true },
+        options,
       }),
     onSuccess: (data) => {
       setJobId(data.job_id);
@@ -146,10 +152,10 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
 
   const buttonClass =
     phase === "done"
-      ? "border-emerald-500 bg-emerald-950 text-emerald-300"
+      ? "border-sage-400 bg-sage-400/15 text-sage-400"
       : phase === "failed"
-        ? "border-red-600 bg-red-950 text-red-300"
-        : "border-amber-500 bg-amber-600 text-ink-950 hover:bg-amber-500";
+        ? "border-rust-500 bg-rust-500/15 text-rust-500"
+        : "border-amber-500 bg-amber-500 text-deck-950 hover:bg-amber-300";
 
   return (
     <div className="flex flex-col items-start gap-2">
@@ -157,12 +163,12 @@ export function PrintButton({ definition, disabled }: PrintButtonProps) {
         type="button"
         onClick={handleClick}
         disabled={busy || disabled}
-        className={`rounded-md border px-5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
+        className={`rounded-md border px-5 py-2 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
       >
         {label}
       </button>
       {phase === "failed" && errorText && (
-        <p role="alert" className="text-xs text-red-400">
+        <p role="alert" className="text-[12px] text-rust-500">
           {errorText}
         </p>
       )}

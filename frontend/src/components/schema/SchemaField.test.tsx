@@ -1,0 +1,158 @@
+import { useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { JsonSchemaObject } from "../../schema/jsonSchema";
+import { SchemaField } from "./SchemaField";
+
+/** Uncontrolled-from-the-caller's-perspective harness: SchemaField itself
+ * is a controlled component (value/onChange props), so most interaction
+ * tests need SOMETHING holding state between renders -- this is that,
+ * kept in the test file rather than exported, since no real caller ever
+ * uses SchemaField this directly (SchemaForm always owns the params
+ * object -- see SchemaForm.test.tsx / AllTypes.test.tsx for that level). */
+function Harness<T>({ schema, root, fieldKey, initial }: { schema: JsonSchemaObject; root?: JsonSchemaObject; fieldKey: string; initial: T }) {
+  const [value, setValue] = useState<T>(initial);
+  return (
+    <SchemaField
+      fieldKey={fieldKey}
+      schema={schema}
+      root={root ?? schema}
+      value={value}
+      onChange={(v) => setValue(v as T)}
+      path={[fieldKey]}
+      allParams={{}}
+    />
+  );
+}
+
+describe("SchemaField shapes", () => {
+  it("string: renders a labeled text input, description becomes help text, typing calls onChange", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const schema: JsonSchemaObject = {
+      type: "string",
+      description: "the value encoded in the code",
+      maxLength: 500,
+    };
+    render(<SchemaField fieldKey="data" schema={schema} root={schema} value="" onChange={onChange} path={["data"]} allParams={{}} />);
+
+    expect(screen.getByText("the value encoded in the code")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Data"), "X");
+    expect(onChange).toHaveBeenCalledWith("X");
+  });
+
+  it("number: carries the schema's own min/max as HTML bounds and shows an inline alert only when the current value violates them", () => {
+    const schema: JsonSchemaObject = { type: "number", minimum: 5, maximum: 300 };
+    const { rerender } = render(
+      <SchemaField fieldKey="block_length_mm" schema={schema} root={schema} value={15} onChange={vi.fn()} path={["x"]} allParams={{}} />,
+    );
+    const input = screen.getByLabelText("Block length (mm)");
+    expect(input).toHaveAttribute("min", "5");
+    expect(input).toHaveAttribute("max", "300");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    rerender(
+      <SchemaField fieldKey="block_length_mm" schema={schema} root={schema} value={400} onChange={vi.fn()} path={["x"]} allParams={{}} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("must be between 5 and 300");
+  });
+
+  it("boolean: renders a real checkbox toggled by its own label", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const schema: JsonSchemaObject = { type: "boolean" };
+    render(<SchemaField fieldKey="bold" schema={schema} root={schema} value={false} onChange={onChange} path={["bold"]} allParams={{}} />);
+
+    const checkbox = screen.getByLabelText("Bold");
+    expect(checkbox).toHaveAttribute("type", "checkbox");
+    await user.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("enum with <=4 options renders a keyboard-navigable segmented radiogroup, not a dropdown", () => {
+    const schema: JsonSchemaObject = { type: "string", enum: ["left", "center", "right"] };
+    render(<SchemaField fieldKey="h_align" schema={schema} root={schema} value="center" onChange={vi.fn()} path={["h_align"]} allParams={{}} />);
+
+    expect(screen.getByRole("radiogroup", { name: "H align" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Center" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("enum with >4 options renders a native select instead", () => {
+    const schema: JsonSchemaObject = { type: "string", enum: ["tic", "dash", "line", "bold", "frame", "none"] };
+    render(<SchemaField fieldKey="separator" schema={schema} root={schema} value="line" onChange={vi.fn()} path={["separator"]} allParams={{}} />);
+
+    expect(screen.getByLabelText("Separator").tagName).toBe("SELECT");
+  });
+
+  it("array-of-string: add respects maxItems, remove respects minItems, reorder swaps values, rows are labeled 1-indexed", async () => {
+    const user = userEvent.setup();
+    const schema: JsonSchemaObject = { type: "array", items: { type: "string" }, minItems: 1, maxItems: 2 };
+    render(<Harness schema={schema} fieldKey="lines" initial={["A"]} />);
+
+    expect(screen.getByLabelText("Lines 1")).toHaveValue("A");
+    expect(screen.getByLabelText("Remove Lines 1")).toBeDisabled(); // at minItems
+
+    await user.click(screen.getByLabelText("Add Lines row"));
+    await user.type(screen.getByLabelText("Lines 2"), "B");
+    expect(screen.getByLabelText("Add Lines row")).toBeDisabled(); // at maxItems
+
+    await user.click(screen.getByLabelText("Move Lines 1 down"));
+    expect(screen.getByLabelText("Lines 1")).toHaveValue("B");
+    expect(screen.getByLabelText("Lines 2")).toHaveValue("A");
+
+    await user.click(screen.getByLabelText("Remove Lines 2"));
+    expect(screen.queryByLabelText("Lines 2")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Remove Lines 1")).toBeDisabled();
+  });
+
+  it("array-of-object: rows recurse through SchemaField for their own nested fields, get block-N DOM ids, and add/remove works", async () => {
+    const user = userEvent.setup();
+    const root: JsonSchemaObject = {
+      type: "object",
+      properties: {},
+      $defs: {
+        BreakerSpec: {
+          type: "object",
+          properties: {
+            poles: { type: "integer", minimum: 1, maximum: 4, default: 1 },
+            lines: { type: "array", items: { type: "string", maxLength: 30 }, maxItems: 2 },
+          },
+        },
+      },
+    };
+    const schema: JsonSchemaObject = { type: "array", items: { $ref: "#/$defs/BreakerSpec" }, minItems: 1, maxItems: 50 };
+    render(<Harness schema={schema} root={root} fieldKey="breakers" initial={[{ poles: 1, lines: [] }]} />);
+
+    expect(document.getElementById("block-0")).toBeInTheDocument();
+    expect(screen.getByLabelText("Poles")).toHaveValue(1); // nested field, recursively rendered
+    expect(screen.getByLabelText("Remove Breakers 1")).toBeDisabled();
+
+    await user.click(screen.getByLabelText("Add Breakers row"));
+    expect(document.getElementById("block-1")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Poles")).toHaveLength(2);
+
+    await user.click(screen.getByLabelText("Remove Breakers 2"));
+    expect(document.getElementById("block-1")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Poles")).toHaveLength(1);
+  });
+
+  it("nullable field: starts Auto (control hidden), Manual reveals it seeded with a sensible value, Auto clears it back to null", async () => {
+    const user = userEvent.setup();
+    const schema: JsonSchemaObject = {
+      anyOf: [{ type: "integer" }, { type: "null" }],
+      default: null,
+      description: "fixed font size in px; omit for auto-fit",
+    };
+    render(<Harness schema={schema} fieldKey="font_size_px" initial={null} />);
+
+    expect(screen.getByText("fixed font size in px; omit for auto-fit")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Font size (px)")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Manual" }));
+    expect(screen.getByLabelText("Font size (px)")).toHaveValue(24);
+
+    await user.click(screen.getByRole("radio", { name: "Auto" }));
+    expect(screen.queryByLabelText("Font size (px)")).not.toBeInTheDocument();
+  });
+});

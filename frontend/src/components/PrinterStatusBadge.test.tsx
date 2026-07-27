@@ -6,10 +6,10 @@ import { renderWithQueryClient } from "../test/utils";
 import { server } from "../test/msw/server";
 
 describe("PrinterStatusBadge", () => {
-  it("shows connected + media width, plus a mock tag, when the printer is reachable", async () => {
+  it("shows connected + media width/family/lamination, plus a mock tag, when the printer is reachable", async () => {
     renderWithQueryClient(<PrinterStatusBadge />);
 
-    expect(await screen.findByText("24mm")).toBeInTheDocument();
+    expect(await screen.findByText("connected · 24mm TZe · laminated")).toBeInTheDocument();
     expect(screen.getByText("mock")).toBeInTheDocument();
   });
 

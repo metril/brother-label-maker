@@ -1,6 +1,8 @@
 // Types mirroring the backend API contract (backend/src/labelmaker/api/*.py).
 // Keep in lockstep with that source, not with the task brief's summary of it.
 
+import type { JsonSchemaObject } from "../schema/jsonSchema";
+
 export type TapeFamily = "tze" | "hse_2_1" | "hse_3_1";
 
 export interface Tape {
@@ -74,7 +76,13 @@ export interface LabelTypeInfo {
   category: string;
   /** None (null) = usable on any tape width. Not yet consumed by any UI. */
   min_tape_mm: number | null;
-  params_schema: Record<string, unknown>;
+  /** pydantic's `model_json_schema()` output for this type's own Params
+   * model -- task 2.10's schema-driven form renderer (src/schema/,
+   * src/components/schema/) walks this directly. See
+   * src/schema/jsonSchema.ts's module docstring for exactly which JSON
+   * Schema shapes it's verified against (the 9 real types' live output,
+   * fixtured at src/test/fixtures/label-types.json). */
+  params_schema: JsonSchemaObject;
 }
 
 /** Mirrors backend/render/fonts.py's FontInfo -- GET /api/fonts. */

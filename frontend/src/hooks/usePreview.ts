@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ApiError, pngDataUrl, postPreview } from "../api/client";
-import { hasRenderableContent } from "../stores/designer";
-import type { LabelDefinition, RenderWarning, TextLabelParams } from "../api/types";
+import type { LabelDefinition, RenderWarning } from "../api/types";
 
 const DEBOUNCE_MS = 300;
 /** Matches the backend's default PreviewRequest.scale (router_labels.py) --
@@ -17,6 +16,7 @@ export interface UsePreviewResult {
    * (those are scaled device-dot dimensions; see api/types.ts's
    * PreviewResponse doc). */
   lengthMm: number | null;
+  minFeedMm: number | null;
   warnings: RenderWarning[];
   isFetching: boolean;
   error: string | null;
@@ -26,8 +26,17 @@ export interface UsePreviewResult {
  * burst of keystrokes/param changes collapses into a single request instead
  * of one per change. The previous image is kept on screen (placeholderData:
  * keepPreviousData) while a new one loads, so the preview never flashes
- * blank between renders -- only `isFetching` flips, for a subtle indicator. */
-export function usePreview(definition: LabelDefinition): UsePreviewResult {
+ * blank between renders -- only `isFetching` flips, for a subtle indicator.
+ *
+ * `isRenderable` decides whether the (debounced) definition is even worth
+ * sending -- type-generic (task 2.10: every one of the 9 label types has
+ * its own notion of "has enough content to preview", see
+ * schema/renderable.ts's hasRenderableContent), unlike the text-only
+ * hasRenderableContent this hook used to import directly. */
+export function usePreview(
+  definition: LabelDefinition,
+  isRenderable: (definition: LabelDefinition) => boolean,
+): UsePreviewResult {
   // Starts undefined (not seeded with `definition`) so the FIRST value is
   // debounced exactly like every subsequent one -- otherwise the initial
   // render would fire an immediate, un-debounced request before the 300ms
@@ -49,13 +58,12 @@ export function usePreview(definition: LabelDefinition): UsePreviewResult {
   // has caught up (it's still whatever settled 300ms ago, possibly the
   // still-blank initial state) -- firing a request against that stale,
   // non-renderable `debounced` and 422-ing for one query cycle.
-  const isRenderable =
-    debounced !== undefined && hasRenderableContent(debounced.params as TextLabelParams);
+  const isDebouncedRenderable = debounced !== undefined && isRenderable(debounced);
 
   const query = useQuery({
     queryKey: ["preview", debounced ? JSON.stringify(debounced) : null, PREVIEW_SCALE],
     queryFn: () => postPreview({ definition: debounced as LabelDefinition, scale: PREVIEW_SCALE }),
-    enabled: isRenderable,
+    enabled: isDebouncedRenderable,
     placeholderData: keepPreviousData,
     retry: false,
     staleTime: Infinity,
@@ -70,6 +78,7 @@ export function usePreview(definition: LabelDefinition): UsePreviewResult {
   return {
     png: query.data ? pngDataUrl(query.data.png_b64) : null,
     lengthMm: query.data?.length_mm ?? null,
+    minFeedMm: query.data?.min_feed_mm ?? null,
     warnings: query.data?.warnings ?? [],
     isFetching: query.isFetching,
     error,
