@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pydantic-settings>=2.4",
     "python-multipart>=0.0.32",
+    "qrcode>=7",
+    "python-barcode>=0.15",
+    "ppf-datamatrix>=0.2",
 ]
 
 [dependency-groups]
