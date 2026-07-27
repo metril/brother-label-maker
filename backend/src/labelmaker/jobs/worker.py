@@ -143,7 +143,26 @@ async def _process_job(state, job_id: str) -> None:
 
         # tape_used_mm stays whatever it already was (None at creation) --
         # the tape-length estimator is Phase 2.9, not this task.
-        await db.update_job(job_id, status="done", preview_png=thumbnail)
+        #
+        # Task 2.8 carry-forward: backfill strategy/tape_width_mm/
+        # media_raw_byte from what this print ACTUALLY used, not what the
+        # request declared -- result.job.strategy_name is the strategy that
+        # actually built the stream (config.printer_init_strategy, resolved
+        # by _open_print_close above; mock mode still records this, since
+        # it's the configured strategy either way, not something the mock
+        # negotiates). result.tape/status_before come from print_images'
+        # OWN tape resolution against the printer's live status (I4's
+        # resolve_tape, possibly TZe-assumed) -- the same "what's actually
+        # loaded" source I1's tape-mismatch error message above already
+        # relies on, not the label's merely-declared tape.
+        await db.update_job(
+            job_id,
+            status="done",
+            preview_png=thumbnail,
+            strategy=result.job.strategy_name,
+            tape_width_mm=result.tape.nominal_mm,
+            media_raw_byte=result.status_before.media_type_raw,
+        )
         await bus.broadcast({"event": "job.done", "job_id": job_id})
     except Exception as exc:
         await db.update_job(job_id, status="failed", error=str(exc))

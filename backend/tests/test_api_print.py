@@ -129,6 +129,33 @@ async def test_print_walking_skeleton_e2e_mock_mode(app_and_client):
     assert thumb_img.height == 128
 
 
+# --- 1b. task 2.8 carry-forward: worker backfills strategy/tape_width_mm/ --
+# media_raw_byte on a successful print -- these three columns exist in the
+# schema since 0001_init.sql but were never actually populated post-print
+# until now (create_print_job's own strategy=/tape_width_mm=/media_raw_byte=
+# kwargs are for a DIFFERENT, not-yet-used caller shape -- the worker itself
+# always created jobs via the 3-positional-arg call and left them NULL).
+
+
+async def test_print_backfills_strategy_tape_width_and_media_raw_byte_on_done(app_and_client):
+    app, client = app_and_client
+
+    resp = await client.post("/api/print", json={"labels": [_text_label("HELLO")]})
+    job_id = resp.json()["job_id"]
+
+    job = await _wait_for_terminal_job(client, job_id)
+    assert job["status"] == "done"
+
+    # Mock mode still records the CONFIGURED strategy (there's no real
+    # printer to have negotiated one with) -- app_config's plain default is
+    # "classic" (see conftest.py's _DEFAULT_APP_CONFIG_KWARGS).
+    assert job["strategy"] == "classic"
+    # The mock transport always answers with REFERENCE_STATUS_BLOCK: 24mm,
+    # media_type_raw 0x14 (see this module's docstring/_TAPE_24MM_TZE).
+    assert job["tape_width_mm"] == 24.0
+    assert job["media_raw_byte"] == 0x14
+
+
 # --- 2. chain_ff, two labels: byte-parity against in-test build_job ---
 
 
@@ -486,7 +513,7 @@ async def test_print_serialization_alpha_underflow_rejected_before_queueing(clie
     # _validate_render_side gives the non-serialized path.
     app, _ = app_and_client
     db = app.state.db
-    before = await db.list_jobs(page_size=1000)
+    before = await db.list_jobs(page_size=100)  # page_size is capped at 100 (task 2.8)
 
     resp = await client.post(
         "/api/print",
@@ -497,7 +524,7 @@ async def test_print_serialization_alpha_underflow_rejected_before_queueing(clie
     )
     assert resp.status_code == 422
 
-    after = await db.list_jobs(page_size=1000)
+    after = await db.list_jobs(page_size=100)
     assert after["total"] == before["total"]  # nothing was ever persisted
 
 
@@ -581,7 +608,7 @@ async def test_print_text_with_image_icon_completes_and_uses_uploaded_image(clie
 async def test_print_unknown_image_icon_rejected_before_queueing(client, app_and_client):
     app, _ = app_and_client
     db = app.state.db
-    before = await db.list_jobs(page_size=1000)
+    before = await db.list_jobs(page_size=100)  # page_size is capped at 100 (task 2.8)
 
     unknown_id = uuid.uuid4().hex  # well-formed (matches IMAGE_ID_RE), never uploaded
     label = {
@@ -593,7 +620,7 @@ async def test_print_unknown_image_icon_rejected_before_queueing(client, app_and
     assert resp.status_code == 422
     assert "unknown image_id" in resp.json()["detail"]
 
-    after = await db.list_jobs(page_size=1000)
+    after = await db.list_jobs(page_size=100)
     assert after["total"] == before["total"]  # nothing was ever persisted
 
 
@@ -613,7 +640,7 @@ async def test_print_with_malicious_image_icon_id_rejected_before_queueing(
 ):
     app, _ = app_and_client
     db = app.state.db
-    before = await db.list_jobs(page_size=1000)
+    before = await db.list_jobs(page_size=100)  # page_size is capped at 100 (task 2.8)
 
     label = {
         "type": "text",
@@ -624,7 +651,7 @@ async def test_print_with_malicious_image_icon_id_rejected_before_queueing(
     assert resp.status_code == 422
     assert "invalid image_id" in resp.json()["detail"]
 
-    after = await db.list_jobs(page_size=1000)
+    after = await db.list_jobs(page_size=100)
     assert after["total"] == before["total"]  # nothing was ever persisted
 
 

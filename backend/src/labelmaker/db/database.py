@@ -77,12 +77,22 @@ class Database:
             "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
         )
 
-        cur = await self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
-        row = await cur.fetchone()
-        current_version = row[0]
+        # Phase-1 review triage: gate on SET MEMBERSHIP of applied versions,
+        # not MAX(version). A MAX-based gate ("skip anything <= the highest
+        # version we've recorded") silently and permanently skips a
+        # migration numbered BELOW an already-applied higher one -- e.g.
+        # 0002 merged in from a diverged branch after 0003 already shipped
+        # to this db file. That migration would never run, with no error --
+        # just a schema quietly missing whatever 0002 was supposed to add.
+        # Checking "is THIS EXACT version already recorded" instead applies
+        # any such gap-fill correctly regardless of where it falls relative
+        # to what's already been applied.
+        cur = await self._conn.execute("SELECT version FROM schema_migrations")
+        rows = await cur.fetchall()
+        applied_versions = {row[0] for row in rows}
 
         for version, path in self._discover_migrations(migrations_dir):
-            if version <= current_version:
+            if version in applied_versions:
                 continue
             statements = self._split_statements(path.read_text())
             await self._conn.execute("BEGIN")
@@ -117,14 +127,28 @@ class Database:
 
     @staticmethod
     def _discover_migrations(migrations_dir: Path) -> list[tuple[int, Path]]:
-        found = []
-        for path in migrations_dir.glob("*.sql"):
+        """Glob `migrations_dir` for `NNNN_*.sql` files, sorted by version.
+
+        Phase-1 review triage: two files sharing the same version number
+        (e.g. a rebase/merge collision) used to resolve silently by whichever
+        one glob() happened to yield first -- the other was dropped with no
+        error, and which one "won" wasn't even deterministic across
+        filesystems. Rejected here, at discovery, with a clear error naming
+        both filenames, before either one is ever read let alone executed.
+        """
+        found: dict[int, Path] = {}
+        for path in sorted(migrations_dir.glob("*.sql")):
             match = _MIGRATION_FILE_RE.match(path.name)
             if not match:
                 continue
-            found.append((int(match.group(1)), path))
-        found.sort(key=lambda item: item[0])
-        return found
+            version = int(match.group(1))
+            if version in found:
+                raise ValueError(
+                    f"duplicate migration version {version}: "
+                    f"{found[version].name!r} and {path.name!r}"
+                )
+            found[version] = path
+        return sorted(found.items())
 
     # -- settings ----------------------------------------------------------
 
@@ -296,17 +320,49 @@ class Database:
         *,
         status: str | None = None,
         error: str | None = None,
+        clear_error: bool = False,
+        strategy: str | None = None,
+        tape_width_mm: float | None = None,
+        media_raw_byte: int | None = None,
         tape_used_mm: float | None = None,
         preview_png: bytes | None = None,
     ) -> dict | None:
+        """Partial update: every column argument left at its default (None,
+        or False for `clear_error`) is left untouched -- this method never
+        overwrites a column the caller didn't explicitly ask to change.
+
+        `strategy`/`tape_width_mm`/`media_raw_byte` (task 2.8) are the
+        worker's post-print backfill columns (see jobs/worker.py) -- set
+        once a job has actually printed, from what was really used, not
+        what the request declared.
+
+        `clear_error`: `error=None` already means "leave `error` as-is"
+        (the same convention every other column here follows), so it can't
+        ALSO mean "set it to NULL" without becoming ambiguous at the call
+        site. A dedicated bool keeps that convention intact for `error` too,
+        instead of a magic sentinel value or a second "NOT_SET" object --
+        simplest option that says exactly what it does. Passing both `error`
+        and `clear_error=True` is almost certainly a caller bug (which one
+        wins?), so it's rejected outright rather than silently picking one.
+        """
         if status is not None and status not in _VALID_JOB_STATUSES:
             raise ValueError(f"invalid status: {status!r}")
+        if error is not None and clear_error:
+            raise ValueError("update_job: pass at most one of `error` and `clear_error=True`")
 
         fields: dict[str, Any] = {}
         if status is not None:
             fields["status"] = status
-        if error is not None:
+        if clear_error:
+            fields["error"] = None
+        elif error is not None:
             fields["error"] = error
+        if strategy is not None:
+            fields["strategy"] = strategy
+        if tape_width_mm is not None:
+            fields["tape_width_mm"] = tape_width_mm
+        if media_raw_byte is not None:
+            fields["media_raw_byte"] = media_raw_byte
         if tape_used_mm is not None:
             fields["tape_used_mm"] = tape_used_mm
         if preview_png is not None:
@@ -330,6 +386,17 @@ class Database:
         return self._job_row_to_dict(row) if row is not None else None
 
     async def list_jobs(self, page: int = 1, page_size: int = 20) -> dict:
+        # Phase-1 review triage: page_size=-1 previously reached the SQL
+        # LIMIT clause unvalidated -- SQLite treats `LIMIT -1` as "no limit
+        # at all", turning one malformed query param into an unbounded
+        # query. Both bounds are enforced here, before any SQL runs, so the
+        # API layer can map a ValueError straight to 422 (see
+        # api/router_history.py).
+        if page < 1:
+            raise ValueError(f"page must be >= 1, got {page}")
+        if not (1 <= page_size <= 100):
+            raise ValueError(f"page_size must be between 1 and 100, got {page_size}")
+
         cur = await self._conn.execute("SELECT COUNT(*) FROM print_jobs")
         row = await cur.fetchone()
         total = row[0]

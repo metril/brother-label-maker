@@ -178,6 +178,75 @@ async def test_print_job_lifecycle():
         await db.close()
 
 
+async def test_update_job_widened_columns_and_clear_error_sentinel():
+    """Task 2.8 carry-forward: update_job widened to also accept
+    strategy/tape_width_mm/media_raw_byte (the worker backfill columns --
+    see jobs/worker.py), plus a `clear_error` flag to explicitly null out
+    `error` on e.g. a manual re-queue.
+
+    `clear_error` (not a None-sentinel on `error` itself) because `error`
+    already means "leave unchanged" at None throughout this method, same as
+    every other optional column here (tape_used_mm, preview_png, ...) --
+    overloading None to ALSO mean "set it to NULL" for just this one field
+    would make it the sole exception to that convention, and silently
+    ambiguous besides (a caller who does `update_job(id, error=maybe_none)`
+    could never tell "don't touch" from "clear" apart at the call site). A
+    separate explicit bool keeps every field's None meaning exactly what it
+    already means everywhere else in this signature.
+    """
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+
+        updated = await db.update_job(
+            job["id"], strategy="classic", tape_width_mm=24.0, media_raw_byte=0x14
+        )
+        assert updated["strategy"] == "classic"
+        assert updated["tape_width_mm"] == 24.0
+        assert updated["media_raw_byte"] == 0x14
+
+        failed = await db.update_job(job["id"], status="failed", error="tape jam")
+        assert failed["error"] == "tape jam"
+
+        # clear_error=True nulls `error` out even though no new `error` was
+        # given -- e.g. a manual re-queue back to "queued" clearing a stale
+        # failure message.
+        cleared = await db.update_job(job["id"], status="queued", clear_error=True)
+        assert cleared["status"] == "queued"
+        assert cleared["error"] is None
+
+        # Columns untouched by that last call keep their prior values --
+        # clear_error doesn't reset anything else.
+        assert cleared["strategy"] == "classic"
+
+        with pytest.raises(ValueError):
+            await db.update_job(job["id"], error="x", clear_error=True)
+
+        with pytest.raises(ValueError):
+            await db.update_job(job["id"], status="not-a-real-status")
+    finally:
+        await db.close()
+
+
+async def test_list_jobs_bounds_raise_value_error():
+    """Phase-1 review triage: page_size=-1 used to reach SQL as `LIMIT -1`,
+    which SQLite treats as "no limit" -- an unbounded query from a single
+    malformed query param. page/page_size are now validated up front."""
+    db = await Database.open(":memory:")
+    try:
+        for kwargs in (
+            {"page": 0},
+            {"page": -1},
+            {"page_size": 0},
+            {"page_size": 101},
+            {"page_size": -1},
+        ):
+            with pytest.raises(ValueError):
+                await db.list_jobs(**kwargs)
+    finally:
+        await db.close()
+
+
 async def test_print_job_pagination_newest_first_excludes_preview():
     db = await Database.open(":memory:")
     try:
@@ -277,6 +346,61 @@ async def test_migration_runner_applies_additional_migration(tmp_path):
     (count,) = await cur.fetchone()
     assert count == 2
     await db2.close()
+
+
+async def test_migration_gap_fill_applies_missing_version_below_already_applied_max(tmp_path):
+    """Phase-1 review triage: the old gate compared each discovered version
+    against MAX(applied version) -- so a migration numbered BELOW an
+    already-applied higher version (e.g. 0002 merged in after 0003 already
+    shipped to this db, from a diverged branch) was silently skipped
+    forever, even though it was never actually applied. The fix gates on
+    SET membership of applied versions instead: "is this exact version
+    already recorded", not "is this version <= the highest one recorded"."""
+    import shutil
+
+    custom_dir = tmp_path / "migrations"
+    shutil.copytree(_MIGRATIONS_DIR, custom_dir)  # ships 0001_init.sql
+    (custom_dir / "0003_add_note3.sql").write_text(
+        "ALTER TABLE presets ADD COLUMN note3 TEXT;\n"
+    )
+
+    db_path = tmp_path / "gapfill.db"
+    db = await Database.open(db_path, migrations_dir=custom_dir)
+    cur = await db._conn.execute("SELECT version FROM schema_migrations ORDER BY version")
+    rows = await cur.fetchall()
+    assert [row[0] for row in rows] == [1, 3]
+    await db.close()
+
+    # 0002 lands in the migrations dir AFTER 0003 was already applied to
+    # this db file -- a gap below the recorded max. Re-opening must still
+    # apply it.
+    (custom_dir / "0002_add_note2.sql").write_text(
+        "ALTER TABLE presets ADD COLUMN note2 TEXT;\n"
+    )
+
+    db2 = await Database.open(db_path, migrations_dir=custom_dir)
+    try:
+        cur = await db2._conn.execute("SELECT version FROM schema_migrations ORDER BY version")
+        rows = await cur.fetchall()
+        assert [row[0] for row in rows] == [1, 2, 3]
+
+        cur = await db2._conn.execute("PRAGMA table_info(presets)")
+        columns = {row[1] for row in await cur.fetchall()}
+        assert "note2" in columns
+        assert "note3" in columns
+    finally:
+        await db2.close()
+
+
+async def test_migration_discovery_rejects_duplicate_version_numbers(tmp_path):
+    custom_dir = tmp_path / "migrations"
+    custom_dir.mkdir()
+    (custom_dir / "0001_init.sql").write_text("CREATE TABLE foo (id INTEGER PRIMARY KEY);\n")
+    (custom_dir / "0001_also_init.sql").write_text("CREATE TABLE bar (id INTEGER PRIMARY KEY);\n")
+
+    db_path = tmp_path / "dup.db"
+    with pytest.raises(ValueError, match="duplicate migration version"):
+        await Database.open(db_path, migrations_dir=custom_dir)
 
 
 async def test_migration_runs_in_a_transaction_rolls_back_on_failure(tmp_path):
