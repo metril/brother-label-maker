@@ -195,9 +195,11 @@ def test_progress_resets_and_stays_monotonic_across_independent_print_images_cal
     # must stay monotonic WITHIN each call and end at sent==total each time.
     # (The "at most ~10 broadcasts per job, throttled by percentage" rule
     # from the brief is a WORKER-layer policy on top of this raw per-chunk
-    # callback -- see test_worker_progress.py -- not a constraint on
-    # print_images' own callback, which fires once per raw chunk and can
-    # legitimately fire more often for a large enough job.)
+    # callback -- see test_api_print_task29.py's
+    # test_print_broadcasts_job_progress_events_monotonic_and_final_matches_total
+    # -- not a constraint on print_images' own callback, which fires once
+    # per raw chunk and can legitimately fire more often for a large
+    # enough job.)
     transport = MockPrinterTransport()
     strategy = get_strategy("e310bt")
     images = _big_images(3000)

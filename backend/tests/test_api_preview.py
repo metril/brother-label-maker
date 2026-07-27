@@ -136,8 +136,9 @@ async def test_preview_warnings_pass_through_on_cramped_text(client):
     )
     # task 2.9: this label's content is well under MIN_FEED_MM (24.5mm) on a
     # 3.5mm tape -- the preview response's own short_label warning (info
-    # severity, NOT "warning" -- see test_preview_short_label_warning_and_min_feed_mm
-    # below for the dedicated coverage) legitimately coexists with
+    # severity, NOT "warning" -- see
+    # test_preview_short_label_warning_present_when_under_min_feed above
+    # for the dedicated coverage) legitimately coexists with
     # text_cramped's "warning"-severity ones here, which is why the
     # assertion above is now scoped to text_cramped specifically.
     assert any(w["code"] == "short_label" for w in body["warnings"])
