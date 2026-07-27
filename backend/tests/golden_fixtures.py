@@ -8,6 +8,7 @@ no second copy to remember to update.
 
 from dataclasses import dataclass
 
+from labelmaker.render.types.barcode_label import BarcodeLabelParams
 from labelmaker.render.types.breaker_box import BreakerBoxParams, BreakerSpec
 from labelmaker.render.types.divided_blocks import (
     BlockSpec,
@@ -194,5 +195,39 @@ ELECTRICAL_TYPE_FIXTURES: tuple[ElectricalTypeFixture, ...] = (
             numbering_scheme="odd",
         ),
         tape_mm=24,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class BarcodeTypeFixture:
+    name: str  # golden file is tests/golden/render/{name}.png
+    params: BarcodeLabelParams
+    tape_mm: float
+    tape_family: str = "tze"
+
+
+# Task 2.5's barcode label type -- one fixture per symbology family, each
+# rendered via get_renderer("barcode").render(...), same convention as
+# TYPE_CONFIG_FIXTURES/ELECTRICAL_TYPE_FIXTURES above.
+BARCODE_TYPE_FIXTURES: tuple[BarcodeTypeFixture, ...] = (
+    # (a) QR, a URL, 24mm tape, default caption="below" (data itself as the
+    # caption text).
+    BarcodeTypeFixture(
+        name="barcode_qr_url_caption_24mm",
+        params=BarcodeLabelParams(symbology="qr", data="https://example.com/a/000-001"),
+        tape_mm=24,
+    ),
+    # (b) Code128, an asset tag, 24mm tape, default caption="below".
+    BarcodeTypeFixture(
+        name="barcode_code128_asset_caption_24mm",
+        params=BarcodeLabelParams(symbology="code128", data="ASSET-0042"),
+        tape_mm=24,
+    ),
+    # (c) DataMatrix, a short code, 12mm tape, caption explicitly off.
+    BarcodeTypeFixture(
+        name="barcode_datamatrix_short_nocaption_12mm",
+        params=BarcodeLabelParams(symbology="datamatrix", data="T-01", caption="none"),
+        tape_mm=12,
     ),
 )

@@ -125,6 +125,13 @@ def main() -> None:
         _write(fixture.name, get_renderer(fixture.type).render(fixture.params, tape))
         count += 1
 
+    # Task 2.5's barcode label type -- same get_renderer(...) convention,
+    # always "barcode" (a single label type covering all four symbologies).
+    for fixture in golden_fixtures.BARCODE_TYPE_FIXTURES:
+        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
+        _write(fixture.name, get_renderer("barcode").render(fixture.params, tape))
+        count += 1
+
     print(f"regenerated {count} golden(s) in {_GOLDEN_DIR}")
     print("INSPECT every new/changed golden visually before committing it.")
 

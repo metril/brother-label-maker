@@ -20,16 +20,18 @@ async def test_label_types_contains_text_with_schema(client):
     assert "lines" in text_type["params_schema"]["properties"]
 
 
-async def test_label_types_lists_six_types_with_categories(client):
+async def test_label_types_lists_seven_types_with_categories(client):
     # Task 2.2: patch_panel/punch_down/faceplate join "text". Task 2.3:
-    # terminal_block/breaker_box join those -- exactly these six (the
-    # registry-isolation fixture in conftest.py, see test_render_registry.py,
-    # keeps test-only "dummy" types from leaking into this count).
+    # terminal_block/breaker_box join those. Task 2.5: barcode joins "text"
+    # in category "general" -- exactly these seven (the registry-isolation
+    # fixture in conftest.py, see test_render_registry.py, keeps test-only
+    # "dummy" types from leaking into this count).
     resp = await client.get("/api/label-types")
     body = resp.json()
     by_type = {t["type"]: t for t in body}
     assert by_type.keys() == {
         "text",
+        "barcode",
         "patch_panel",
         "punch_down",
         "faceplate",
@@ -37,7 +39,8 @@ async def test_label_types_lists_six_types_with_categories(client):
         "breaker_box",
     }
 
-    assert by_type["text"]["category"] == "general"
+    for general_type in ("text", "barcode"):
+        assert by_type[general_type]["category"] == "general"
     for network_type in ("patch_panel", "punch_down", "faceplate"):
         assert by_type[network_type]["category"] == "network"
     for electrical_type in ("terminal_block", "breaker_box"):
