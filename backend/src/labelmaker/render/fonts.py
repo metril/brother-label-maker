@@ -28,6 +28,14 @@ FONTS_DIR = Path(__file__).resolve().parents[3] / "assets" / "fonts"
 _WIDTH_SAFETY_MARGIN = 0.95
 _DEFAULT_LINE_SPACING = 1.15
 
+# Probe size extent_ratio() measures ascent/descent at, before dividing back
+# down to a ratio. FreeType's getmetrics() returns per-size-rounded integer
+# ascent/descent, so a bigger probe means less relative rounding error --
+# 1000px keeps that error well under a pixel once scaled back to any
+# realistic target font size (verified directly in
+# test_text_label.py::test_extent_ratio_is_linear_in_probe_size).
+_EXTENT_RATIO_PROBE_PX = 1000
+
 
 class FontInfo(BaseModel):
     family: str
@@ -102,6 +110,25 @@ def measure_text(text: str, family: str, size_px: float, bold: bool = False) -> 
     return (right - left, bottom - top)
 
 
+def extent_ratio(family: str, bold: bool = False, probe_px: int = _EXTENT_RATIO_PROBE_PX) -> float:
+    """(ascent + descent) / probe_px for family/bold, measured via Pillow's
+    FreeType metrics at a large probe size.
+
+    This is the fraction of an em-square a font's glyphs actually occupy
+    vertically -- NOT necessarily 1.0 (a font's declared ascent+descent can
+    be smaller OR larger than its nominal pixel size). It is ~linear in
+    size (multiplying it back by any target size predicts that size's real
+    ascent+descent to within ~1px -- see
+    test_text_label.py::test_extent_ratio_is_linear_in_probe_size), which is
+    what lets fit_font_size use one measurement at a fixed probe size to
+    evaluate every candidate size in its search, instead of re-measuring
+    metrics at each one.
+    """
+    font = ImageFont.truetype(str(font_path(family, bold)), probe_px)
+    ascent, descent = font.getmetrics()
+    return (ascent + descent) / probe_px
+
+
 def fit_font_size(
     lines: list[str],
     family: str,
@@ -114,10 +141,18 @@ def fit_font_size(
 ) -> int:
     """Largest integer px size where all lines fit.
 
-    Height fit: len(lines) * size * line_spacing <= max_height_px (an
-    approximate line-box model -- font size stands in for line height,
-    scaled by line_spacing; exact ascent/descent metrics are a rendering
-    concern, not a fitting concern).
+    Height fit: len(lines) * size * extent_ratio(family, bold) * line_spacing
+    <= max_height_px, where extent_ratio is the font's real (ascent+descent)
+    fraction of its own pixel size (see extent_ratio()'s docstring). This
+    replaces an older model that used `size` itself as the line's vertical
+    extent -- wrong whenever a font's real ascent+descent isn't equal to its
+    nominal pixel size (common), which let auto-fit pick sizes whose glyphs
+    render past the true canvas edge, silently clipped by the renderer
+    (never visible in fit_font_size's own numbers -- see
+    test_text_label.py's B1 clipping tests). extent_ratio is measured ONCE
+    per call (not once per candidate size in the loop below): it is ~constant
+    across sizes, so re-measuring it at every candidate would just be wasted
+    font loads for the same answer.
 
     Width fit (only when max_width_px is given): every line's measured
     width must be <= max_width_px * _WIDTH_SAFETY_MARGIN (0.95). The 5%
@@ -129,8 +164,9 @@ def fit_font_size(
     expected to warn that the result may be cramped).
     """
     non_empty_lines = [line for line in lines if line]
+    ratio = extent_ratio(family, bold)
     for size in range(max_px, min_px - 1, -1):
-        if len(lines) * size * line_spacing > max_height_px:
+        if len(lines) * size * ratio * line_spacing > max_height_px:
             continue
         if max_width_px is not None and non_empty_lines:
             widest = max(measure_text(line, family, size, bold)[0] for line in non_empty_lines)

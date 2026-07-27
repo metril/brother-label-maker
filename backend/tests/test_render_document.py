@@ -13,6 +13,7 @@ from labelmaker.render.document import (
     LabelDefinition,
     ObjectRegion,
     RenderedLabel,
+    RenderWarning,
     Tape,
 )
 
@@ -92,13 +93,39 @@ def test_rendered_label_with_object_map_and_warnings():
         width_px=10,
         height_px=20,
         object_map=[ObjectRegion(x=0, y=0, width=5, height=5, mode="dither")],
-        warnings=["cramped"],
+        warnings=[RenderWarning(code="text_cramped", message="cramped")],
     )
     assert len(label.object_map) == 1
-    assert label.warnings == ["cramped"]
+    assert len(label.warnings) == 1
+    assert label.warnings[0].code == "text_cramped"
+    assert label.warnings[0].severity == "warning"
+    assert label.warnings[0].message == "cramped"
+    assert label.warnings[0].object_id is None
 
 
-# --- 3. LabelDefinition ---
+# --- 3. RenderWarning: field shape and defaults -----------------------------
+
+
+def test_render_warning_defaults():
+    warning = RenderWarning(code="text_cramped", message="cramped")
+    assert warning.severity == "warning"
+    assert warning.object_id is None
+
+
+def test_render_warning_info_severity_and_object_id():
+    warning = RenderWarning(
+        code="dither_region", severity="info", message="a note", object_id="obj-1"
+    )
+    assert warning.severity == "info"
+    assert warning.object_id == "obj-1"
+
+
+def test_render_warning_invalid_severity_rejected():
+    with pytest.raises(ValidationError):
+        RenderWarning(code="x", severity="critical", message="m")
+
+
+# --- 4. LabelDefinition ---
 
 
 def test_label_definition_roundtrip():
@@ -112,7 +139,7 @@ def test_label_definition_roundtrip():
     assert defn.params == {"lines": ["HELLO"]}
 
 
-# --- 4. SVG helpers (module-private, exercised directly) ---
+# --- 5. SVG helpers (module-private, exercised directly) ---
 
 
 def test_escape_xml_escapes_special_characters():

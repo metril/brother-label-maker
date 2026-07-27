@@ -16,7 +16,7 @@ from PIL import ImageFont
 from pydantic import BaseModel, Field, field_validator
 
 from labelmaker.driver.geometry import MIN_LABEL_MM, TapeSpec, mm_to_dots
-from labelmaker.render.document import RenderedLabel, _svg_document, _text_element
+from labelmaker.render.document import RenderedLabel, RenderWarning, _svg_document, _text_element
 from labelmaker.render.fonts import fit_font_size, font_path, list_fonts, measure_text
 from labelmaker.render.types.base import LabelRenderer, register
 
@@ -71,7 +71,7 @@ class TextLabelRenderer(LabelRenderer):
     Params = TextLabelParams
 
     def render(self, params: TextLabelParams, tape: TapeSpec) -> RenderedLabel:
-        warnings: list[str] = []
+        warnings: list[RenderWarning] = []
         lines = params.lines
         n_lines = len(lines)
         height_px = tape.print_dots  # a text label always spans the full print strip
@@ -95,7 +95,10 @@ class TextLabelRenderer(LabelRenderer):
             )
             if font_px <= _MIN_FONT_PX:
                 warnings.append(
-                    "auto font size hit the minimum size; text may be cramped"
+                    RenderWarning(
+                        code="text_cramped",
+                        message="auto font size hit the minimum size; text may be cramped",
+                    )
                 )
         else:
             # Explicit size is already validated to [6, 128] by TextLabelParams;
@@ -108,6 +111,16 @@ class TextLabelRenderer(LabelRenderer):
                 min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
             font_px = min(params.font_size_px, height_fit_px)
+            if font_px < params.font_size_px:
+                warnings.append(
+                    RenderWarning(
+                        code="font_clamped",
+                        message=(
+                            f"font size {params.font_size_px}px was reduced to "
+                            f"{font_px}px to fit the print area"
+                        ),
+                    )
+                )
 
         # -- measure widest line at the chosen font size --
         widest_px = max(
@@ -126,7 +139,10 @@ class TextLabelRenderer(LabelRenderer):
             available_px = width_px - 2 * padding_px
             if widest_px > available_px:
                 warnings.append(
-                    "text truncated: content is wider than the fixed label length"
+                    RenderWarning(
+                        code="text_truncated",
+                        message="text truncated: content is wider than the fixed label length",
+                    )
                 )
                 needs_clip = True
         else:

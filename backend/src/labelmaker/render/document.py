@@ -18,6 +18,18 @@ _FAMILY_MAP: dict[str, MediaFamily] = {
     "hse_3_1": MediaFamily.HSE_3_1,
 }
 
+# Reverse of _FAMILY_MAP -- built from it (not hand-duplicated) so the two
+# vocabularies can never drift apart.
+_FAMILY_NAMES: dict[MediaFamily, str] = {family: name for name, family in _FAMILY_MAP.items()}
+
+
+def family_name(family: MediaFamily) -> str:
+    """The short vocabulary string ("tze"/"hse_2_1"/"hse_3_1") Tape.family
+    and LabelDefinition accept, for a driver MediaFamily -- used by GET
+    /api/tapes (router_labels.py) to report each geometry.TapeSpec's family
+    in the same vocabulary a client would send back in a Tape."""
+    return _FAMILY_NAMES[family]
+
 
 class ObjectRegion(BaseModel):
     """A rectangular region of a rasterized label with a non-default 1-bit
@@ -31,6 +43,22 @@ class ObjectRegion(BaseModel):
     mode: Literal["threshold", "dither"]
 
 
+class RenderWarning(BaseModel):
+    """A structured, machine-checkable warning a LabelRenderer can attach to
+    its RenderedLabel (e.g. text_label.py's "auto font size hit the
+    minimum" / "content wider than the fixed label length" / "explicit
+    font size was clamped" cases). `code` is a stable identifier a caller
+    can branch on programmatically; `message` is the human-readable text a
+    UI shows verbatim (e.g. LabelPreview.tsx's warning chips) -- callers
+    should prefer matching on `code`, never on `message` text, so wording
+    can change freely without breaking anything downstream."""
+
+    code: str
+    severity: Literal["info", "warning"] = "warning"
+    message: str
+    object_id: str | None = None
+
+
 class RenderedLabel(BaseModel):
     """The output of a LabelRenderer: an SVG document plus its device-pixel
     canvas size. This is the ONE artifact both the preview PNG and the
@@ -40,7 +68,7 @@ class RenderedLabel(BaseModel):
     width_px: int
     height_px: int  # device pixels; height_px == tape.print_dots
     object_map: list[ObjectRegion] = []
-    warnings: list[str] = []
+    warnings: list[RenderWarning] = []
 
 
 class Tape(BaseModel):

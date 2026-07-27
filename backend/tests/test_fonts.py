@@ -8,6 +8,7 @@ from labelmaker.render.fonts import (
     FONTS_DIR,
     FontInfo,
     ensure_fonts_dir,
+    extent_ratio,
     fit_font_size,
     font_path,
     list_fonts,
@@ -143,9 +144,15 @@ def test_measure_text_bold_variant_loads_independently():
 
 def test_fit_font_size_fits_within_height_only():
     size = fit_font_size(["HELLO"], "Inter", None, 100.0)
-    # N=1 line: size * 1.15 <= 100
-    assert size * 1.15 <= 100.0 + 1e-9
+    # N=1 line: size * extent_ratio(family) * line_spacing <= 100 (B1: fit is
+    # on the font's real vertical extent, not on size itself -- see
+    # fit_font_size's docstring).
+    assert size * extent_ratio("Inter") * 1.15 <= 100.0 + 1e-9
     assert size >= 6
+    # One size larger must NOT fit -- pins this as the true boundary, not a
+    # vacuously-true inequality (e.g. a size far below the real limit would
+    # also satisfy the assertion above without this).
+    assert (size + 1) * extent_ratio("Inter") * 1.15 > 100.0 + 1e-9
 
 
 def test_fit_font_size_respects_width_constraint():

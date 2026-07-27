@@ -10,11 +10,19 @@ render/ never imports labelmaker.driver EXCEPT labelmaker.driver.geometry
 (TapeSpec/geometry is shared vocabulary with the driver, nothing else is).
 """
 
-from labelmaker.render.document import LabelDefinition, ObjectRegion, RenderedLabel, Tape
+from labelmaker.render.document import (
+    LabelDefinition,
+    ObjectRegion,
+    RenderedLabel,
+    RenderWarning,
+    Tape,
+    family_name,
+)
 from labelmaker.render.fonts import (
     FONTS_DIR,
     FontInfo,
     ensure_fonts_dir,
+    extent_ratio,
     fit_font_size,
     font_path,
     list_fonts,
@@ -37,9 +45,12 @@ __all__ = [
     "LabelRenderer",
     "LabelTypeInfo",
     "ObjectRegion",
+    "RenderWarning",
     "RenderedLabel",
     "Tape",
     "ensure_fonts_dir",
+    "extent_ratio",
+    "family_name",
     "fit_font_size",
     "font_path",
     "get_renderer",
