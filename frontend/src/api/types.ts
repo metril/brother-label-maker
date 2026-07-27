@@ -21,6 +21,31 @@ export interface LabelDefinition {
 
 export type HAlign = "left" | "center" | "right";
 
+/** Mirrors backend/render/types/text_label.py's SymbolIcon -- a bundled
+ * Material Symbols icon (see GET /api/symbols for valid `id`s). */
+export interface SymbolIcon {
+  kind: "symbol";
+  id: string;
+}
+
+/** Mirrors backend/render/types/text_label.py's ImageIcon -- a previously
+ * uploaded image (see POST /api/images, which returns the `image_id` this
+ * carries). `mode="threshold"` binarizes at a fixed cutoff (hard edges);
+ * `mode="dither"` Floyd-Steinberg halftones it (better for photos/
+ * gradients) -- see render/images.py's module docstring. */
+export interface ImageIcon {
+  kind: "image";
+  image_id: string;
+  mode: "threshold" | "dither";
+  threshold: number;
+}
+
+/** Mirrors backend/render/types/text_label.py's `Icon` discriminated union
+ * (discriminator: `kind`). Optional leading art at the left of a "text"
+ * label's text block, square, sized to (print height - 2*padding); text
+ * shifts right to make room -- see that module's docstring. */
+export type Icon = SymbolIcon | ImageIcon;
+
 /** Mirrors backend/render/types/text_label.py's TextLabelParams. */
 export interface TextLabelParams {
   lines: string[];
@@ -30,6 +55,7 @@ export interface TextLabelParams {
   h_align: HAlign;
   length_mm: number | null;
   padding_mm: number;
+  icon?: Icon | null;
   [key: string]: unknown;
 }
 
@@ -66,6 +92,28 @@ export interface TapeInfo {
   print_dots: number;
   print_mm: number;
   max_length_mm: number;
+}
+
+/** Mirrors backend/render/symbols.py's SymbolInfo -- one entry of
+ * GET /api/symbols' curated Material Symbols catalog. `id` is what an
+ * `Icon` of `kind: "symbol"` carries; `path` (an `<id>.svg` filename under
+ * backend/assets/symbols/) is informational only -- fetch the SVG itself
+ * via GET /api/symbols/{id}, not by constructing this path client-side. */
+export interface SymbolInfo {
+  id: string;
+  name: string;
+  tags: string[];
+  path: string;
+}
+
+/** POST /api/images' response (task 2.7): `image_id` is what an `Icon` of
+ * `kind: "image"` carries. `width`/`height` are the NORMALIZED (RGBA
+ * flattened onto white, converted to PNG) stored image's dimensions, not
+ * necessarily the originally-uploaded file's encoding. */
+export interface ImageUploadResponse {
+  image_id: string;
+  width: number;
+  height: number;
 }
 
 export type WarningSeverity = "info" | "warning";

@@ -87,6 +87,58 @@ def test_rasterize_bundled_font_family_in_text_does_not_raise():
     assert img.getextrema() != (255, 255)
 
 
+# --- 1c. Font guard, extended forms (task 1.2 review, deferred to 2.7):
+# single-quoted font-family="..." attributes and font-family: X; CSS
+# declarations inside a style="..." attribute -- neither form is emitted by
+# this package's own document.py, but a future inlined symbol/image SVG
+# theoretically could carry one (see rasterize.py's module docstring).
+
+
+def test_rasterize_unbundled_font_family_single_quoted_attr_raises():
+    body = (
+        '<rect width="100" height="40" fill="white"/>'
+        "<text x=\"5\" y=\"30\" font-family='Arial' font-size=\"24\">HELLO</text>"
+    )
+    svg = _svg(100, 40, body)
+    label = RenderedLabel(svg=svg, width_px=100, height_px=40)
+    with pytest.raises(ValueError, match="Arial"):
+        rasterize(label)
+
+
+def test_rasterize_bundled_font_family_single_quoted_attr_does_not_raise():
+    body = (
+        '<rect width="100" height="40" fill="white"/>'
+        "<text x=\"5\" y=\"30\" font-family='Inter' font-size=\"24\">HI</text>"
+    )
+    svg = _svg(100, 40, body)
+    label = RenderedLabel(svg=svg, width_px=100, height_px=40)
+    img = rasterize(label)
+    assert img.getextrema() != (255, 255)
+
+
+def test_rasterize_unbundled_font_family_in_style_attr_raises():
+    body = (
+        '<rect width="100" height="40" fill="white"/>'
+        '<text x="5" y="30" style="font-family: Arial; fill: black" font-size="24">'
+        "HELLO</text>"
+    )
+    svg = _svg(100, 40, body)
+    label = RenderedLabel(svg=svg, width_px=100, height_px=40)
+    with pytest.raises(ValueError, match="Arial"):
+        rasterize(label)
+
+
+def test_rasterize_bundled_font_family_in_style_attr_no_trailing_semicolon_does_not_raise():
+    body = (
+        '<rect width="100" height="40" fill="white"/>'
+        '<text x="5" y="30" style="font-family: Inter" font-size="24">HI</text>'
+    )
+    svg = _svg(100, 40, body)
+    label = RenderedLabel(svg=svg, width_px=100, height_px=40)
+    img = rasterize(label)
+    assert img.getextrema() != (255, 255)
+
+
 # --- 2. All-white SVG -> all-white bitmap; black rect -> those pixels black ---
 
 

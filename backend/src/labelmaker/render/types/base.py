@@ -3,6 +3,7 @@ LabelRenderer subclass registered under a short type name via @register.
 """
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -38,7 +39,19 @@ class LabelRenderer(ABC):
     Params: type[BaseModel]
 
     @abstractmethod
-    def render(self, params: BaseModel, tape: TapeSpec) -> RenderedLabel: ...
+    def render(
+        self, params: BaseModel, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
+        """Render `params` (already validated against this class's own
+        `Params` model) against `tape`. `data_dir` (task 2.7) is the app's
+        configured data directory -- only "text" actually reads it (to
+        resolve an `icon.kind="image"` param's uploaded file via render/
+        images.py; see text_label.py), and only when an image icon is
+        requested. Every other type ignores it; it defaults to None so
+        every existing direct `renderer.render(params, tape)` call (tests,
+        scripts/regen_goldens.py, goldens with no icon) keeps working
+        unchanged."""
+        ...
 
 
 def register(type_name: str):
@@ -72,10 +85,13 @@ def list_types() -> list[LabelTypeInfo]:
     ]
 
 
-def render_definition(defn: LabelDefinition) -> RenderedLabel:
+def render_definition(defn: LabelDefinition, *, data_dir: Path | None = None) -> RenderedLabel:
     """Resolve defn's tape (exact nominal match), validate its params against
-    the target type's own Params model, and render."""
+    the target type's own Params model, and render. `data_dir` (task 2.7) is
+    threaded straight through to `renderer.render()` -- see that abstract
+    method's docstring; optional, defaults to None, only consumed by the
+    "text" type's `icon.kind="image"` path."""
     tape = defn.tape.resolve()
     renderer = get_renderer(defn.type)
     params = renderer.Params.model_validate(defn.params)
-    return renderer.render(params, tape)
+    return renderer.render(params, tape, data_dir=data_dir)

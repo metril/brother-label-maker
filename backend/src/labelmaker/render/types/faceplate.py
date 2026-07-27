@@ -25,6 +25,8 @@ engine would also catch it) -- so is `build_divided_blocks_params`'s
 outer-type-name error-message substitution (see divided_blocks.py).
 """
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field, model_validator
 
 from labelmaker.driver.geometry import TapeSpec
@@ -95,5 +97,7 @@ class FaceplateRenderer(LabelRenderer):
     category = "network"
     Params = FaceplateParams
 
-    def render(self, params: FaceplateParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: FaceplateParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         return render_divided_blocks(_to_engine_params(params), tape)

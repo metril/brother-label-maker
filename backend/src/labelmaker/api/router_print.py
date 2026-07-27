@@ -8,6 +8,7 @@ this router only does cheap validation, persistence, and job-record I/O.
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 import anyio
 from fastapi import APIRouter, HTTPException
@@ -42,18 +43,24 @@ class PrintRequest(BaseModel):
     serialization: Sequence | None = None
 
 
-def _validate_render_side(labels: list[LabelDefinition]) -> None:
+def _validate_render_side(labels: list[LabelDefinition], data_dir: Path) -> None:
     """Cheap per-label validation: resolve each label's tape and validate its
     params against the target type's own Params model (render_definition
     does both, plus building the SVG -- still no resvg call). The expensive
     step, rasterize(), is deliberately deferred to the worker so a batch of
     100 labels doesn't rasterize before the client even gets a job id back.
+    `data_dir` (task 2.7) is threaded through so a "text" label's
+    `icon.kind="image"` param resolves against the same uploads/ directory
+    the worker will use -- an unknown image_id fails HERE, at POST time,
+    not after the job is already queued.
     """
     for defn in labels:
-        render_definition(defn)
+        render_definition(defn, data_dir=data_dir)
 
 
-def _validate_serialized_print(template: LabelDefinition, serialization: Sequence) -> list[dict]:
+def _validate_serialized_print(
+    template: LabelDefinition, serialization: Sequence, data_dir: Path
+) -> list[dict]:
     """task 2.4's serialized-print pre-flight: expand `template` now (still
     no resvg call) so an ALPHA run stepping below 'A'/beyond 'ZZZ' or an
     unknown {csv.<col>} in the template comes back as an immediate 422,
@@ -78,7 +85,7 @@ def _validate_serialized_print(template: LabelDefinition, serialization: Sequenc
     values = ordered_values(serialization)
     for i, (raw, value) in enumerate(zip(bound, values, strict=True)):
         try:
-            render_definition(LabelDefinition.model_validate(raw))
+            render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
         except (KeyError, ValueError) as exc:
             raise ValueError(
                 f"label {i} (sequence value {value!r}): {error_message(exc)}"
@@ -87,7 +94,9 @@ def _validate_serialized_print(template: LabelDefinition, serialization: Sequenc
 
 
 @router.post("", status_code=202)
-async def create_print_job(body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep) -> dict:
+async def create_print_job(
+    body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep, config: AppConfigDep
+) -> dict:
     if body.serialization is not None:
         if len(body.labels) != 1:
             raise HTTPException(
@@ -99,14 +108,14 @@ async def create_print_job(body: PrintRequest, db: DbDep, queue: QueueDep, bus: 
             )
         try:
             bound = await anyio.to_thread.run_sync(
-                _validate_serialized_print, body.labels[0], body.serialization
+                _validate_serialized_print, body.labels[0], body.serialization, config.data_dir
             )
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=error_message(exc)) from exc
         label_count = len(bound)
     else:
         try:
-            await anyio.to_thread.run_sync(_validate_render_side, body.labels)
+            await anyio.to_thread.run_sync(_validate_render_side, body.labels, config.data_dir)
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=error_message(exc)) from exc
         label_count = len(body.labels)

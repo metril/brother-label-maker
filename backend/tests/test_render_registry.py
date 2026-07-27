@@ -38,7 +38,7 @@ class _DummyRenderer(LabelRenderer):
     category = "general"
     Params = _DummyParams
 
-    def render(self, params: _DummyParams, tape) -> RenderedLabel:
+    def render(self, params: _DummyParams, tape, *, data_dir=None) -> RenderedLabel:
         return RenderedLabel(svg=f"<svg>{params.text}</svg>", width_px=1, height_px=tape.print_dots)
 
 

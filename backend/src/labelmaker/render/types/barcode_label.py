@@ -146,6 +146,7 @@ partially cut off is not a smaller barcode, it's an unscannable one).
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Literal
 
 from PIL import ImageFont
@@ -456,7 +457,9 @@ class BarcodeLabelRenderer(LabelRenderer):
     category = "general"
     Params = BarcodeLabelParams
 
-    def render(self, params: BarcodeLabelParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: BarcodeLabelParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         caption_wanted = params.caption == "below"
         result = _attempt(params, tape, caption_enabled=caption_wanted)
         if result is None:

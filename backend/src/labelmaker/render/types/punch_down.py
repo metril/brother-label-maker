@@ -36,6 +36,7 @@ engine would also catch it) -- so is `build_divided_blocks_params`'s
 outer-type-name error-message substitution (see divided_blocks.py).
 """
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -119,5 +120,7 @@ class PunchDownRenderer(LabelRenderer):
     category = "network"
     Params = PunchDownParams
 
-    def render(self, params: PunchDownParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: PunchDownParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         return render_divided_blocks(_to_engine_params(params), tape)

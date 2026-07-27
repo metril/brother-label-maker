@@ -28,6 +28,7 @@ catch it) -- so does `build_divided_blocks_params`'s outer-type-name
 error-message substitution (see divided_blocks.py).
 """
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -175,5 +176,7 @@ class TerminalBlockRenderer(LabelRenderer):
     category = "electrical"
     Params = TerminalBlockParams
 
-    def render(self, params: TerminalBlockParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: TerminalBlockParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         return render_divided_blocks(_to_engine_params(params), tape)

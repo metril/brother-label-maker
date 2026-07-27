@@ -545,3 +545,57 @@ async def test_get_unknown_job_404(client):
 async def test_stream_unknown_job_404(client):
     resp = await client.get("/api/print/jobs/does-not-exist/stream")
     assert resp.status_code == 404
+
+
+# --- 7. task 2.7: print job for a "text" label with an image icon ----------
+# End-to-end proof that jobs/worker.py's _expand_and_render/_render_all
+# thread the app's real data_dir through to TextLabelRenderer.render the
+# same way router_labels.py's preview path does (test_api_preview.py) --
+# an uploaded image icon must resolve at PRINT time too, off the queue,
+# not just at preview time.
+
+
+async def test_print_text_with_image_icon_completes_and_uses_uploaded_image(client):
+    upload = await client.post(
+        "/api/images",
+        files={"file": ("logo.png", io.BytesIO(_icon_png_bytes()), "image/png")},
+    )
+    assert upload.status_code == 201
+    image_id = upload.json()["image_id"]
+
+    label = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": image_id}},
+    }
+    resp = await client.post("/api/print", json={"labels": [label]})
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    job = await _wait_for_terminal_job(client, job_id)
+    assert job["status"] == "done"
+    assert job["error"] is None
+
+
+async def test_print_unknown_image_icon_rejected_before_queueing(client, app_and_client):
+    app, _ = app_and_client
+    db = app.state.db
+    before = await db.list_jobs(page_size=1000)
+
+    label = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": "no-such-id"}},
+    }
+    resp = await client.post("/api/print", json={"labels": [label]})
+    assert resp.status_code == 422
+    assert "unknown image_id" in resp.json()["detail"]
+
+    after = await db.list_jobs(page_size=1000)
+    assert after["total"] == before["total"]  # nothing was ever persisted
+
+
+def _icon_png_bytes(width: int = 20, height: int = 20) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), (30, 60, 90)).save(buf, format="PNG")
+    return buf.getvalue()

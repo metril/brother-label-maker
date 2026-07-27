@@ -29,6 +29,22 @@ font-family="..." attribute, so this is exact for every SVG this package
 produces, and it protects any future renderer's output too, not just ones
 that remember to declare their fonts via some separate metadata field) for
 the second.
+
+Task 1.2 review, deferred to 2.7: the original regex only matched the
+double-quoted attribute form (`font-family="X"`, the only form document.py's
+own `_text_element` ever emits). Extended here to also match single-quoted
+attributes (`font-family='X'`) and a `font-family: X;` CSS declaration
+inside a `style="..."` attribute -- forms this package's own generator still
+never produces, but a future symbol/image SVG *inlined* into a label
+(render/symbols.py's curated Material Symbols subset, render/images.py's
+embedded `<image>` raster payloads) theoretically could, if a differently-
+authored source SVG ever carried one. Fixed HERE (a general SVG-string
+guard covering every form, run once before any resvg call) rather than by
+stripping `style` attributes during symbol ingestion specifically -- this
+protects every SVG this package inlines from any source, present or future,
+not just the symbol library, and needs no special-casing in the ingestion
+path itself (render/symbols.py's own load-time validation instead asserts
+its curated files carry NO such attributes at all, belt-and-suspenders).
 """
 
 import io
@@ -40,11 +56,19 @@ from PIL import Image
 from labelmaker.render import fonts
 from labelmaker.render.document import RenderedLabel
 
-_FONT_FAMILY_ATTR_RE = re.compile(r'font-family="([^"]*)"')
+# Attribute form, either quote style: font-family="X" / font-family='X'.
+_FONT_FAMILY_ATTR_RE = re.compile(r'''font-family\s*=\s*(["'])(.*?)\1''')
+# CSS declaration form, as it would appear inside a style="..." attribute:
+# font-family: X; -- value runs up to the next ';' or quote character
+# (there is no reliable unquoted terminator otherwise), since SVG/CSS
+# doesn't require a trailing ';' before the closing attribute quote.
+_FONT_FAMILY_STYLE_RE = re.compile(r'''font-family\s*:\s*([^;"']+)''')
 
 
 def _referenced_font_families(svg: str) -> set[str]:
-    return set(_FONT_FAMILY_ATTR_RE.findall(svg))
+    families = {value for _quote, value in _FONT_FAMILY_ATTR_RE.findall(svg)}
+    families.update(value.strip() for value in _FONT_FAMILY_STYLE_RE.findall(svg))
+    return families
 
 
 def rasterize(label: RenderedLabel) -> Image.Image:

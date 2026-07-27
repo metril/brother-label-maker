@@ -97,6 +97,49 @@ def test_ensure_fonts_dir_raises_when_fonts_dir_is_a_file(monkeypatch, tmp_path)
         ensure_fonts_dir()
 
 
+# --- 2c. ensure_fonts_dir(): a directory that EXISTS but is missing one or
+# more of the 8 expected TTFs also fails loudly (task 1.2 review, deferred
+# to 2.7) -- not just a missing directory. Without this, a partial fonts
+# dir sails through ensure_fonts_dir() and only fails much later, deep
+# inside font_path()/resvg, as a generic "file not found" instead of a
+# clear "here's what's missing" error at this same first-use checkpoint.
+
+
+def test_ensure_fonts_dir_raises_when_one_ttf_is_missing(monkeypatch, tmp_path):
+    partial = tmp_path / "partial-fonts"
+    partial.mkdir()
+    for name in {f for f in fonts_module._FILES.values()}:
+        (partial / name).write_bytes(b"not a real font, just needs to exist")
+    (partial / "JetBrainsMono-Bold.ttf").unlink()
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", partial)
+    with pytest.raises(RuntimeError, match="JetBrainsMono-Bold.ttf"):
+        ensure_fonts_dir()
+
+
+def test_ensure_fonts_dir_names_multiple_missing_files(monkeypatch, tmp_path):
+    partial = tmp_path / "partial-fonts-2"
+    partial.mkdir()
+    for name in set(fonts_module._FILES.values()):
+        (partial / name).write_bytes(b"placeholder")
+    (partial / "Inter-Bold.ttf").unlink()
+    (partial / "DejaVuSans.ttf").unlink()
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", partial)
+    with pytest.raises(RuntimeError) as exc_info:
+        ensure_fonts_dir()
+    message = str(exc_info.value)
+    assert "Inter-Bold.ttf" in message
+    assert "DejaVuSans.ttf" in message
+
+
+def test_ensure_fonts_dir_passes_with_all_8_files_present(monkeypatch, tmp_path):
+    complete = tmp_path / "complete-fonts"
+    complete.mkdir()
+    for name in set(fonts_module._FILES.values()):
+        (complete / name).write_bytes(b"placeholder")
+    monkeypatch.setattr(fonts_module, "FONTS_DIR", complete)
+    ensure_fonts_dir()  # no raise -- directory exists AND all 8 files present
+
+
 # --- 3. All 8 files exist, are nonempty, and load with their declared family ---
 
 

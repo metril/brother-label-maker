@@ -18,6 +18,9 @@ async def test_label_types_contains_text_with_schema(client):
     text_type = next(t for t in body if t["type"] == "text")
     assert text_type["title"] == "Text"
     assert "lines" in text_type["params_schema"]["properties"]
+    # task 2.7: the optional leading-art `icon` param (symbol/image) is
+    # visible in the schema a UI would build a form from.
+    assert "icon" in text_type["params_schema"]["properties"]
 
 
 async def test_label_types_lists_nine_types_with_categories(client):

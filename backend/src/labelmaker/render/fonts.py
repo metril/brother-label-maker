@@ -73,7 +73,14 @@ def list_fonts() -> list[FontInfo]:
 
 
 def ensure_fonts_dir() -> None:
-    """Raise loudly if FONTS_DIR doesn't exist.
+    """Raise loudly if FONTS_DIR doesn't exist, or exists but is missing any
+    of the 8 expected TTF files (task 1.2 review, deferred to 2.7: the
+    original version only checked the directory itself -- a directory that
+    exists but is missing e.g. `JetBrainsMono-Bold.ttf` (a partial copy, a
+    bad Docker COPY glob, ...) used to sail through this check and only fail
+    much later, deep inside `font_path()`/resvg, as a generic "file not
+    found"/blank-bitmap symptom instead of a clear "here's what's missing"
+    error at the same first-use checkpoint this function already owns).
 
     Without this, a missing/misplaced fonts directory degrades silently:
     resvg raises nothing and draws nothing for a font_dirs entry that
@@ -90,6 +97,13 @@ def ensure_fonts_dir() -> None:
             f"fonts directory not found: {FONTS_DIR} -- expected backend/assets/fonts "
             "alongside backend/src/ (see labelmaker.render.fonts.FONTS_DIR's docstring "
             "for the layout assumption this depends on)"
+        )
+    missing = sorted(name for name in set(_FILES.values()) if not (FONTS_DIR / name).is_file())
+    if missing:
+        raise RuntimeError(
+            f"fonts directory {FONTS_DIR} is missing expected font file(s): {missing} -- "
+            "see labelmaker.render.fonts._FILES for the full expected set (8 files: "
+            "regular+bold for each of the 4 bundled families)"
         )
 
 

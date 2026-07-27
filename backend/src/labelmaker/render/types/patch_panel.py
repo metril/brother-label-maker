@@ -29,6 +29,7 @@ same way render_definition's other ValueErrors are -- see
 api/router_labels.py.
 """
 
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
@@ -110,5 +111,7 @@ class PatchPanelRenderer(LabelRenderer):
     category = "network"
     Params = PatchPanelParams
 
-    def render(self, params: PatchPanelParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: PatchPanelParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         return render_divided_blocks(_to_engine_params(params), tape)

@@ -7,6 +7,7 @@ no second copy to remember to update.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from labelmaker.render.types.barcode_label import BarcodeLabelParams
 from labelmaker.render.types.breaker_box import BreakerBoxParams, BreakerSpec
@@ -24,12 +25,24 @@ from labelmaker.render.types.patch_panel import BlockText as PatchPanelBlockText
 from labelmaker.render.types.patch_panel import PatchPanelParams
 from labelmaker.render.types.punch_down import PunchDownParams
 from labelmaker.render.types.terminal_block import TerminalBlockParams
-from labelmaker.render.types.text_label import TextLabelParams
+from labelmaker.render.types.text_label import ImageIcon, SymbolIcon, TextLabelParams
 
 # Upscale factor golden PNGs are encoded at (preview_png's `scale`) -- purely
 # a golden-fixture convention (makes the committed PNGs bigger/easier to eyeball
 # than the raw device-dot bitmap), unrelated to any real API default.
 GOLDEN_SCALE = 4
+
+# task 2.7: `tests/fixtures/uploads/cam3_gradient.png` is a COMMITTED,
+# deterministically-generated (not random) synthetic diagonal gradient PNG
+# -- not something a real upload endpoint ever produced. Using this
+# directory AS a `data_dir` for image_object()'s `data_dir/uploads/
+# {image_id}.png` lookup (see render/images.py) means golden fixture (e)
+# below needs zero special-casing in image_object/text_label.py: it's just
+# an ordinary `icon.kind="image"` render pointed at a fixture "upload"
+# instead of a tmp_path one, which is what keeps the golden reproducible
+# (a real POST /api/images upload would mint a fresh random image_id every
+# run -- incompatible with a byte-locked golden).
+FIXTURES_DATA_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
 @dataclass(frozen=True)
@@ -38,6 +51,7 @@ class GoldenFixture:
     params: TextLabelParams
     tape_mm: float
     tape_family: str = "tze"
+    data_dir: Path | None = None  # only set when params.icon.kind == "image"
 
 
 FIXTURES: tuple[GoldenFixture, ...] = (
@@ -59,6 +73,27 @@ FIXTURES: tuple[GoldenFixture, ...] = (
             lines=["PORT-01"], font_family="JetBrains Mono", length_mm=40.0, h_align="left"
         ),
         tape_mm=24,
+    ),
+    # (d) task 2.7: text + a bundled Material Symbol icon (bolt), leading
+    # art at the label's left edge, text shifted right.
+    GoldenFixture(
+        name="text_server_bolt_icon_24mm",
+        params=TextLabelParams(lines=["SERVER"], icon=SymbolIcon(id="bolt")),
+        tape_mm=24,
+    ),
+    # (e) task 2.7: text + a DITHERED image icon -- the real end-to-end path
+    # for render/images.py's mode="dither" + rasterize.py's per-ObjectRegion
+    # Floyd-Steinberg mechanism (task 1.2's mechanism, exercised here for
+    # the first time through an actual label type, not a synthetic SVG).
+    # `data_dir=FIXTURES_DATA_DIR` (see above) resolves image_id
+    # "cam3_gradient" against the committed fixture file, not a real upload.
+    GoldenFixture(
+        name="text_cam3_dithered_icon_24mm",
+        params=TextLabelParams(
+            lines=["CAM-3"], icon=ImageIcon(image_id="cam3_gradient", mode="dither")
+        ),
+        tape_mm=24,
+        data_dir=FIXTURES_DATA_DIR,
     ),
 )
 

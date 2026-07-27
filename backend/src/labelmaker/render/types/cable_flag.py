@@ -125,6 +125,7 @@ tail.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Literal
 
 from PIL import ImageFont
@@ -292,7 +293,9 @@ class CableFlagRenderer(LabelRenderer):
     category = "network"
     Params = CableFlagParams
 
-    def render(self, params: CableFlagParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: CableFlagParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         warnings: list[RenderWarning] = []
         lines = params.lines
         vertical = params.text_orientation == "vertical"

@@ -120,6 +120,7 @@ tiling formula, not a separate code path.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from PIL import ImageFont
 from pydantic import BaseModel, Field, field_validator
@@ -291,7 +292,9 @@ class CableWrapRenderer(LabelRenderer):
     category = "network"
     Params = CableWrapParams
 
-    def render(self, params: CableWrapParams, tape: TapeSpec) -> RenderedLabel:
+    def render(
+        self, params: CableWrapParams, tape: TapeSpec, *, data_dir: Path | None = None
+    ) -> RenderedLabel:
         warnings: list[RenderWarning] = []
         lines = params.lines
         height_px = tape.print_dots

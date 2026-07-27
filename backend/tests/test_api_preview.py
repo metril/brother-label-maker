@@ -229,3 +229,67 @@ async def test_preview_serialization_with_csv_binds_row_columns(client):
         rasterize(render_definition(LabelDefinition.model_validate(bound[1]))), scale=1
     )
     assert base64.b64decode(body["png_b64"]) == expected_png
+
+
+# --- task 2.7: preview of a "text" label with an `icon` --------------------
+# End-to-end proof that the app's real data_dir (not a hand-built one, as
+# test_text_label.py uses) is threaded from AppConfigDep through
+# render_preview -> render_definition -> TextLabelRenderer.render -- an
+# uploaded image's icon must resolve here, through the actual app + real
+# tmp data_dir the `client` fixture wires up (see conftest.py's app_config).
+
+
+async def test_preview_text_with_symbol_icon(client):
+    definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["SERVER"], "icon": {"kind": "symbol", "id": "bolt"}},
+    }
+    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    assert resp.status_code == 200
+    assert resp.json()["warnings"] == []
+
+
+async def test_preview_text_with_image_icon_resolves_via_app_data_dir(client):
+    upload = await client.post(
+        "/api/images",
+        files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")},
+    )
+    assert upload.status_code == 201
+    image_id = upload.json()["image_id"]
+
+    definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": image_id}},
+    }
+    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    assert resp.status_code == 200
+
+
+async def test_preview_text_with_unknown_image_icon_returns_422(client):
+    definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": "no-such-id"}},
+    }
+    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    assert resp.status_code == 422
+    assert "unknown image_id" in resp.json()["detail"]
+
+
+async def test_preview_text_with_unknown_symbol_icon_returns_422(client):
+    definition = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["X"], "icon": {"kind": "symbol", "id": "not-a-real-icon"}},
+    }
+    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    assert resp.status_code == 422
+    assert "unknown symbol id" in resp.json()["detail"]
+
+
+def _png_bytes(width: int = 20, height: int = 10) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), (10, 20, 30)).save(buf, format="PNG")
+    return buf.getvalue()

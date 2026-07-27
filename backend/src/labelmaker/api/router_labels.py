@@ -1,14 +1,23 @@
-"""GET /api/label-types, GET /api/fonts, GET /api/tapes, POST /api/render/preview,
-POST /api/render/expand, POST /api/serialize/csv.
+"""GET /api/label-types, GET /api/fonts, GET /api/tapes, GET /api/symbols,
+GET /api/symbols/{id}, POST /api/render/preview, POST /api/render/expand,
+POST /api/serialize/csv.
 
 Preview and print are the same bitmap (see labelmaker.render's module
 docstring) -- /render/preview runs the exact same render_definition ->
 rasterize -> preview_png pipeline the print worker will later run for the
-same definition, just synchronously and without persisting a job.
+same definition, just synchronously and without persisting a job. It's
+given the app's `data_dir` (task 2.7) so a "text" label whose `icon` is
+`{kind: "image", ...}` can resolve the uploaded file the same way the print
+worker eventually will -- see render/types/text_label.py's module docstring.
 /render/expand and /serialize/csv (task 2.4) are pure data-shaping
 endpoints in support of BarTender-model serialization -- neither one
 renders anything; see labelmaker.render.serialize's module docstring for
 the expansion model itself.
+
+GET /api/symbols / GET /api/symbols/{id} (task 2.7) expose render/symbols.
+py's curated Material Symbols library -- the catalog and one icon's raw SVG,
+respectively -- for a UI icon picker and for symbol_object() ids to be
+discoverable independent of this project's own source tree.
 """
 
 from __future__ import annotations
@@ -16,13 +25,15 @@ from __future__ import annotations
 import base64
 import csv
 import io
+from pathlib import Path
 
 import anyio
 from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from labelmaker.api.deps import error_message
+from labelmaker.api.deps import AppConfigDep, error_message
 from labelmaker.driver.geometry import all_tapes, dots_to_mm
 from labelmaker.render import (
     FontInfo,
@@ -43,6 +54,7 @@ from labelmaker.render.serialize import (
     sequence_values,
     total_labels,
 )
+from labelmaker.render.symbols import SYMBOLS_DIR, SymbolInfo, get_symbol_info, list_symbols
 
 router = APIRouter(tags=["labels"])
 
@@ -89,6 +101,23 @@ async def get_tapes() -> list[TapeInfo]:
     ]
 
 
+@router.get("/symbols")
+async def get_symbols() -> list[SymbolInfo]:
+    return list_symbols()
+
+
+@router.get("/symbols/{symbol_id}")
+async def get_symbol_svg(symbol_id: str) -> Response:
+    try:
+        info = get_symbol_info(symbol_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=error_message(exc)) from exc
+    path = SYMBOLS_DIR / info.path
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"symbol file missing: {info.path}")
+    return Response(content=path.read_bytes(), media_type="image/svg+xml")
+
+
 class PreviewRequest(BaseModel):
     definition: LabelDefinition
     scale: int = Field(default=2, ge=1, le=8)
@@ -102,7 +131,11 @@ class PreviewRequest(BaseModel):
 
 
 def _render_and_encode(
-    definition: LabelDefinition, scale: int, serialization: Sequence | None, index: int
+    definition: LabelDefinition,
+    scale: int,
+    serialization: Sequence | None,
+    index: int,
+    data_dir: Path,
 ) -> dict:
     total_labels_: int | None = None
     sequence_value: str | None = None
@@ -116,7 +149,7 @@ def _render_and_encode(
         sequence_value = ordered_values(serialization)[index]
         target = LabelDefinition.model_validate(bound[index])
 
-    rendered = render_definition(target)
+    rendered = render_definition(target, data_dir=data_dir)
     img: Image.Image = rasterize(rendered)
     png_bytes = preview_png(img, scale=scale)
     return {
@@ -135,10 +168,15 @@ def _render_and_encode(
 
 
 @router.post("/render/preview")
-async def render_preview(body: PreviewRequest) -> dict:
+async def render_preview(body: PreviewRequest, config: AppConfigDep) -> dict:
     try:
         return await anyio.to_thread.run_sync(
-            _render_and_encode, body.definition, body.scale, body.serialization, body.index
+            _render_and_encode,
+            body.definition,
+            body.scale,
+            body.serialization,
+            body.index,
+            config.data_dir,
         )
     except (KeyError, ValueError) as exc:
         # ValueError also catches pydantic.ValidationError (a subclass) from

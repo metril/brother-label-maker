@@ -98,7 +98,7 @@ def main() -> None:
     renderer = TextLabelRenderer()
     for fixture in golden_fixtures.FIXTURES:
         tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
-        _write(fixture.name, renderer.render(fixture.params, tape))
+        _write(fixture.name, renderer.render(fixture.params, tape, data_dir=fixture.data_dir))
         count += 1
 
     # divided_blocks.py registers no label type of its own (see its module

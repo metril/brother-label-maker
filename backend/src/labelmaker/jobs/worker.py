@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from pathlib import Path
 
 import anyio
 from PIL import Image
@@ -100,7 +101,9 @@ async def _process_job(state, job_id: str) -> None:
         definition = job["definition"]
         options = definition.get("options", {})
 
-        images, definitions = await anyio.to_thread.run_sync(_expand_and_render, definition)
+        images, definitions = await anyio.to_thread.run_sync(
+            _expand_and_render, definition, config.data_dir
+        )
 
         strategy = get_strategy(config.printer_init_strategy)
         job_options = JobOptions(
@@ -148,12 +151,14 @@ async def _process_job(state, job_id: str) -> None:
 
 
 def _expand_and_render(
-    definition: dict,
+    definition: dict, data_dir: Path
 ) -> tuple[list[Image.Image], list[LabelDefinition]]:
     """Off the event-loop thread (see this module's docstring) end to end:
     validate `definition`'s labels -- re-expanding via Sequence.
     model_validate + expand_definition first when a task 2.4 serialization
     spec is present -- then render/rasterize every resulting label.
+    `data_dir` (task 2.7) is passed straight through to `_render_all` so a
+    "text" label's `icon.kind="image"` param can resolve its uploaded file.
 
     Review fix-up: the expansion step used to run directly on the event
     loop, BEFORE the to_thread.run_sync call that did the rendering (a
@@ -180,11 +185,11 @@ def _expand_and_render(
     else:
         definitions = [LabelDefinition.model_validate(label) for label in labels]
 
-    return _render_all(definitions), definitions
+    return _render_all(definitions, data_dir), definitions
 
 
-def _render_all(definitions: list[LabelDefinition]) -> list[Image.Image]:
-    return [rasterize(render_definition(defn)) for defn in definitions]
+def _render_all(definitions: list[LabelDefinition], data_dir: Path) -> list[Image.Image]:
+    return [rasterize(render_definition(defn, data_dir=data_dir)) for defn in definitions]
 
 
 def _open_print_close(
