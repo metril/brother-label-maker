@@ -1,0 +1,239 @@
+"""Tests for labelmaker.driver.status: 32-byte status parser + retry polling.
+
+The reference block below is real probe data (see HANDOFF.md), not a
+hand-fabricated example. All other blocks in this file are built by mutating
+copies of it, never by calling parse_status() and trusting the result.
+"""
+
+import pytest
+
+from labelmaker.driver.status import (
+    E720BT_MODEL_CODE,
+    STATUS_LEN,
+    STATUS_REQUEST,
+    MediaType,
+    StatusTimeoutError,
+    StatusType,
+    parse_status,
+    request_status,
+)
+from labelmaker.driver.transport import CaptureTransport
+
+# Real probe data (HANDOFF.md): 24mm laminated-family tape, no errors, model 0x81.
+REFERENCE_STATUS_BLOCK = bytes(
+    [
+        0x80, 0x20, 0x42, 0x30, 0x81, 0x30, 0x00, 0x00,
+        0x00, 0x00, 0x18, 0x14, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x90, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]
+)  # fmt: skip
+
+assert len(REFERENCE_STATUS_BLOCK) == STATUS_LEN
+
+
+def _status_block(overrides: dict[int, int]) -> bytes:
+    """Reference block with specific byte offsets overridden."""
+    block = bytearray(REFERENCE_STATUS_BLOCK)
+    for offset, value in overrides.items():
+        block[offset] = value
+    return bytes(block)
+
+
+# --- 1. Reference block golden parse ---
+
+
+def test_reference_block_golden_parse():
+    status = parse_status(REFERENCE_STATUS_BLOCK)
+    assert status.raw == REFERENCE_STATUS_BLOCK
+    assert status.series_code == 0x30
+    assert status.model_code == 0x81
+    assert status.country_code == 0x30
+    assert status.error_info1 == 0x00
+    assert status.error_info2 == 0x00
+    assert status.media_width_mm == 24
+    assert status.media_type_raw == 0x14
+    assert status.media_type is None
+    assert status.number_of_colors == 0x01
+    assert status.status_type_raw == 0x00
+    assert status.status_type is StatusType.REPLY_TO_REQUEST
+    assert status.phase_type == 0x00
+    assert status.phase_number == 0
+    assert status.tape_color_raw == 0x90
+    assert status.text_color_raw == 0x08
+    assert status.has_error is False
+    assert status.errors == []
+    assert status.is_e720bt is True
+
+
+# --- 2. MediaType round-trip ---
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (0x00, MediaType.NO_MEDIA),
+        (0x01, MediaType.LAMINATED),
+        (0x03, MediaType.NON_LAMINATED),
+        (0x11, MediaType.HEAT_SHRINK_2_1),
+        (0x17, MediaType.HEAT_SHRINK_3_1),
+        (0xFF, MediaType.INCOMPATIBLE),
+    ],
+)
+def test_media_type_known_values_round_trip(raw, expected):
+    status = parse_status(_status_block({11: raw}))
+    assert status.media_type is expected
+    assert status.media_type_raw == raw
+
+
+@pytest.mark.parametrize("raw", [0x14, 0x99])
+def test_media_type_unknown_value_decodes_to_none(raw):
+    status = parse_status(_status_block({11: raw}))
+    assert status.media_type is None
+    assert status.media_type_raw == raw
+
+
+# --- 3. Error decode ---
+
+
+def test_error_info1_no_media_and_cutter_jam():
+    status = parse_status(_status_block({8: 0x05}))
+    assert status.errors == ["No media", "Cutter jam"]
+    assert status.has_error is True
+
+
+def test_error_info2_cover_open():
+    status = parse_status(_status_block({9: 0x10}))
+    assert status.errors == ["Cover open"]
+    assert status.has_error is True
+
+
+def test_error_info1_unknown_bit_message():
+    status = parse_status(_status_block({8: 0x80}))
+    assert status.has_error is True
+    assert len(status.errors) == 1
+    assert "unknown error bit" in status.errors[0]
+
+
+def test_error_info2_unknown_bit_message():
+    status = parse_status(_status_block({9: 0x80}))
+    assert status.has_error is True
+    assert len(status.errors) == 1
+    assert "unknown error bit" in status.errors[0]
+
+
+def test_no_errors_both_zero():
+    status = parse_status(REFERENCE_STATUS_BLOCK)
+    assert status.errors == []
+    assert status.has_error is False
+
+
+# --- 4. parse_status rejects malformed input ---
+
+
+def test_parse_status_rejects_31_bytes():
+    with pytest.raises(ValueError):
+        parse_status(REFERENCE_STATUS_BLOCK[:-1])
+
+
+def test_parse_status_rejects_33_bytes():
+    with pytest.raises(ValueError):
+        parse_status(REFERENCE_STATUS_BLOCK + b"\x00")
+
+
+def test_parse_status_rejects_bad_byte0():
+    with pytest.raises(ValueError, match="0x81"):
+        parse_status(_status_block({0: 0x81}))
+
+
+def test_parse_status_rejects_bad_byte1():
+    with pytest.raises(ValueError, match="0x21"):
+        parse_status(_status_block({1: 0x21}))
+
+
+def test_parse_status_rejects_bad_byte2():
+    with pytest.raises(ValueError, match="0x43"):
+        parse_status(_status_block({2: 0x43}))
+
+
+# --- 5. request_status via CaptureTransport ---
+
+
+def test_request_status_immediate_full_reply():
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+
+    status = request_status(transport, interval_s=0)
+
+    assert status.is_e720bt is True
+    assert transport.written == STATUS_REQUEST
+
+
+def test_request_status_two_empty_reads_then_full_reply():
+    transport = CaptureTransport()
+    transport.queue_read(b"")
+    transport.queue_read(b"")
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+
+    status = request_status(transport, interval_s=0)
+
+    assert status.raw == REFERENCE_STATUS_BLOCK
+
+
+def test_request_status_partial_reads_accumulate():
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK[:16])
+    transport.queue_read(REFERENCE_STATUS_BLOCK[16:])
+
+    status = request_status(transport, interval_s=0)
+
+    assert status.raw == REFERENCE_STATUS_BLOCK
+
+
+def test_request_status_never_replies_raises_timeout():
+    transport = CaptureTransport()  # empty queue -> every read() is b""
+
+    with pytest.raises(StatusTimeoutError):
+        request_status(transport, retries=3, interval_s=0)
+
+    assert transport.written == STATUS_REQUEST  # request sent exactly once
+
+
+def test_request_status_split_reply_with_empty_read_between():
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK[:20])
+    transport.queue_read(b"")
+    transport.queue_read(REFERENCE_STATUS_BLOCK[20:])
+
+    status = request_status(transport, interval_s=0)
+
+    assert status.raw == REFERENCE_STATUS_BLOCK
+
+
+# --- 6. StatusType decode ---
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (0x00, StatusType.REPLY_TO_REQUEST),
+        (0x01, StatusType.PRINTING_COMPLETED),
+        (0x02, StatusType.ERROR_OCCURRED),
+        (0x05, StatusType.NOTIFICATION),
+        (0x06, StatusType.PHASE_CHANGE),
+    ],
+)
+def test_status_type_known_values_round_trip(raw, expected):
+    status = parse_status(_status_block({18: raw}))
+    assert status.status_type is expected
+    assert status.status_type_raw == raw
+
+
+def test_status_type_unknown_raw_decodes_to_none():
+    status = parse_status(_status_block({18: 0x99}))
+    assert status.status_type is None
+    assert status.status_type_raw == 0x99
+
+
+def test_e720bt_model_code_constant():
+    assert E720BT_MODEL_CODE == 0x81
