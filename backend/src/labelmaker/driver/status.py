@@ -1,7 +1,9 @@
 """32-byte printer status parser and retry-driven status request.
 
-Protocol facts (from HANDOFF.md real probe data and the family raster manual
-for the PT-E550W/P750W/P710BT, as documented in docs/research/protocol.md):
+Protocol facts (from HANDOFF.md's real probe data, and Brother's family raster
+manual for the PT-E550W/P750W/P710BT -- not in-repo; see HANDOFF.md's
+References section for the download link. docs/research/protocol.md is
+driver-landscape research, not a source of field-level byte facts):
 
 - Status request command: ESC i S (`STATUS_REQUEST`).
 - Reply is exactly 32 bytes (`STATUS_LEN`). Header: byte0=0x80 (print-head
@@ -148,6 +150,7 @@ def parse_status(data: bytes) -> PrinterStatus:
         status_type_raw=status_type_raw,
         status_type=status_type,
         phase_type=data[19],
+        # UNVERIFIED: phase_number endianness (LE assumed) — confirm at physical checkpoint.
         # Multi-byte fields in this protocol family are little-endian (e.g. the
         # ESC i d feed amount, the ESC i z raster line count -- see HANDOFF.md);
         # the reference block's phase_number is 0x0000, so endianness here is
