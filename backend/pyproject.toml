@@ -9,10 +9,14 @@ dependencies = [
     "pyusb>=1.2",
     "aiosqlite>=0.20",
     "resvg-py==0.3.3",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.27",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.4",
@@ -29,6 +33,19 @@ select = ["E", "F", "I", "UP", "B"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    # test_api_ws.py is the only file that imports starlette.testclient (for
+    # WebSocket support: httpx.AsyncClient/ASGITransport, used everywhere
+    # else in the API suite, has none). Importing it with only `httpx`
+    # installed -- not `httpx2` -- warns at *import time* that httpx2 should
+    # replace it as TestClient's backend. That's an upstream test-
+    # infrastructure migration path, not something this task's brief asked
+    # for (it explicitly names httpx>=0.27 as the dev dependency to add;
+    # httpx2 is a different, unrequested package). Suppressed narrowly by
+    # exact message text so an unrelated future StarletteDeprecationWarning
+    # would still surface normally.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated.*:starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [build-system]
 requires = ["hatchling"]

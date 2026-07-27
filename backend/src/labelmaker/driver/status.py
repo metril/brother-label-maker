@@ -129,6 +129,36 @@ class PrinterStatus:
     def is_e720bt(self) -> bool:
         return self.model_code == E720BT_MODEL_CODE
 
+    def to_dict(self) -> dict:
+        """JSON-safe representation for the API layer (Task 1.3b):
+        `raw` becomes `raw_hex` (a space-separated hex string, so it survives
+        a JSON round-trip losslessly and is human-readable in a browser
+        network tab), enum fields become their plain `.value` (never the
+        Enum member itself -- not JSON-serializable), and the computed
+        `errors`/`has_error`/`is_e720bt` properties are included alongside
+        the raw fields rather than requiring a second call."""
+        return {
+            "model_code": self.model_code,
+            "series_code": self.series_code,
+            "country_code": self.country_code,
+            "error_info1": self.error_info1,
+            "error_info2": self.error_info2,
+            "media_width_mm": self.media_width_mm,
+            "media_type_raw": self.media_type_raw,
+            "media_type": self.media_type.value if self.media_type is not None else None,
+            "number_of_colors": self.number_of_colors,
+            "status_type_raw": self.status_type_raw,
+            "status_type": self.status_type.value if self.status_type is not None else None,
+            "phase_type": self.phase_type,
+            "phase_number": self.phase_number,
+            "tape_color_raw": self.tape_color_raw,
+            "text_color_raw": self.text_color_raw,
+            "raw_hex": self.raw.hex(" "),
+            "errors": self.errors,
+            "has_error": self.has_error,
+            "is_e720bt": self.is_e720bt,
+        }
+
 
 def parse_status(data: bytes) -> PrinterStatus:
     """Parse a 32-byte status reply. Raises ValueError on wrong length or bad header."""

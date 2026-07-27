@@ -273,3 +273,35 @@ def test_media_family_for_heat_shrink_2_1_resolves_hse_not_tze_spec():
     assert tape.nominal_mm == 8.8
     assert tape.family is MediaFamily.HSE_2_1
     assert tape.print_dots == 48
+
+
+# --- 8. to_dict (Task 1.3b: JSON-safe status for the API layer) ---
+
+
+def test_to_dict_enums_as_values_errors_and_raw_hex_round_trips():
+    # Undecoded media_type_raw (0x14, the reference block's real value) ->
+    # media_type is None on the dataclass; to_dict must carry that through as
+    # JSON null, not crash calling .value on None.
+    status = parse_status(REFERENCE_STATUS_BLOCK)
+    d = status.to_dict()
+
+    assert d["media_type"] is None
+    assert d["media_type_raw"] == 0x14
+    assert d["status_type"] == StatusType.REPLY_TO_REQUEST.value
+    assert d["has_error"] is False
+    assert d["errors"] == []
+    assert d["is_e720bt"] is True
+    assert d["media_width_mm"] == 24
+
+    raw_roundtrip = bytes.fromhex(d["raw_hex"])
+    assert len(raw_roundtrip) == 32
+    assert raw_roundtrip == status.raw
+    assert " " in d["raw_hex"]  # space-separated, not one long hex blob
+
+    # A block with a decodable media_type and an error set: enums resolve to
+    # their plain .value (JSON-safe), not the Enum member itself.
+    error_status = parse_status(_status_block({8: 0x01, 11: MediaType.LAMINATED.value}))
+    d2 = error_status.to_dict()
+    assert d2["media_type"] == MediaType.LAMINATED.value
+    assert d2["has_error"] is True
+    assert d2["errors"] == ["No media"]
