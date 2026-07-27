@@ -234,13 +234,14 @@ def test_capture_chain2_chain_mode_override_to_cut_each(tmp_path):
     assert data.count(b"\x00" * 100) == 2
 
 
-def test_capture_arrow_chain2_default_chain_mode_is_cut_each(tmp_path):
-    # arrow/checker default to CUT_EACH; single-page arrow -> exactly one preamble
-    # either way, so assert via the printed summary instead of stream shape.
-    out = tmp_path / "arrow.bin"
+def test_capture_checker_default_chain_mode_is_cut_each(tmp_path):
+    # checker defaults to CUT_EACH -> ESC i K's no-chain bit (0x08) must be SET.
+    # A FLUSH-count check would pass under either mode here (checker is a single
+    # page either way), so assert the actual ESC i K byte instead.
+    out = tmp_path / "checker.bin"
     cli.main(["capture", "--out", str(out), "--strategy", "classic", "--pattern", "checker"])
     data = out.read_bytes()
-    assert data.count(b"\x00" * 100) == 1  # single page regardless of mode
+    assert b"\x1b\x69\x4b\x08" in data
 
 
 def test_capture_accepts_orientation_and_job_option_flags(tmp_path):
