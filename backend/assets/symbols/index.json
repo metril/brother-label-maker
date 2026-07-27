@@ -1,0 +1,619 @@
+[
+  {
+    "id": "bolt",
+    "name": "Bolt",
+    "tags": [
+      "electrical",
+      "power",
+      "energy",
+      "lightning"
+    ],
+    "path": "bolt.svg"
+  },
+  {
+    "id": "electrical_services",
+    "name": "Electrical Services",
+    "tags": [
+      "electrical",
+      "outlet",
+      "plug"
+    ],
+    "path": "electrical_services.svg"
+  },
+  {
+    "id": "power",
+    "name": "Power",
+    "tags": [
+      "electrical",
+      "power",
+      "on",
+      "plug"
+    ],
+    "path": "power.svg"
+  },
+  {
+    "id": "power_off",
+    "name": "Power Off",
+    "tags": [
+      "electrical",
+      "power",
+      "off"
+    ],
+    "path": "power_off.svg"
+  },
+  {
+    "id": "outlet",
+    "name": "Outlet",
+    "tags": [
+      "electrical",
+      "outlet",
+      "socket",
+      "receptacle"
+    ],
+    "path": "outlet.svg"
+  },
+  {
+    "id": "flash_on",
+    "name": "Flash On",
+    "tags": [
+      "electrical",
+      "power",
+      "energy"
+    ],
+    "path": "flash_on.svg"
+  },
+  {
+    "id": "flash_off",
+    "name": "Flash Off",
+    "tags": [
+      "electrical",
+      "power",
+      "off"
+    ],
+    "path": "flash_off.svg"
+  },
+  {
+    "id": "warning",
+    "name": "Warning",
+    "tags": [
+      "electrical",
+      "hazard",
+      "caution",
+      "danger",
+      "misc"
+    ],
+    "path": "warning.svg"
+  },
+  {
+    "id": "report",
+    "name": "Report",
+    "tags": [
+      "electrical",
+      "hazard",
+      "alert",
+      "misc"
+    ],
+    "path": "report.svg"
+  },
+  {
+    "id": "error",
+    "name": "Error",
+    "tags": [
+      "electrical",
+      "hazard",
+      "alert",
+      "misc"
+    ],
+    "path": "error.svg"
+  },
+  {
+    "id": "cable",
+    "name": "Cable",
+    "tags": [
+      "network",
+      "cable",
+      "wire",
+      "patch"
+    ],
+    "path": "cable.svg"
+  },
+  {
+    "id": "router",
+    "name": "Router",
+    "tags": [
+      "network",
+      "router",
+      "wifi"
+    ],
+    "path": "router.svg"
+  },
+  {
+    "id": "lan",
+    "name": "LAN",
+    "tags": [
+      "network",
+      "ethernet",
+      "lan"
+    ],
+    "path": "lan.svg"
+  },
+  {
+    "id": "wifi",
+    "name": "Wifi",
+    "tags": [
+      "network",
+      "wireless",
+      "wifi"
+    ],
+    "path": "wifi.svg"
+  },
+  {
+    "id": "wifi_off",
+    "name": "Wifi Off",
+    "tags": [
+      "network",
+      "wireless",
+      "wifi",
+      "off"
+    ],
+    "path": "wifi_off.svg"
+  },
+  {
+    "id": "hub",
+    "name": "Hub",
+    "tags": [
+      "network",
+      "switch",
+      "hub"
+    ],
+    "path": "hub.svg"
+  },
+  {
+    "id": "dns",
+    "name": "DNS/Server",
+    "tags": [
+      "network",
+      "server",
+      "dns",
+      "rack"
+    ],
+    "path": "dns.svg"
+  },
+  {
+    "id": "storage",
+    "name": "Storage",
+    "tags": [
+      "network",
+      "server",
+      "storage",
+      "rack"
+    ],
+    "path": "storage.svg"
+  },
+  {
+    "id": "device_hub",
+    "name": "Device Hub",
+    "tags": [
+      "network",
+      "hub",
+      "topology"
+    ],
+    "path": "device_hub.svg"
+  },
+  {
+    "id": "settings_ethernet",
+    "name": "Ethernet Settings",
+    "tags": [
+      "network",
+      "ethernet",
+      "cable"
+    ],
+    "path": "settings_ethernet.svg"
+  },
+  {
+    "id": "network_check",
+    "name": "Network Check",
+    "tags": [
+      "network",
+      "signal",
+      "check"
+    ],
+    "path": "network_check.svg"
+  },
+  {
+    "id": "speaker",
+    "name": "Speaker",
+    "tags": [
+      "av",
+      "audio",
+      "speaker"
+    ],
+    "path": "speaker.svg"
+  },
+  {
+    "id": "mic",
+    "name": "Microphone",
+    "tags": [
+      "av",
+      "audio",
+      "mic"
+    ],
+    "path": "mic.svg"
+  },
+  {
+    "id": "mic_off",
+    "name": "Microphone Off",
+    "tags": [
+      "av",
+      "audio",
+      "mic",
+      "off"
+    ],
+    "path": "mic_off.svg"
+  },
+  {
+    "id": "usb",
+    "name": "USB",
+    "tags": [
+      "av",
+      "usb",
+      "port"
+    ],
+    "path": "usb.svg"
+  },
+  {
+    "id": "headphones",
+    "name": "Headphones",
+    "tags": [
+      "av",
+      "audio",
+      "headphones"
+    ],
+    "path": "headphones.svg"
+  },
+  {
+    "id": "volume_up",
+    "name": "Volume Up",
+    "tags": [
+      "av",
+      "audio",
+      "volume"
+    ],
+    "path": "volume_up.svg"
+  },
+  {
+    "id": "tv",
+    "name": "TV",
+    "tags": [
+      "av",
+      "video",
+      "display",
+      "hdmi"
+    ],
+    "path": "tv.svg"
+  },
+  {
+    "id": "videocam",
+    "name": "Video Camera",
+    "tags": [
+      "av",
+      "video",
+      "camera"
+    ],
+    "path": "videocam.svg"
+  },
+  {
+    "id": "headset_mic",
+    "name": "Headset Mic",
+    "tags": [
+      "av",
+      "audio",
+      "headset"
+    ],
+    "path": "headset_mic.svg"
+  },
+  {
+    "id": "arrow_forward",
+    "name": "Arrow Forward",
+    "tags": [
+      "arrow",
+      "direction"
+    ],
+    "path": "arrow_forward.svg"
+  },
+  {
+    "id": "arrow_back",
+    "name": "Arrow Back",
+    "tags": [
+      "arrow",
+      "direction"
+    ],
+    "path": "arrow_back.svg"
+  },
+  {
+    "id": "arrow_upward",
+    "name": "Arrow Up",
+    "tags": [
+      "arrow",
+      "direction"
+    ],
+    "path": "arrow_upward.svg"
+  },
+  {
+    "id": "arrow_downward",
+    "name": "Arrow Down",
+    "tags": [
+      "arrow",
+      "direction"
+    ],
+    "path": "arrow_downward.svg"
+  },
+  {
+    "id": "home",
+    "name": "Home",
+    "tags": [
+      "misc",
+      "house"
+    ],
+    "path": "home.svg"
+  },
+  {
+    "id": "lock",
+    "name": "Lock",
+    "tags": [
+      "misc",
+      "security",
+      "lock"
+    ],
+    "path": "lock.svg"
+  },
+  {
+    "id": "lock_open",
+    "name": "Lock Open",
+    "tags": [
+      "misc",
+      "security",
+      "unlock"
+    ],
+    "path": "lock_open.svg"
+  },
+  {
+    "id": "key",
+    "name": "Key",
+    "tags": [
+      "misc",
+      "security",
+      "key"
+    ],
+    "path": "key.svg"
+  },
+  {
+    "id": "vpn_key",
+    "name": "VPN Key",
+    "tags": [
+      "misc",
+      "security",
+      "key"
+    ],
+    "path": "vpn_key.svg"
+  },
+  {
+    "id": "sell",
+    "name": "Tag",
+    "tags": [
+      "misc",
+      "tag",
+      "label",
+      "price"
+    ],
+    "path": "sell.svg"
+  },
+  {
+    "id": "label",
+    "name": "Label",
+    "tags": [
+      "misc",
+      "tag",
+      "label"
+    ],
+    "path": "label.svg"
+  },
+  {
+    "id": "star",
+    "name": "Star",
+    "tags": [
+      "misc",
+      "favorite",
+      "star"
+    ],
+    "path": "star.svg"
+  },
+  {
+    "id": "check",
+    "name": "Check",
+    "tags": [
+      "misc",
+      "ok",
+      "done",
+      "check"
+    ],
+    "path": "check.svg"
+  },
+  {
+    "id": "check_circle",
+    "name": "Check Circle",
+    "tags": [
+      "misc",
+      "ok",
+      "done",
+      "check"
+    ],
+    "path": "check_circle.svg"
+  },
+  {
+    "id": "close",
+    "name": "Close",
+    "tags": [
+      "misc",
+      "x",
+      "cancel",
+      "close"
+    ],
+    "path": "close.svg"
+  },
+  {
+    "id": "cancel",
+    "name": "Cancel",
+    "tags": [
+      "misc",
+      "x",
+      "cancel"
+    ],
+    "path": "cancel.svg"
+  },
+  {
+    "id": "build",
+    "name": "Build/Tools",
+    "tags": [
+      "misc",
+      "tools",
+      "wrench",
+      "maintenance"
+    ],
+    "path": "build.svg"
+  },
+  {
+    "id": "settings",
+    "name": "Settings",
+    "tags": [
+      "misc",
+      "gear",
+      "settings",
+      "config"
+    ],
+    "path": "settings.svg"
+  },
+  {
+    "id": "info",
+    "name": "Info",
+    "tags": [
+      "misc",
+      "information"
+    ],
+    "path": "info.svg"
+  },
+  {
+    "id": "add",
+    "name": "Add",
+    "tags": [
+      "misc",
+      "plus",
+      "add"
+    ],
+    "path": "add.svg"
+  },
+  {
+    "id": "remove",
+    "name": "Remove",
+    "tags": [
+      "misc",
+      "minus",
+      "remove"
+    ],
+    "path": "remove.svg"
+  },
+  {
+    "id": "delete",
+    "name": "Delete",
+    "tags": [
+      "misc",
+      "trash",
+      "delete"
+    ],
+    "path": "delete.svg"
+  },
+  {
+    "id": "edit",
+    "name": "Edit",
+    "tags": [
+      "misc",
+      "pencil",
+      "edit"
+    ],
+    "path": "edit.svg"
+  },
+  {
+    "id": "print",
+    "name": "Print",
+    "tags": [
+      "misc",
+      "print",
+      "printer"
+    ],
+    "path": "print.svg"
+  },
+  {
+    "id": "qr_code",
+    "name": "QR Code",
+    "tags": [
+      "misc",
+      "qr",
+      "code",
+      "barcode"
+    ],
+    "path": "qr_code.svg"
+  },
+  {
+    "id": "save",
+    "name": "Save",
+    "tags": [
+      "misc",
+      "save",
+      "disk"
+    ],
+    "path": "save.svg"
+  },
+  {
+    "id": "person",
+    "name": "Person",
+    "tags": [
+      "misc",
+      "user",
+      "person"
+    ],
+    "path": "person.svg"
+  },
+  {
+    "id": "location_on",
+    "name": "Location",
+    "tags": [
+      "misc",
+      "location",
+      "pin",
+      "map"
+    ],
+    "path": "location_on.svg"
+  },
+  {
+    "id": "schedule",
+    "name": "Schedule",
+    "tags": [
+      "misc",
+      "clock",
+      "time",
+      "schedule"
+    ],
+    "path": "schedule.svg"
+  },
+  {
+    "id": "inventory_2",
+    "name": "Inventory",
+    "tags": [
+      "misc",
+      "box",
+      "inventory",
+      "package"
+    ],
+    "path": "inventory_2.svg"
+  }
+]
