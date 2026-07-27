@@ -21,6 +21,19 @@ services:
       # after the physical checkpoint resolves which init strategy the
       # PT-E720BT actually needs.
       PRINTER_INIT_STRATEGY: classic
+      # M4: the OTHER two checkpoint-pending knobs (docs/protocol-notes.md
+      # step 5, "Orientation diagnosis") -- uncomment and set per the
+      # checkpoint's result if the arrow test print comes out mirrored/
+      # striped. Defaults (commented out): msb_first bit order, pins not
+      # flipped -- matching config.py's AppConfig field defaults.
+      # PRINTER_BIT_ORDER: lsb_first
+      # PRINTER_FLIP_PINS: "true"
+      # M3: CORS_ORIGINS is a JSON array, not a bare string -- see config.py's
+      # AppConfig.cors_origins field comment for the exact env-var syntax.
+      # Only needed if the frontend is served from a different origin than
+      # this container (e.g. a separate static host) instead of the SPA
+      # this image mounts itself (main.py's _resolve_static_dir).
+      # CORS_ORIGINS: '["https://labels.example.com"]'
     volumes:
       # Bind-mount the *directory*, not a specific device node
       # (`/dev/bus/usb/001/005`-style paths under `devices:` renumber on
