@@ -8,6 +8,7 @@ dependencies = [
     "packbits",
     "pyusb>=1.2",
     "aiosqlite>=0.20",
+    "resvg-py==0.3.3",
 ]
 
 [dependency-groups]

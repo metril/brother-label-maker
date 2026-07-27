@@ -1,0 +1,146 @@
+"""Tests for labelmaker.render.fonts: hermetic bundled fonts + measurement."""
+
+import pytest
+from PIL import ImageFont
+
+from labelmaker.render.fonts import (
+    FONTS_DIR,
+    FontInfo,
+    fit_font_size,
+    font_path,
+    list_fonts,
+    measure_text,
+)
+
+# --- 1. list_fonts() ---
+
+
+def test_list_fonts_returns_four_families():
+    fonts = list_fonts()
+    assert len(fonts) == 4
+    assert all(isinstance(f, FontInfo) for f in fonts)
+    families = {f.family for f in fonts}
+    assert families == {"Inter", "Roboto Condensed", "JetBrains Mono", "DejaVu Sans"}
+
+
+def test_list_fonts_all_have_bold():
+    assert all(f.has_bold for f in list_fonts())
+
+
+def test_list_fonts_monospace_flag_only_on_jetbrains_mono():
+    monospace = {f.family for f in list_fonts() if f.monospace}
+    assert monospace == {"JetBrains Mono"}
+
+
+# --- 2. font_path() ---
+
+
+@pytest.mark.parametrize(
+    "family,bold,filename",
+    [
+        ("Inter", False, "Inter-Regular.ttf"),
+        ("Inter", True, "Inter-Bold.ttf"),
+        ("Roboto Condensed", False, "RobotoCondensed-Regular.ttf"),
+        ("Roboto Condensed", True, "RobotoCondensed-Bold.ttf"),
+        ("JetBrains Mono", False, "JetBrainsMono-Regular.ttf"),
+        ("JetBrains Mono", True, "JetBrainsMono-Bold.ttf"),
+        ("DejaVu Sans", False, "DejaVuSans.ttf"),
+        ("DejaVu Sans", True, "DejaVuSans-Bold.ttf"),
+    ],
+)
+def test_font_path_maps_family_and_bold_to_expected_file(family, bold, filename):
+    assert font_path(family, bold) == FONTS_DIR / filename
+
+
+def test_font_path_default_is_not_bold():
+    assert font_path("Inter") == font_path("Inter", bold=False)
+
+
+def test_font_path_unknown_family_raises_with_valid_list():
+    with pytest.raises(ValueError, match="Inter"):
+        font_path("Comic Sans")
+
+
+# --- 3. All 8 files exist, are nonempty, and load with their declared family ---
+
+
+def test_all_bundled_font_files_exist_and_are_nonempty():
+    for family in {f.family for f in list_fonts()}:
+        for bold in (False, True):
+            path = font_path(family, bold)
+            assert path.is_file(), f"{path} missing"
+            assert path.stat().st_size > 0, f"{path} is empty"
+
+
+def test_all_bundled_font_files_load_and_declare_their_family():
+    for family in {f.family for f in list_fonts()}:
+        for bold in (False, True):
+            loaded = ImageFont.truetype(str(font_path(family, bold)), 24)
+            declared_family, _style = loaded.getname()
+            assert declared_family == family
+
+
+# --- 4. measure_text() ---
+
+
+def test_measure_text_monotonic_in_string_length():
+    short_w, _ = measure_text("A", "Inter", 40)
+    long_w, _ = measure_text("A LONGER STRING OF TEXT", "Inter", 40)
+    assert long_w >= short_w
+
+
+def test_measure_text_monotonic_in_font_size():
+    small_w, small_h = measure_text("HELLO", "Inter", 10)
+    big_w, big_h = measure_text("HELLO", "Inter", 40)
+    assert big_w > small_w
+    assert big_h > small_h
+
+
+def test_measure_text_bold_variant_loads_independently():
+    w_regular, _ = measure_text("HELLO", "Inter", 40, bold=False)
+    w_bold, _ = measure_text("HELLO", "Inter", 40, bold=True)
+    assert w_regular > 0
+    assert w_bold > 0
+
+
+# --- 5. fit_font_size() ---
+
+
+def test_fit_font_size_fits_within_height_only():
+    size = fit_font_size(["HELLO"], "Inter", None, 100.0)
+    # N=1 line: size * 1.15 <= 100
+    assert size * 1.15 <= 100.0 + 1e-9
+    assert size >= 6
+
+
+def test_fit_font_size_respects_width_constraint():
+    size = fit_font_size(["HI"], "Inter", 100.0, 1000.0)
+    width, _ = measure_text("HI", "Inter", size)
+    # width must fit inside the 0.95 safety-margined budget, and the fit
+    # must not be the degenerate min_px fallback (100px is generous for "HI")
+    assert size > 6
+    assert width <= 100.0 * 0.95 + 1e-6
+
+
+def test_fit_font_size_falls_back_to_min_px_when_width_budget_is_impossible():
+    # Even at min_px, this string cannot fit inside a 1px width budget --
+    # fit_font_size must fall back to min_px rather than loop forever or
+    # return something smaller than min_px.
+    size = fit_font_size(["A REASONABLY LONG LINE OF TEXT"], "Inter", 1.0, 1000.0)
+    assert size == 6
+
+
+def test_fit_font_size_multiple_lines_shrinks_to_fit_height():
+    one_line = fit_font_size(["X"], "Inter", None, 100.0)
+    four_lines = fit_font_size(["X", "X", "X", "X"], "Inter", None, 100.0)
+    assert four_lines <= one_line
+
+
+def test_fit_font_size_hits_min_px_when_impossible():
+    size = fit_font_size(["X"], "Inter", None, 0.5, min_px=6, max_px=128)
+    assert size == 6
+
+
+def test_fit_font_size_caps_at_max_px():
+    size = fit_font_size(["X"], "Inter", None, 100000.0, max_px=20)
+    assert size == 20
