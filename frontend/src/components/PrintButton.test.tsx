@@ -154,9 +154,16 @@ describe("PrintButton", () => {
       renderWithProviders(<PrintButton definition={DEFINITION} />);
       fireEvent.click(screen.getByRole("button", { name: "Print" }));
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(31_000);
-      });
+      // Advance in 1s steps (not one 31s jump) so ~30 real polls actually
+      // get served the identical "printing" payload -- a single big jump
+      // only advances render count enough to coincidentally trip a
+      // dead-branch check on the mutation's own late render, without
+      // genuinely exercising repeated polls against unchanging data.
+      for (let i = 0; i < 35; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1000);
+        });
+      }
 
       expect(screen.getByRole("button")).toHaveTextContent("Print");
       expect(screen.getByText("timed out waiting for print status")).toBeInTheDocument();
