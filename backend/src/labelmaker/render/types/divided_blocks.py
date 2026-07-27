@@ -31,6 +31,7 @@ Separators are drawn ON the block boundary, not as additional width -- see
 _separator_body's docstring and each Separator member's pixel geometry.
 """
 
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import NamedTuple
 
@@ -45,13 +46,14 @@ from labelmaker.render.document import (
     _svg_document,
     _text_element,
 )
-from labelmaker.render.fonts import fit_font_size, font_path, list_fonts
+from labelmaker.render.fonts import fit_font_size, font_path, list_fonts, measure_text
 
 _LINE_SPACING = 1.15
 _MIN_FONT_PX = 6
 _MAX_FONT_PX = 128
 _MAX_LINES = 4
 _MAX_BLOCKS = 50
+_MIN_BLOCK_WIDTH_PX = 4  # a block narrower than this can't hold a visible separator + text
 _VALID_FAMILIES = {f.family for f in list_fonts()}
 
 # Separator pixel geometry -- see _separator_body's docstring.
@@ -61,6 +63,17 @@ _DASH_OFF_PX = 4
 _LINE_WIDTH_PX = 1
 _BOLD_WIDTH_PX = 3
 _FRAME_BORDER_PX = 1
+
+
+def _round_half_up(value: float) -> int:
+    """Round-half-away-from-zero to the nearest int, matching
+    geometry.mm_to_dots' own rounding convention (Decimal, ROUND_HALF_UP)
+    -- used for TIC's top/bottom extent so a tie (e.g. print_dots*0.15 ==
+    10.5 exactly, on a 12mm tape) resolves the same direction the rest of
+    this codebase's pixel math does. Python's builtin round() ties to
+    EVEN (banker's rounding) instead, which would silently disagree with
+    mm_to_dots right at such a tie."""
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 class Separator(StrEnum):
@@ -136,12 +149,15 @@ def _per_unit_mm(params: DividedBlocksParams) -> float:
     """The mm-per-multiplier-unit both length modes reduce to: block i's
     length is always `_per_unit_mm(params) * blocks[i].width_multiplier`.
     In per-block-length mode this is block_length_mm itself (order-
-    independent). In total-length mode it's total_length_mm divided by the
-    sum of every block's multiplier -- computed once so
-    boundary_mm(cum_weight) == total_length_mm * (cum_weight/total_weight)
-    reaches EXACTLY total_length_mm at cum_weight==total_weight (float
-    division of X/X is exactly 1.0 for any nonzero X), which is what keeps
-    the final boundary drift-free (see layout_blocks)."""
+    independent, no division involved). In total-length mode it's
+    total_length_mm divided by the sum of every block's multiplier,
+    computed ONCE here and reused for every boundary -- so the final
+    boundary in layout_blocks evaluates as
+    `(total_length_mm / total_weight) * total_weight`, the same
+    divide-then-multiply-back expression regardless of block count. Any
+    sub-ULP gap that expression leaves versus total_length_mm itself is far
+    smaller than mm_to_dots' own rounding granularity (>=1/180in), which is
+    what actually keeps the total exact in practice (see layout_blocks)."""
     if params.block_length_mm is not None:
         return params.block_length_mm
     total_weight = sum(b.width_multiplier for b in params.blocks)
@@ -183,8 +199,15 @@ def layout_blocks(params: DividedBlocksParams, tape: TapeSpec) -> list[BlockLayo
     total_weight = sum(b.width_multiplier for b in params.blocks)
     total_mm = per_unit_mm * total_weight
     if total_mm < MIN_LABEL_MM or total_mm > tape.max_length_mm:
+        # {total_mm} (not a fixed-precision format like :.3f) -- str() on a
+        # float is Python's shortest round-tripping representation, so a
+        # near-miss value that's actually a hair below MIN_LABEL_MM (e.g.
+        # some float arithmetic landing on 4.399999999999999) still shows
+        # as such, instead of a fixed :.3f rounding it to "4.400" and
+        # making it look identical to (and hiding that it's just under)
+        # the boundary itself.
         raise ValueError(
-            f"divided-blocks total length {total_mm:.3f}mm is outside the valid range "
+            f"divided-blocks total length {total_mm}mm is outside the valid range "
             f"[{MIN_LABEL_MM}, {tape.max_length_mm}]mm for this tape"
         )
 
@@ -199,7 +222,23 @@ def layout_blocks(params: DividedBlocksParams, tape: TapeSpec) -> list[BlockLayo
         x = boundary_px[pos]
         layouts_by_index[idx] = BlockLayout(x_px=x, width_px=boundary_px[pos + 1] - x)
 
-    return [layouts_by_index[i] for i in range(n)]
+    layouts = [layouts_by_index[i] for i in range(n)]
+
+    # A block whose multiplier/length combination rounds to a sliver (or
+    # exactly 0px) is reachable even though the overall total passes the
+    # MIN_LABEL_MM check above (e.g. a 0.1 multiplier next to a much larger
+    # sibling) -- it can't hold a visible separator or any text, so reject
+    # it explicitly rather than silently rendering an invisible/degenerate
+    # block.
+    for i, layout in enumerate(layouts):
+        if layout.width_px < _MIN_BLOCK_WIDTH_PX:
+            raise ValueError(
+                f"block {i}: computed width {layout.width_px}px is narrower than the "
+                f"minimum {_MIN_BLOCK_WIDTH_PX}px -- its block_length_mm/total_length_mm "
+                "and width_multiplier combination is too small"
+            )
+
+    return layouts
 
 
 def _rect(x: int, y: int, width: int, height: int) -> str:
@@ -220,7 +259,8 @@ def _separator_body(kind: Separator, boundary_x: int, height_px: int) -> str:
     the first column of the block to its right):
 
     - TIC: 1px wide, drawn only across the top and bottom
-      round(height_px * 0.15) rows (a short tic mark, not a full line).
+      _round_half_up(height_px * 0.15) rows (a short tic mark, not a full
+      line).
     - DASH: 1px wide, full height, alternating 4px-on/4px-off vertical
       segments starting at y=0.
     - LINE / FRAME's per-boundary mark: 1px wide, solid, full height.
@@ -230,7 +270,7 @@ def _separator_body(kind: Separator, boundary_x: int, height_px: int) -> str:
     if kind is Separator.NONE:
         return ""
     if kind is Separator.TIC:
-        seg_h = round(height_px * _TIC_FRACTION)
+        seg_h = _round_half_up(height_px * _TIC_FRACTION)
         rx = boundary_x - _LINE_WIDTH_PX // 2
         return _rect(rx, 0, _LINE_WIDTH_PX, seg_h) + _rect(
             rx, height_px - seg_h, _LINE_WIDTH_PX, seg_h
@@ -330,14 +370,45 @@ def render_divided_blocks(params: DividedBlocksParams, tape: TapeSpec) -> Render
                 )
             )
 
+        # Explicit font sizes skip fit_font_size's own width check entirely
+        # (height_fit_px above only ever measures height) -- unlike auto
+        # mode, nothing here guarantees an explicit size actually fits each
+        # block's own width. Mirrors text_label.py's fixed-length
+        # text_truncated convention: measure the widest line at the final
+        # font_px against this block's own available width (orientation-
+        # swapped for VERTICAL/BACKBONE, same as _avail's fit-width
+        # component) and warn per block when it doesn't fit. The actual
+        # rendered glyphs are still kept on-label by the unconditional
+        # per-block clip below regardless of this warning.
+        for i, (block, layout) in enumerate(zip(params.blocks, layouts, strict=True)):
+            avail_w, _ = _avail(layout)
+            non_blank = [line for line in block.lines if line]
+            if not non_blank:
+                continue
+            widest_px = max(
+                measure_text(line, params.font_family, font_px, params.bold)[0]
+                for line in non_blank
+            )
+            if widest_px > avail_w:
+                warnings.append(
+                    RenderWarning(
+                        code="text_truncated",
+                        message=(
+                            f"block {i}: text truncated: content is wider than the block"
+                        ),
+                        object_id=f"block-{i}",
+                    )
+                )
+
     # -- per-block text, centered in the block minus padding (rule 5/6) --
     font_obj = ImageFont.truetype(str(font_path(params.font_family, params.bold)), font_px)
     ascent, descent = font_obj.getmetrics()
     line_height_px = font_px * _LINE_SPACING
     leading_px = line_height_px - (ascent + descent)
 
+    clip_defs: list[str] = []
     text_parts: list[str] = []
-    for block, layout in zip(params.blocks, layouts, strict=True):
+    for i, (block, layout) in enumerate(zip(params.blocks, layouts, strict=True)):
         lines = block.lines or [""]
         if not any(lines):
             continue  # empty lines list or [""] -> block renders empty, no error (rule 5)
@@ -369,7 +440,30 @@ def render_divided_blocks(params: DividedBlocksParams, tape: TapeSpec) -> Render
             group = f'<g transform="rotate(90, {_fmt_num(cx)}, {_fmt_num(cy)})">{group}</g>'
         elif params.orientation is Orientation.BACKBONE:
             group = f'<g transform="rotate(-90, {_fmt_num(cx)}, {_fmt_num(cy)})">{group}</g>'
-        text_parts.append(group)
+
+        # Clip every block's (possibly rotated) text to its own padded box
+        # on the canvas, UNCONDITIONALLY -- not just when a warning fired
+        # above. Two distinct ways a block's text can extend past its own
+        # box: an explicit font_size_px too big for this block (flagged by
+        # text_truncated above) and auto-fit's min_px FALLBACK when nothing
+        # in [min_px, max_px] actually satisfies the fit (fit_font_size
+        # returns min_px anyway per its own documented fallback -- that
+        # case only ever surfaces today as a text_cramped warning, which
+        # says "may be cramped", not "may bleed into the next block"). The
+        # clip-path is defined in the same (post-rotation) canvas
+        # coordinate space as `cx`/`cy` above, so it applies identically
+        # regardless of orientation; it is a no-op on anything that already
+        # fit inside the box.
+        clip_id = f"db-block-clip-{i}"
+        clip_x = layout.x_px + padding_px
+        clip_y = padding_px
+        clip_w = max(0, layout.width_px - 2 * padding_px)
+        clip_h = max(0, height_px - 2 * padding_px)
+        clip_defs.append(
+            f'<clipPath id="{clip_id}"><rect x="{_fmt_num(clip_x)}" y="{_fmt_num(clip_y)}" '
+            f'width="{_fmt_num(clip_w)}" height="{_fmt_num(clip_h)}"/></clipPath>'
+        )
+        text_parts.append(f'<g clip-path="url(#{clip_id})">{group}</g>')
 
     # -- separators, drawn on top of text so they're never occluded (rule 3) --
     total_width_px = sum(layout.width_px for layout in layouts)
@@ -389,6 +483,7 @@ def render_divided_blocks(params: DividedBlocksParams, tape: TapeSpec) -> Render
                 _rect(total_width_px - _FRAME_BORDER_PX, 0, _FRAME_BORDER_PX, height_px)
             )
 
-    body = "".join(text_parts) + "".join(sep_parts)
+    defs = f"<defs>{''.join(clip_defs)}</defs>" if clip_defs else ""
+    body = defs + "".join(text_parts) + "".join(sep_parts)
     svg = _svg_document(total_width_px, height_px, body)
     return RenderedLabel(svg=svg, width_px=total_width_px, height_px=height_px, warnings=warnings)

@@ -175,17 +175,19 @@ def test_equal_blocks_widths_sum_to_total_and_are_near_ideal():
 
 
 def test_multiplier_extremes_produce_proportional_widths():
-    # 2 blocks, multipliers 0.1 and 9.5, block_length_mm=2.0 ->
-    # boundaries_mm [0, 0.2, 19.2] -> boundaries_px [0, 1, 136].
+    # 2 blocks, multipliers 0.1 and 9.5, block_length_mm=10.0 (kept large
+    # enough that the 0.1-multiplier block still clears the 4px minimum
+    # block width -- see the zero-width-floor tests below) ->
+    # boundaries_mm [0, 1.0, 96.0] -> boundaries_px [0, 7, 680].
     params = DividedBlocksParams(
         blocks=[
             BlockSpec(lines=["A"], width_multiplier=0.1),
             BlockSpec(lines=["B"], width_multiplier=9.5),
         ],
-        block_length_mm=2.0,
+        block_length_mm=10.0,
     )
     layouts = layout_blocks(params, _tape(24))
-    assert layouts == [BlockLayout(x_px=0, width_px=1), BlockLayout(x_px=1, width_px=135)]
+    assert layouts == [BlockLayout(x_px=0, width_px=7), BlockLayout(x_px=7, width_px=673)]
 
 
 def test_total_length_mm_division_with_mixed_multipliers():
@@ -267,7 +269,11 @@ def test_reverse_does_not_change_per_block_multiset_of_widths_much():
 
 def test_total_below_min_label_mm_raises():
     params = DividedBlocksParams(blocks=[BlockSpec()], block_length_mm=1.0)
-    with pytest.raises(ValueError, match=r"1\.000mm"):
+    # Message uses str(total_mm), not a fixed-precision format -- Python's
+    # shortest round-tripping float repr, so it names the value exactly
+    # rather than rounding it to look deceptively close to the boundary
+    # (see the near-miss precision test further down).
+    with pytest.raises(ValueError, match=r"1\.0mm"):
         layout_blocks(params, _tape(24))
 
 
@@ -275,8 +281,59 @@ def test_total_above_tape_max_length_mm_raises():
     params = DividedBlocksParams(
         blocks=[BlockSpec(), BlockSpec()], block_length_mm=600.0
     )
-    with pytest.raises(ValueError, match=r"1200\.000mm"):
+    with pytest.raises(ValueError, match=r"1200\.0mm"):
         layout_blocks(params, _tape(24))  # tze max_length_mm == 1000.0
+
+
+def test_length_error_message_shows_near_miss_precision_not_rounded():
+    # 50 blocks x 0.08788mm each: total_mm is a hair below MIN_LABEL_MM
+    # (4.4) but NOT exactly 4.4 -- a fixed :.3f format would round this to
+    # "4.394mm" (fine here) but the point being guarded is that the
+    # message must reflect the ACTUAL float, not a lossy rounding of it,
+    # so a near-miss can never accidentally print as if it were exactly on
+    # the boundary. str(total_mm) (Python's shortest round-tripping float
+    # repr) guarantees that regardless of how close to a "clean" decimal
+    # the underlying float lands.
+    per_block_mm = 4.399999999 / 50
+    params = DividedBlocksParams(
+        blocks=[BlockSpec() for _ in range(50)], block_length_mm=per_block_mm
+    )
+    total_mm = per_block_mm * 50
+    assert total_mm != 4.4  # the float genuinely isn't the clean boundary value
+    with pytest.raises(ValueError, match=rf"{total_mm}mm"):
+        layout_blocks(params, _tape(24))
+
+
+# --- 2b. Pure math: minimum block width floor ----------------------------
+
+
+def test_zero_width_block_raises_naming_index_and_width():
+    # 2 blocks, multipliers [0.1, 9.5], block_length_mm=1.0 -> block 0's
+    # width is mm_to_dots(0.1mm) == 1px, below the 4px floor, even though
+    # the total (9.6mm) comfortably clears MIN_LABEL_MM.
+    params = DividedBlocksParams(
+        blocks=[
+            BlockSpec(width_multiplier=0.1),
+            BlockSpec(width_multiplier=9.5),
+        ],
+        block_length_mm=1.0,
+    )
+    with pytest.raises(ValueError, match=r"block 0.*1px"):
+        layout_blocks(params, _tape(24))
+
+
+def test_block_width_exactly_at_floor_is_accepted():
+    # Sanity check the floor is `< 4px`, not `<= 4px`: block_length_mm=0.55
+    # for a single default-multiplier block -> mm_to_dots(0.55) == 4px
+    # exactly, total_mm == 0.55 which is below MIN_LABEL_MM by itself, so
+    # pair it with a second larger block to keep the total valid while
+    # keeping the first block's own width pinned at exactly 4px.
+    params = DividedBlocksParams(
+        blocks=[BlockSpec(width_multiplier=0.55), BlockSpec(width_multiplier=9.0)],
+        block_length_mm=1.0,
+    )
+    layouts = layout_blocks(params, _tape(24))
+    assert layouts[0].width_px == 4
 
 
 # --- 3. Separator geometry: bitmap-level pixel asserts, 2-block label ---
@@ -327,6 +384,29 @@ def test_separator_tic_touches_only_top_and_bottom_15_percent():
     assert not _ink(img, 85, 108)
     assert _ink(img, 85, 109)
     assert _ink(img, 85, 127)
+
+
+def test_separator_tic_extent_rounds_half_up_at_exact_tie():
+    # A 12mm tape has print_dots == 70 -> 70*0.15 == 10.5 EXACTLY, a genuine
+    # rounding tie. The repo's own mm_to_dots convention is Decimal
+    # ROUND_HALF_UP (round-half-away-from-zero), which resolves this tie to
+    # 11 -- Python's builtin round() would instead tie to EVEN (banker's
+    # rounding) and give 10, silently disagreeing with the rest of the
+    # codebase's pixel math. 2 blocks x 6mm each on this tape -> boundary
+    # at mm_to_dots(6.0) == 43px (hand-derived, independent of this
+    # module).
+    params = DividedBlocksParams(
+        blocks=[BlockSpec(lines=["A"]), BlockSpec(lines=["B"])],
+        block_length_mm=6.0,
+        separator=Separator.TIC,
+        font_size_px=8,
+    )
+    label = render_divided_blocks(params, _tape(12))
+    img = rasterize(label)
+    assert _ink(img, 43, 10), "row 10 (0-indexed) should be the last ink row of an 11-row tic"
+    assert not _ink(img, 43, 11), "row 11 should already be blank under ROUND_HALF_UP (seg_h=11)"
+    assert not _ink(img, 43, 58)
+    assert _ink(img, 43, 59), "bottom tic should start at row 59 (70-11)"
 
 
 def test_separator_dash_has_4px_on_4px_off_gaps():
@@ -456,6 +536,68 @@ def test_explicit_font_size_clamped_triggers_global_font_clamped_warning():
     clamped = [w for w in label.warnings if w.code == "font_clamped"]
     assert len(clamped) == 1
     assert clamped[0].object_id is None
+
+
+def test_explicit_oversized_font_warns_text_truncated_per_block_and_clips():
+    # Reproduces the reported bug: an explicit font_size_px far too big for
+    # each block's own width (3 blocks x 10mm on a 24mm tape ->
+    # boundaries_px [0, 71, 142, 213], avail width per block ==
+    # 71 - 2*mm_to_dots(1.0) == 71 - 14 == 57px; an 8-char line at 48px is
+    # far wider than that) used to render an illegible smear crossing
+    # every block boundary with warnings == []. Now: a text_truncated
+    # warning per block, AND the rendered ink never crosses into a
+    # neighboring block.
+    params = DividedBlocksParams(
+        blocks=[BlockSpec(lines=["ABCDEFGH"]) for _ in range(3)],
+        block_length_mm=10.0,
+        font_size_px=48,
+        separator=Separator.NONE,
+    )
+    tape = _tape(24)
+    label = render_divided_blocks(params, tape)
+
+    truncated = [w for w in label.warnings if w.code == "text_truncated"]
+    assert {w.object_id for w in truncated} == {"block-0", "block-1", "block-2"}
+    assert all(w.severity == "warning" for w in truncated)
+    assert "clipPath" in label.svg
+
+    layouts = layout_blocks(params, tape)
+    img = rasterize(label)
+    # No ink within a padding-width margin (7px, mm_to_dots(1.0)) of any
+    # inner boundary -- proves clipping actually confines each block's
+    # (badly overflowing) text to its own box instead of bleeding across
+    # the boundary into a neighbor.
+    for boundary_x in (layouts[1].x_px, layouts[2].x_px):
+        for x in range(boundary_x - 6, boundary_x + 6):
+            for y in range(0, tape.print_dots, 8):
+                assert not _ink(img, x, y), f"ink bled across boundary at x={x}, y={y}"
+
+
+def test_auto_mode_floor_fallback_still_clips_no_cross_block_bleed():
+    # Reproduces the report's second finding: fit_font_size's min_px
+    # FALLBACK (when nothing in [min_px, max_px] actually satisfies the
+    # fit) used to paint text at the floor size with no clip, which can
+    # still overflow a very narrow block and bleed into its neighbors --
+    # auto mode's existing text_cramped warning flags that something's
+    # wrong, but didn't used to stop the bleed. 3 narrow blocks (4mm each
+    # -> ~28px wide, avail width ~14px after padding) with a wide word
+    # forces every block to the 6px floor.
+    params = DividedBlocksParams(
+        blocks=[BlockSpec(lines=["WWWWWWWWWW"]) for _ in range(3)],
+        block_length_mm=4.0,
+        separator=Separator.NONE,
+    )
+    tape = _tape(24)
+    label = render_divided_blocks(params, tape)
+
+    assert any(w.code == "text_cramped" for w in label.warnings)
+
+    layouts = layout_blocks(params, tape)
+    img = rasterize(label)
+    for boundary_x in (layouts[1].x_px, layouts[2].x_px):
+        for x in range(boundary_x - 6, boundary_x + 6):
+            for y in range(0, tape.print_dots, 8):
+                assert not _ink(img, x, y), f"ink bled across boundary at x={x}, y={y}"
 
 
 def test_explicit_font_size_that_fits_has_no_warning():
