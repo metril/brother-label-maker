@@ -1,3 +1,5 @@
+import type { RenderWarning } from "../api/types";
+
 /** On-screen px per physical mm, applied to the image's WIDTH from
  * `lengthMm` directly (never to height first) -- height is then left to
  * `"auto"`, so the browser derives it from the PNG's own natural aspect
@@ -11,8 +13,8 @@
  * same amount. Anchoring on `lengthMm` (the backend's physical truth, same
  * field the text readout below uses) instead sidesteps that mismatch
  * entirely, and keeps this component's only unit-trap-relevant input as
- * `lengthMm` -- it never reads width_px/height_px (scaled device dots) at
- * all. */
+ * `lengthMm` -- it never reads png_width_px/png_height_px (scaled device
+ * dots) at all. */
 const PX_PER_MM = 4;
 
 interface LabelPreviewProps {
@@ -20,7 +22,7 @@ interface LabelPreviewProps {
   hasContent: boolean;
   png: string | null;
   lengthMm: number | null;
-  warnings: string[];
+  warnings: RenderWarning[];
   isFetching: boolean;
   error: string | null;
 }
@@ -84,12 +86,16 @@ export function LabelPreview({
         </p>
         {warnings.length > 0 && (
           <ul className="flex flex-wrap justify-center gap-1.5">
-            {warnings.map((warning) => (
+            {warnings.map((warning, index) => (
               <li
-                key={warning}
-                className="rounded-full border border-amber-600/50 bg-amber-950 px-2 py-0.5 text-[11px] text-amber-300"
+                key={`${warning.code}:${index}`}
+                className={
+                  warning.severity === "warning"
+                    ? "rounded-full border border-amber-600/50 bg-amber-950 px-2 py-0.5 text-[11px] text-amber-300"
+                    : "rounded-full border border-ink-600/50 bg-ink-800 px-2 py-0.5 text-[11px] text-ink-400"
+                }
               >
-                {warning}
+                {warning.message}
               </li>
             ))}
           </ul>

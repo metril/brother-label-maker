@@ -27,8 +27,8 @@ describe("usePreview", () => {
         requestSpy();
         return HttpResponse.json({
           png_b64: TINY_PNG_B64,
-          width_px: 200,
-          height_px: 96,
+          png_width_px: 200,
+          png_height_px: 96,
           length_mm: 25.4,
           warnings: [],
         });
@@ -62,10 +62,17 @@ describe("usePreview", () => {
       http.post("/api/render/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
-          width_px: 200,
-          height_px: 96,
+          png_width_px: 200,
+          png_height_px: 96,
           length_mm: 25.4,
-          warnings: ["text truncated: content is wider than the fixed label length"],
+          warnings: [
+            {
+              code: "text_truncated",
+              severity: "warning",
+              message: "text truncated: content is wider than the fixed label length",
+              object_id: null,
+            },
+          ],
         }),
       ),
     );
@@ -78,7 +85,12 @@ describe("usePreview", () => {
     expect(result.current.png).toBe(`data:image/png;base64,${TINY_PNG_B64}`);
     expect(result.current.lengthMm).toBe(25.4);
     expect(result.current.warnings).toEqual([
-      "text truncated: content is wider than the fixed label length",
+      {
+        code: "text_truncated",
+        severity: "warning",
+        message: "text truncated: content is wider than the fixed label length",
+        object_id: null,
+      },
     ]);
   });
 
@@ -104,8 +116,8 @@ describe("usePreview", () => {
         }
         return HttpResponse.json({
           png_b64: TINY_PNG_B64,
-          width_px: 200,
-          height_px: 96,
+          png_width_px: 200,
+          png_height_px: 96,
           length_mm: 25.4,
           warnings: [],
         });

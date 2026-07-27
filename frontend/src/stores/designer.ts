@@ -1,14 +1,11 @@
 import { create } from "zustand";
 import type { HAlign, LabelDefinition, Tape, TextLabelParams } from "../api/types";
 
-/** TZe tape widths, mm -- MUST match backend/driver/geometry.py's _TZE_ROWS
- * (the geometry table is the single source of truth; this list exists only
- * because the UI needs it before a label is ever rendered). */
-export const TZE_WIDTHS_MM = [3.5, 6, 9, 12, 18, 24] as const;
-
-/** Font families the backend's text renderer accepts today (hardcoded per
- * backend/render/fonts.py's bundled set -- /api/fonts arrives later). */
-export const FONT_FAMILIES = ["Inter", "Roboto Condensed", "JetBrains Mono", "DejaVu Sans"] as const;
+// TZe tape widths and font families used to be hardcoded here (kept in
+// lockstep by hand with backend/driver/geometry.py's _TZE_ROWS and
+// backend/render/fonts.py's bundled set -- two drift risks). B2 replaced
+// both with live data: TapeSelector reads GET /api/tapes (via useTapes),
+// TextLabelForm's font select reads GET /api/fonts (via useFonts).
 
 export const MAX_LINES = 4;
 export const MIN_LINES = 1;

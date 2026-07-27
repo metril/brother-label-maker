@@ -18,7 +18,14 @@ describe("LabelPreview", () => {
         hasContent
         png="data:image/png;base64,AAAA"
         lengthMm={54.2}
-        warnings={["auto font size hit the minimum size; text may be cramped"]}
+        warnings={[
+          {
+            code: "text_cramped",
+            severity: "warning",
+            message: "auto font size hit the minimum size; text may be cramped",
+            object_id: null,
+          },
+        ]}
         isFetching={false}
         error={null}
       />,
@@ -28,5 +35,27 @@ describe("LabelPreview", () => {
     expect(
       screen.getByText("auto font size hit the minimum size; text may be cramped"),
     ).toBeInTheDocument();
+  });
+
+  it("renders info-severity warnings distinctly from warning-severity ones", () => {
+    render(
+      <LabelPreview
+        tapeWidthMm={24}
+        hasContent
+        png="data:image/png;base64,AAAA"
+        lengthMm={54.2}
+        warnings={[
+          { code: "text_cramped", severity: "warning", message: "cramped msg", object_id: null },
+          { code: "a_note", severity: "info", message: "info msg", object_id: null },
+        ]}
+        isFetching={false}
+        error={null}
+      />,
+    );
+
+    const warningChip = screen.getByText("cramped msg");
+    const infoChip = screen.getByText("info msg");
+    expect(warningChip.className).toContain("amber");
+    expect(infoChip.className).not.toContain("amber");
   });
 });

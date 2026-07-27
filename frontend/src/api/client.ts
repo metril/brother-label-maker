@@ -1,5 +1,6 @@
 import type {
   ApiErrorBody,
+  FontInfo,
   HealthResponse,
   LabelTypeInfo,
   PreviewRequest,
@@ -8,6 +9,7 @@ import type {
   PrintJobResponse,
   PrintRequest,
   PrinterStatusResponse,
+  TapeInfo,
   ValidationIssue,
 } from "./types";
 
@@ -87,6 +89,14 @@ export function getLabelTypes(): Promise<LabelTypeInfo[]> {
   return request<LabelTypeInfo[]>("/label-types");
 }
 
+export function getFonts(): Promise<FontInfo[]> {
+  return request<FontInfo[]>("/fonts");
+}
+
+export function getTapes(): Promise<TapeInfo[]> {
+  return request<TapeInfo[]>("/tapes");
+}
+
 export function postPreview(body: PreviewRequest): Promise<PreviewResponse> {
   return request<PreviewResponse>("/render/preview", {
     method: "POST",
@@ -110,7 +120,7 @@ export function getPrinterStatus(): Promise<PrinterStatusResponse> {
 }
 
 /** data: URL for a base64 PNG payload, as returned by /api/render/preview
- * (png_b64) or a print job's preview_png. */
+ * (png_b64) or a print job's thumbnail_png_b64. */
 export function pngDataUrl(pngB64: string): string {
   return `data:image/png;base64,${pngB64}`;
 }

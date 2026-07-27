@@ -19,6 +19,45 @@ export const labelTypesHandler = http.get("/api/label-types", () =>
   ]),
 );
 
+/** Mirrors backend/render/fonts.py's bundled four families exactly (B2:
+ * GET /api/fonts) -- TextLabelForm's font <select> renders from this. */
+export const fontsHandler = http.get("/api/fonts", () =>
+  HttpResponse.json([
+    { family: "Inter", display_name: "Inter", monospace: false, has_bold: true },
+    {
+      family: "Roboto Condensed",
+      display_name: "Roboto Condensed",
+      monospace: false,
+      has_bold: true,
+    },
+    { family: "JetBrains Mono", display_name: "JetBrains Mono", monospace: true, has_bold: true },
+    { family: "DejaVu Sans", display_name: "DejaVu Sans", monospace: false, has_bold: true },
+  ]),
+);
+
+/** Mirrors backend/driver/geometry.py's all_tapes() exactly (all 15, TZe +
+ * HSe -- B2: GET /api/tapes). TapeSelector filters this down to family
+ * "tze" for its six-width UI. */
+export const tapesHandler = http.get("/api/tapes", () =>
+  HttpResponse.json([
+    { nominal_mm: 3.5, family: "tze", print_dots: 24, print_mm: 3.4, max_length_mm: 1000 },
+    { nominal_mm: 6, family: "tze", print_dots: 32, print_mm: 4.5, max_length_mm: 1000 },
+    { nominal_mm: 9, family: "tze", print_dots: 50, print_mm: 7.1, max_length_mm: 1000 },
+    { nominal_mm: 12, family: "tze", print_dots: 70, print_mm: 9.9, max_length_mm: 1000 },
+    { nominal_mm: 18, family: "tze", print_dots: 112, print_mm: 15.8, max_length_mm: 1000 },
+    { nominal_mm: 24, family: "tze", print_dots: 128, print_mm: 18.1, max_length_mm: 1000 },
+    { nominal_mm: 5.8, family: "hse_2_1", print_dots: 28, print_mm: 4.0, max_length_mm: 500 },
+    { nominal_mm: 8.8, family: "hse_2_1", print_dots: 48, print_mm: 6.8, max_length_mm: 500 },
+    { nominal_mm: 11.7, family: "hse_2_1", print_dots: 66, print_mm: 9.3, max_length_mm: 500 },
+    { nominal_mm: 17.7, family: "hse_2_1", print_dots: 106, print_mm: 15.0, max_length_mm: 500 },
+    { nominal_mm: 23.6, family: "hse_2_1", print_dots: 128, print_mm: 18.1, max_length_mm: 500 },
+    { nominal_mm: 5.2, family: "hse_3_1", print_dots: 20, print_mm: 2.8, max_length_mm: 500 },
+    { nominal_mm: 9.0, family: "hse_3_1", print_dots: 44, print_mm: 6.2, max_length_mm: 500 },
+    { nominal_mm: 11.2, family: "hse_3_1", print_dots: 50, print_mm: 7.1, max_length_mm: 500 },
+    { nominal_mm: 21.0, family: "hse_3_1", print_dots: 120, print_mm: 16.9, max_length_mm: 500 },
+  ]),
+);
+
 export const printerStatusConnectedHandler = http.get("/api/printer/status", () =>
   HttpResponse.json({
     connected: true,
@@ -60,8 +99,8 @@ export const printerStatusDisconnectedHandler = http.get("/api/printer/status", 
 export const previewHandler = http.post("/api/render/preview", () =>
   HttpResponse.json({
     png_b64: TINY_PNG_B64,
-    width_px: 200,
-    height_px: 96,
+    png_width_px: 200,
+    png_height_px: 96,
     length_mm: 25.4,
     warnings: [],
   }),
@@ -84,7 +123,7 @@ export const printJobDoneHandler = http.get("/api/print/jobs/:jobId", ({ params 
     tape_width_mm: 24,
     media_raw_byte: null,
     tape_used_mm: null,
-    preview_png: null,
+    thumbnail_png_b64: null,
   }),
 );
 
@@ -101,16 +140,18 @@ export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ param
     tape_width_mm: 24,
     media_raw_byte: null,
     tape_used_mm: null,
-    preview_png: null,
+    thumbnail_png_b64: null,
   }),
 );
 
 /** Sane defaults for the app's own initial queries (health/label-types/
- * printer-status) plus preview/print -- individual tests override with
- * server.use(...) for the scenario they care about. */
+ * fonts/tapes/printer-status) plus preview/print -- individual tests
+ * override with server.use(...) for the scenario they care about. */
 export const defaultHandlers = [
   healthHandler,
   labelTypesHandler,
+  fontsHandler,
+  tapesHandler,
   printerStatusConnectedHandler,
   previewHandler,
   printHandler,

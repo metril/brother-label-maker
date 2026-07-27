@@ -35,7 +35,7 @@ function job(overrides: Partial<PrintJob>): PrintJob {
     tape_width_mm: 24,
     media_raw_byte: null,
     tape_used_mm: null,
-    preview_png: null,
+    thumbnail_png_b64: null,
     ...overrides,
   };
 }

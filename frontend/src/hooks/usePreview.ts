@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ApiError, pngDataUrl, postPreview } from "../api/client";
 import { hasRenderableContent } from "../stores/designer";
-import type { LabelDefinition, TextLabelParams } from "../api/types";
+import type { LabelDefinition, RenderWarning, TextLabelParams } from "../api/types";
 
 const DEBOUNCE_MS = 300;
 /** Matches the backend's default PreviewRequest.scale (router_labels.py) --
@@ -13,10 +13,11 @@ export interface UsePreviewResult {
   /** data: URL of the decoded preview PNG, or null before the first result. */
   png: string | null;
   /** Physical label length in mm -- ALWAYS read from the response's
-   * `length_mm` field, never derived from width_px/height_px (those are
-   * scaled device-dot dimensions; see api/types.ts's PreviewResponse doc). */
+   * `length_mm` field, never derived from png_width_px/png_height_px
+   * (those are scaled device-dot dimensions; see api/types.ts's
+   * PreviewResponse doc). */
   lengthMm: number | null;
-  warnings: string[];
+  warnings: RenderWarning[];
   isFetching: boolean;
   error: string | null;
 }

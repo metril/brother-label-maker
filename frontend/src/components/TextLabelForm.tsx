@@ -1,5 +1,6 @@
 import type { ChangeEvent } from "react";
-import { FONT_FAMILIES, MAX_LINES, MIN_LINES, useDesignerStore } from "../stores/designer";
+import { MAX_LINES, MIN_LINES, useDesignerStore } from "../stores/designer";
+import { useFonts } from "../hooks/useFonts";
 import type { HAlign } from "../api/types";
 
 const H_ALIGN_OPTIONS: { value: HAlign; label: string }[] = [
@@ -13,6 +14,7 @@ const textInput =
   "w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-1.5 text-sm text-ink-100 placeholder:text-ink-500 focus:border-amber-500 focus:outline-none";
 
 export function TextLabelForm() {
+  const { data: fonts, isPending: fontsPending } = useFonts();
   const params = useDesignerStore((s) => s.params);
   const setLine = useDesignerStore((s) => s.setLine);
   const addLine = useDesignerStore((s) => s.addLine);
@@ -72,18 +74,29 @@ export function TextLabelForm() {
           <label className={fieldLabel} htmlFor="font-family">
             Font
           </label>
-          <select
-            id="font-family"
-            value={params.font_family}
-            onChange={(e) => setFontFamily(e.target.value)}
-            className={textInput}
-          >
-            {FONT_FAMILIES.map((family) => (
-              <option key={family} value={family}>
-                {family}
-              </option>
-            ))}
-          </select>
+          {fontsPending || !fonts ? (
+            <select
+              id="font-family"
+              disabled
+              aria-label="Loading fonts"
+              className={`${textInput} shimmer`}
+            >
+              <option>Loading…</option>
+            </select>
+          ) : (
+            <select
+              id="font-family"
+              value={params.font_family}
+              onChange={(e) => setFontFamily(e.target.value)}
+              className={textInput}
+            >
+              {fonts.map((font) => (
+                <option key={font.family} value={font.family}>
+                  {font.display_name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex items-end pb-1.5">

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TextLabelForm } from "./TextLabelForm";
 import { useDesignerStore } from "../stores/designer";
+import { renderWithQueryClient } from "../test/utils";
 
 const INITIAL_STATE = useDesignerStore.getState();
 
@@ -12,7 +13,7 @@ beforeEach(() => {
 
 describe("TextLabelForm", () => {
   it("renders defaults: one empty line, no remove button, an add-line affordance", () => {
-    render(<TextLabelForm />);
+    renderWithQueryClient(<TextLabelForm />);
 
     expect(screen.getByLabelText("Line 1")).toHaveValue("");
     expect(screen.queryByLabelText("Remove line 1")).not.toBeInTheDocument();
@@ -21,7 +22,7 @@ describe("TextLabelForm", () => {
 
   it("adding/removing lines respects the 1-4 bounds", async () => {
     const user = userEvent.setup();
-    render(<TextLabelForm />);
+    renderWithQueryClient(<TextLabelForm />);
     const addLine = () => screen.getByRole("button", { name: /add line/i });
 
     await user.click(addLine());
@@ -42,7 +43,7 @@ describe("TextLabelForm", () => {
 
   it("switching font size to manual reveals the numeric px input", async () => {
     const user = userEvent.setup();
-    render(<TextLabelForm />);
+    renderWithQueryClient(<TextLabelForm />);
 
     expect(screen.queryByLabelText(/font size in pixels/i)).not.toBeInTheDocument();
 
@@ -50,5 +51,17 @@ describe("TextLabelForm", () => {
     await user.click(fontSizeManual!);
 
     expect(screen.getByLabelText(/font size in pixels/i)).toHaveValue(24);
+  });
+
+  it("shows the bundled font families from GET /api/fonts once loaded", async () => {
+    renderWithQueryClient(<TextLabelForm />);
+
+    // Wait for the LOADED state specifically -- the loading skeleton is
+    // also a <select id="font-family"> associated with the same "Font"
+    // <label>, so a bare findByLabelText("Font") would resolve on the
+    // first render (the disabled skeleton) instead of waiting.
+    await screen.findByRole("option", { name: "JetBrains Mono" });
+
+    expect(screen.getByLabelText("Font")).not.toBeDisabled();
   });
 });

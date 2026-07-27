@@ -44,22 +44,51 @@ export interface LabelTypeInfo {
   params_schema: Record<string, unknown>;
 }
 
+/** Mirrors backend/render/fonts.py's FontInfo -- GET /api/fonts. */
+export interface FontInfo {
+  family: string;
+  display_name: string;
+  monospace: boolean;
+  has_bold: boolean;
+}
+
+/** Mirrors backend/api/router_labels.py's TapeInfo -- GET /api/tapes. */
+export interface TapeInfo {
+  nominal_mm: number;
+  family: TapeFamily;
+  print_dots: number;
+  print_mm: number;
+  max_length_mm: number;
+}
+
+export type WarningSeverity = "info" | "warning";
+
+/** Mirrors backend/render/document.py's RenderWarning. Match on `code`,
+ * never on `message` text -- message is UI-display-only prose that can
+ * change wording freely. */
+export interface RenderWarning {
+  code: string;
+  severity: WarningSeverity;
+  message: string;
+  object_id: string | null;
+}
+
 export interface PreviewRequest {
   definition: LabelDefinition;
   scale?: number;
 }
 
-/** UNIT TRAP: width_px/height_px are the SCALED PNG dimensions (device dots x
- * scale) -- see router_labels.py's _render_and_encode. length_mm is the
- * physical label length (backend/driver/geometry.dots_to_mm of the
- * UNscaled render width). Never derive mm from the px fields; always read
- * length_mm directly. */
+/** UNIT TRAP: png_width_px/png_height_px are the SCALED PNG dimensions
+ * (device dots x scale) -- see router_labels.py's _render_and_encode.
+ * length_mm is the physical label length (backend/driver/geometry.dots_to_mm
+ * of the UNscaled render width). Never derive mm from the png_* fields;
+ * always read length_mm directly. */
 export interface PreviewResponse {
   png_b64: string;
-  width_px: number;
-  height_px: number;
+  png_width_px: number;
+  png_height_px: number;
   length_mm: number;
-  warnings: string[];
+  warnings: RenderWarning[];
 }
 
 export type ChainMode = "cut_each" | "chain_ff" | "strip_marks";
@@ -93,7 +122,7 @@ export interface PrintJob {
   tape_width_mm: number | null;
   media_raw_byte: number | null;
   tape_used_mm: number | null;
-  preview_png: string | null;
+  thumbnail_png_b64: string | null;
 }
 
 export interface PrinterStatusDetail {
