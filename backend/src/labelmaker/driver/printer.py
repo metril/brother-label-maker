@@ -53,7 +53,27 @@ class TapeNotFoundError(Exception):
 class PrintResult:
     job: JobStream
     status_before: PrinterStatus
-    post_print_statuses: list[PrinterStatus]  # drained blocks (may be empty)
+    post_print_events: list[PrinterStatus | str]
+    # Post-print drain, in arrival order (a *single* ordered list, not two
+    # parallel ones, precisely so CLI can print notes and parsed statuses
+    # interleaved in the exact order they arrived -- Task 1.3a fix round).
+    # Each entry is either a PrinterStatus (a 32-byte block that parsed
+    # successfully) or a str note for one that didn't:
+    #   "malformed block (<reason>)"  -- a 32-byte block failed parse_status
+    #   "read failed (<err>)"         -- transport.read() raised TransportError
+    # print_images itself never prints; the CLI formats each entry (see
+    # cli._print_post_print_events).
+    blocks_seen: int
+    # Count of 32-byte blocks actually read during the drain, whether they
+    # parsed or not -- NOT incremented for a read that raised TransportError
+    # (no block was received then) or that returned other than exactly 32
+    # bytes (a timeout/short read). This mirrors the pre-refactor CLI's
+    # `received_any` gate exactly, including its quirk: a TransportError on
+    # the very first drain read leaves blocks_seen at 0, so the CLI's final
+    # "no post-print status received" line still prints *in addition to* a
+    # "read failed" note -- both lines appear, matching cli.py's
+    # pre-refactor behavior byte-for-byte (verified against `git show
+    # ddd4e18` during the fix round, not just re-derived from memory).
     tape: TapeSpec
     assumed_tze: bool  # I4: media type was unknown/undecoded, TZe geometry assumed
 
@@ -79,28 +99,37 @@ def resolve_tape(status: PrinterStatus) -> tuple[TapeSpec | None, bool]:
     return tape, assumed_tze
 
 
-def _drain_post_print_statuses(transport: Transport) -> list[PrinterStatus]:
+def _drain_post_print(transport: Transport) -> tuple[list[PrinterStatus | str], int]:
     """I1: best-effort drain of up to 4 status blocks the printer may push
     unsolicited after a job (completion, mid-print errors). Purely
     informational: a transport failure or a malformed block on these reads
     never raises -- the job bytes are already on the wire.
+
+    Returns (events, blocks_seen) -- see PrintResult's field docs for the
+    exact contract. Faithfully reproduces the pre-refactor inline
+    implementation's control flow (same try/except/continue/break
+    structure per iteration), just recording facts instead of printing.
     """
-    statuses: list[PrinterStatus] = []
+    events: list[PrinterStatus | str] = []
+    blocks_seen = 0
     for _ in range(4):
         try:
             block = transport.read(STATUS_LEN, timeout_ms=2000)
-        except TransportError:
+        except TransportError as err:
+            events.append(f"read failed ({err})")
             break
         if len(block) != STATUS_LEN:
             continue
+        blocks_seen += 1
         try:
             status = parse_status(block)
-        except ValueError:
+        except ValueError as err:
+            events.append(f"malformed block ({err})")
             continue
-        statuses.append(status)
+        events.append(status)
         if status.status_type in (StatusType.ERROR_OCCURRED, StatusType.PRINTING_COMPLETED):
             break
-    return statuses
+    return events, blocks_seen
 
 
 def print_images(
@@ -141,12 +170,13 @@ def print_images(
     stream = build_job(images, tape, strategy, options)
     transport.write(stream.data)
 
-    post_print_statuses = _drain_post_print_statuses(transport)
+    post_print_events, blocks_seen = _drain_post_print(transport)
 
     return PrintResult(
         job=stream,
         status_before=status_before,
-        post_print_statuses=post_print_statuses,
+        post_print_events=post_print_events,
+        blocks_seen=blocks_seen,
         tape=tape,
         assumed_tze=assumed_tze,
     )

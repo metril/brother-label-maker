@@ -27,9 +27,14 @@ from labelmaker.driver.printer import (
 )
 from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
 from labelmaker.driver.raster import BitOrder, Compression
-from labelmaker.driver.status import REFERENCE_STATUS_BLOCK, StatusType, request_status
+from labelmaker.driver.status import (
+    REFERENCE_STATUS_BLOCK,
+    PrinterStatus,
+    StatusType,
+    request_status,
+)
 from labelmaker.driver.strategies import ClassicStrategy, E310BTStrategy, get_strategy
-from labelmaker.driver.transport import MockPrinterTransport
+from labelmaker.driver.transport import MockPrinterTransport, TransportError
 
 STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
@@ -47,6 +52,22 @@ def _status_block(overrides: dict[int, int]) -> bytes:
 
 def _image(print_dots: int, width: int = 3) -> list[Image.Image]:
     return [Image.new("1", (width, print_dots), 1)]
+
+
+class _RaisingAfterQueueTransport(MockPrinterTransport):
+    """MockPrinterTransport whose read() raises TransportError once its
+    queued replies (and the automatic status reply) are exhausted, instead
+    of returning b"" -- simulates a transport failure during the post-print
+    drain (Task 1.3a fix round: printer._drain_post_print's TransportError
+    branch)."""
+
+    def read(self, n: int, timeout_ms: int = 500) -> bytes:
+        if self._read_queue:
+            return self._read_queue.pop(0)
+        if self._pending_status_reply:
+            self._pending_status_reply = False
+            return self._status_reply
+        raise TransportError("USB read error: [Errno 5] Input/output error")
 
 
 # =====================================================================
@@ -180,9 +201,11 @@ def test_print_images_drain_stops_at_error_occurred_block():
         images, strategy=strategy, options=JobOptions(), transport=transport, status_before=status
     )
 
-    assert len(result.post_print_statuses) == 1
-    assert result.post_print_statuses[0].status_type is StatusType.ERROR_OCCURRED
-    assert result.post_print_statuses[0].errors == ["No media"]
+    assert len(result.post_print_events) == 1
+    assert isinstance(result.post_print_events[0], PrinterStatus)
+    assert result.post_print_events[0].status_type is StatusType.ERROR_OCCURRED
+    assert result.post_print_events[0].errors == ["No media"]
+    assert result.blocks_seen == 1
 
 
 def test_print_images_no_post_print_status_returns_empty_list():
@@ -192,7 +215,95 @@ def test_print_images_no_post_print_status_returns_empty_list():
 
     result = print_images(images, strategy=strategy, options=JobOptions(), transport=transport)
 
-    assert result.post_print_statuses == []
+    assert result.post_print_events == []
+    assert result.blocks_seen == 0
+
+
+# --- 4b. Drain diagnostics (Task 1.3a fix round): malformed blocks and
+# TransportError during the drain must still surface as ordered notes, not
+# silently vanish (the pre-refactor behavior this preserves) ---
+
+
+def test_print_images_drain_malformed_block_only():
+    transport = MockPrinterTransport()
+    status = request_status(transport, interval_s=0)
+    bad_block = _status_block({0: 0x81})  # bad header byte0 -> parse_status raises ValueError
+    transport.queue_read(bad_block)
+    strategy = get_strategy("classic")
+    images = _image(TAPE_24MM.print_dots)
+
+    result = print_images(
+        images, strategy=strategy, options=JobOptions(), transport=transport, status_before=status
+    )
+
+    assert len(result.post_print_events) == 1
+    assert isinstance(result.post_print_events[0], str)
+    assert result.post_print_events[0] == (
+        "malformed block (bad status header byte0: expected 0x80, got 0x81)"
+    )
+    assert result.blocks_seen == 1  # the block WAS received, just failed to parse
+
+
+def test_print_images_drain_malformed_then_completed_preserves_order():
+    transport = MockPrinterTransport()
+    status = request_status(transport, interval_s=0)
+    bad_block = _status_block({0: 0x81})
+    completed_block = _status_block({18: StatusType.PRINTING_COMPLETED.value})
+    transport.queue_read(bad_block)
+    transport.queue_read(completed_block)
+    strategy = get_strategy("classic")
+    images = _image(TAPE_24MM.print_dots)
+
+    result = print_images(
+        images, strategy=strategy, options=JobOptions(), transport=transport, status_before=status
+    )
+
+    assert len(result.post_print_events) == 2
+    assert isinstance(result.post_print_events[0], str)
+    assert "malformed block" in result.post_print_events[0]
+    assert isinstance(result.post_print_events[1], PrinterStatus)
+    assert result.post_print_events[1].status_type is StatusType.PRINTING_COMPLETED
+    assert result.blocks_seen == 2
+
+
+def test_print_images_drain_transport_error_first_leaves_blocks_seen_zero():
+    transport = _RaisingAfterQueueTransport()
+    status = request_status(transport, interval_s=0)
+    strategy = get_strategy("classic")
+    images = _image(TAPE_24MM.print_dots)
+
+    result = print_images(
+        images, strategy=strategy, options=JobOptions(), transport=transport, status_before=status
+    )
+
+    assert result.post_print_events == [
+        "read failed (USB read error: [Errno 5] Input/output error)"
+    ]
+    # No block was ever received -- CLI's final "no post-print status
+    # received" line still gates on this, printing *alongside* the note
+    # (matches the pre-refactor CLI's `received_any`-driven quirk exactly).
+    assert result.blocks_seen == 0
+
+
+def test_print_images_drain_status_then_transport_error_preserves_order():
+    transport = _RaisingAfterQueueTransport()
+    status = request_status(transport, interval_s=0)
+    notification_block = _status_block({18: StatusType.NOTIFICATION.value})
+    transport.queue_read(notification_block)
+    strategy = get_strategy("classic")
+    images = _image(TAPE_24MM.print_dots)
+
+    result = print_images(
+        images, strategy=strategy, options=JobOptions(), transport=transport, status_before=status
+    )
+
+    assert len(result.post_print_events) == 2
+    assert isinstance(result.post_print_events[0], PrinterStatus)
+    assert result.post_print_events[0].status_type is StatusType.NOTIFICATION
+    assert result.post_print_events[1] == (
+        "read failed (USB read error: [Errno 5] Input/output error)"
+    )
+    assert result.blocks_seen == 1  # the notification block WAS received
 
 
 # =====================================================================
@@ -253,6 +364,11 @@ def test_mock_printer_transport_custom_status_reply():
     transport = MockPrinterTransport(status_reply=custom)
     status = request_status(transport, interval_s=0)
     assert status.media_width_mm == 12
+
+
+def test_mock_printer_transport_rejects_wrong_length_status_reply():
+    with pytest.raises(ValueError, match="32"):
+        MockPrinterTransport(status_reply=b"\x80\x20\x42")
 
 
 # =====================================================================

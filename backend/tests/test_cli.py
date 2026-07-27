@@ -37,6 +37,19 @@ def _status_block(overrides: dict[int, int]) -> bytes:
 ERROR_STATUS_BLOCK = _status_block({8: 0x01})  # error_info1: No media
 
 
+class _ReadFailsAfterQueueTransport(CaptureTransport):
+    """CaptureTransport whose read() raises TransportError once its queued
+    replies are exhausted, instead of returning b"" -- simulates a
+    transport failure during the post-print drain (Task 1.3a fix round:
+    printer._drain_post_print's TransportError branch, reached via the
+    CLI)."""
+
+    def read(self, n, timeout_ms=500):
+        if self._read_queue:
+            return self._read_queue.pop(0)
+        raise TransportError("USB read error: [Errno 5] Input/output error")
+
+
 # =====================================================================
 # 1. Pattern builders (pure PIL drawing, no USB, no fonts)
 # =====================================================================
@@ -464,6 +477,88 @@ def test_print_test_usb_no_post_print_status_prints_note(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "no post-print status received" in out
+
+
+# --- I1 fix round: malformed blocks / TransportError during the drain must
+# still surface (not silently become a false "no post-print status
+# received"), and multiple events must print in original arrival order.
+# Each asserts exact stdout lines -- byte-for-byte parity with the
+# pre-refactor cli._drain_post_print_status, verified against `git show
+# ddd4e18` while designing the fix. ---
+
+
+def test_print_test_usb_drain_malformed_block_only_prints_note_not_no_status(
+    monkeypatch, capsys
+):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)  # initial status request reply
+    bad_block = _status_block({0: 0x81})  # bad header byte0 -> parse_status raises
+    transport.queue_read(bad_block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert (
+        "post-print status: malformed block "
+        "(bad status header byte0: expected 0x80, got 0x81)\n" in out
+    )
+    assert "no post-print status received" not in out  # a block WAS received
+
+
+def test_print_test_usb_drain_malformed_then_completed_prints_both_in_order(
+    monkeypatch, capsys
+):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+    bad_block = _status_block({0: 0x81})
+    completed_block = _status_block({18: StatusType.PRINTING_COMPLETED.value})
+    transport.queue_read(bad_block)
+    transport.queue_read(completed_block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    malformed_idx = out.index("post-print status: malformed block (")
+    completed_idx = out.index("post-print status: PRINTING_COMPLETED")
+    assert malformed_idx < completed_idx  # original arrival order preserved
+    assert "no post-print status received" not in out
+
+
+def test_print_test_usb_drain_transport_error_first_prints_both_lines(monkeypatch, capsys):
+    transport = _ReadFailsAfterQueueTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)  # initial status request reply
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    # No block was received at all -- both the read-failure note AND the
+    # final "no post-print status received" line print (base's quirk,
+    # preserved deliberately, not a bug in this fix).
+    assert "post-print status: read failed (USB read error: [Errno 5] Input/output error)\n" in out
+    assert "no post-print status received (not necessarily an error)" in out
+
+
+def test_print_test_usb_drain_status_then_transport_error_no_final_note(monkeypatch, capsys):
+    transport = _ReadFailsAfterQueueTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+    notification_block = _status_block({18: StatusType.NOTIFICATION.value})
+    transport.queue_read(notification_block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["print-test", "--strategy", "classic", "--pattern", "checker"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    notification_idx = out.index("post-print status: NOTIFICATION")
+    failed_idx = out.index("post-print status: read failed (")
+    assert notification_idx < failed_idx  # original arrival order preserved
+    assert "no post-print status received" not in out  # a block WAS received
 
 
 def test_print_test_printer_not_found_exits_1_with_permissions_hint(monkeypatch, capsys):

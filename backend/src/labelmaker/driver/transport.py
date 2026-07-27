@@ -86,10 +86,17 @@ class MockPrinterTransport(CaptureTransport):
 
     def __init__(self, status_reply: bytes | None = None) -> None:
         super().__init__()
-        if status_reply is None:
-            from labelmaker.driver.status import REFERENCE_STATUS_BLOCK
+        # Lazy import (both the default and the length check need STATUS_LEN
+        # too) -- see module docstring for why this can't be a module-level
+        # import.
+        from labelmaker.driver.status import REFERENCE_STATUS_BLOCK, STATUS_LEN
 
+        if status_reply is None:
             status_reply = REFERENCE_STATUS_BLOCK
+        if len(status_reply) != STATUS_LEN:
+            raise ValueError(
+                f"status_reply must be exactly {STATUS_LEN} bytes, got {len(status_reply)}"
+            )
         self._status_reply = status_reply
         self._pending_status_reply = False
         self.closed = False

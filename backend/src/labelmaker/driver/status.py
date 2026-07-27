@@ -31,7 +31,10 @@ STATUS_LEN = 32
 # tape, no errors, model 0x81. media_type_raw is the still-undecoded 0x14.
 # Single source of truth (Task 1.3a) -- test_status.py/test_cli.py import this
 # instead of each defining their own copy of the same literal, and
-# MockPrinterTransport (transport.py) defaults to it.
+# MockPrinterTransport (transport.py) defaults to it. Its length is a fixed
+# property of this literal, not a runtime invariant to guard here -- checked
+# once in test_status.py (test_reference_status_block_is_status_len_bytes)
+# instead of a module-scope `assert` (which -O would silently strip).
 REFERENCE_STATUS_BLOCK = bytes(
     [
         0x80, 0x20, 0x42, 0x30, 0x81, 0x30, 0x00, 0x00,
@@ -40,8 +43,6 @@ REFERENCE_STATUS_BLOCK = bytes(
         0x90, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]
 )  # fmt: skip
-
-assert len(REFERENCE_STATUS_BLOCK) == STATUS_LEN
 
 _HEADER_BYTE0 = 0x80
 _HEADER_BYTE1 = 0x20

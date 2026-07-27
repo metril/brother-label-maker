@@ -12,6 +12,7 @@ from labelmaker.driver.protocol import ESC_INIT, FLUSH, STATUS_REQUEST
 from labelmaker.driver.status import (
     E720BT_MODEL_CODE,
     REFERENCE_STATUS_BLOCK,
+    STATUS_LEN,
     MediaType,
     StatusTimeoutError,
     StatusType,
@@ -235,6 +236,12 @@ def test_status_type_unknown_raw_decodes_to_none():
 
 def test_e720bt_model_code_constant():
     assert E720BT_MODEL_CODE == 0x81
+
+
+def test_reference_status_block_is_status_len_bytes():
+    # Task 1.3a fix round: this was a module-scope `assert` in status.py
+    # (stripped under python -O) -- moved here as a real test instead.
+    assert len(REFERENCE_STATUS_BLOCK) == STATUS_LEN
 
 
 # --- 7. media_family_for (I4) ---

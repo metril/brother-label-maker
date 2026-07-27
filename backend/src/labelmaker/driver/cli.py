@@ -289,14 +289,28 @@ def _format_post_print_status(status: PrinterStatus) -> str:
     return line
 
 
-def _print_post_print_statuses(statuses: list[PrinterStatus]) -> None:
+def _print_post_print_events(events: list[PrinterStatus | str], blocks_seen: int) -> None:
     """I1: print the (already-drained, see printer.print_images) post-print
-    status blocks, or a note if none arrived. Purely informational -- never
+    events in arrival order -- each is either a parsed PrinterStatus
+    (formatted via _format_post_print_status) or a str note ("malformed
+    block (...)" / "read failed (...)") printed with the same
+    "post-print status: " prefix -- plus a final note if no 32-byte block
+    was ever received (blocks_seen == 0). Purely informational -- never
     called in a way that changes the command's exit code.
+
+    The blocks_seen == 0 gate (not "no notes at all") deliberately
+    reproduces the pre-refactor inline implementation's exact behavior,
+    including its one quirk: a TransportError on the very first drain read
+    (no block received yet) prints BOTH a "read failed" note AND this final
+    "no post-print status received" line -- verified against the
+    pre-refactor source (`git show ddd4e18`), not just re-derived.
     """
-    for status in statuses:
-        print(_format_post_print_status(status))
-    if not statuses:
+    for event in events:
+        if isinstance(event, str):
+            print(f"post-print status: {event}")
+        else:
+            print(_format_post_print_status(event))
+    if blocks_seen == 0:
         print("no post-print status received (not necessarily an error)")
 
 
@@ -386,7 +400,7 @@ def _run_usb_print(args: argparse.Namespace) -> int:
             status_before=status,
         )
         _print_job_summary(result.job, result.tape)
-        _print_post_print_statuses(result.post_print_statuses)
+        _print_post_print_events(result.post_print_events, result.blocks_seen)
         return 0
     except PrinterBusyError as err:
         # Structurally unreachable given the has_error check above (both use
