@@ -77,25 +77,38 @@ def main() -> None:
     # decided not to trust).
     import golden_fixtures
 
-    from labelmaker.render.document import Tape
+    from labelmaker.render.document import RenderedLabel, Tape
     from labelmaker.render.rasterize import preview_png, rasterize
+    from labelmaker.render.types.divided_blocks import render_divided_blocks
     from labelmaker.render.types.text_label import TextLabelRenderer
 
     _GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
 
-    renderer = TextLabelRenderer()
-    for fixture in golden_fixtures.FIXTURES:
-        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
-        label = renderer.render(fixture.params, tape)
+    def _write(name: str, label: RenderedLabel) -> None:
         img = rasterize(label)
         png_bytes = preview_png(img, scale=golden_fixtures.GOLDEN_SCALE)
-
-        out_path = _GOLDEN_DIR / f"{fixture.name}.png"
+        out_path = _GOLDEN_DIR / f"{name}.png"
         out_path.write_bytes(png_bytes)
         digest = hashlib.sha256(png_bytes).hexdigest()
         print(f"{out_path.relative_to(_BACKEND_DIR)}  sha256:{digest}")
 
-    print(f"regenerated {len(golden_fixtures.FIXTURES)} golden(s) in {_GOLDEN_DIR}")
+    count = 0
+
+    renderer = TextLabelRenderer()
+    for fixture in golden_fixtures.FIXTURES:
+        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
+        _write(fixture.name, renderer.render(fixture.params, tape))
+        count += 1
+
+    # divided_blocks.py registers no label type of its own (see its module
+    # docstring) -- its fixtures render via render_divided_blocks() directly,
+    # not through TextLabelRenderer/get_renderer().
+    for fixture in golden_fixtures.DIVIDED_BLOCKS_FIXTURES:
+        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
+        _write(fixture.name, render_divided_blocks(fixture.params, tape))
+        count += 1
+
+    print(f"regenerated {count} golden(s) in {_GOLDEN_DIR}")
     print("INSPECT every new/changed golden visually before committing it.")
 
 
