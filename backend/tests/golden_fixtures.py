@@ -22,6 +22,8 @@ from labelmaker.render.types.divided_blocks import (
 )
 from labelmaker.render.types.faceplate import BlockText as FaceplateBlockText
 from labelmaker.render.types.faceplate import FaceplateParams
+from labelmaker.render.types.homebox_asset import HomeboxAssetParams
+from labelmaker.render.types.homebox_location import HomeboxLocationParams
 from labelmaker.render.types.patch_panel import BlockText as PatchPanelBlockText
 from labelmaker.render.types.patch_panel import PatchPanelParams
 from labelmaker.render.types.punch_down import PunchDownParams
@@ -318,5 +320,65 @@ CABLE_TYPE_FIXTURES: tuple[CableTypeFixture, ...] = (
         type="cable_flag",
         params=CableFlagParams(lines=["FIBER-07"]),
         tape_mm=12,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class HomeboxTypeFixture:
+    name: str  # golden file is tests/golden/render/{name}.png
+    type: str  # registered label type name -- rendered via get_renderer(type)
+    params: HomeboxAssetParams | HomeboxLocationParams
+    tape_mm: float
+    tape_family: str = "tze"
+
+
+# Task 3.3's two label types (homebox_asset/homebox_location) -- same
+# get_renderer(fixture.type).render(...) convention as
+# TYPE_CONFIG_FIXTURES/ELECTRICAL_TYPE_FIXTURES/BARCODE_TYPE_FIXTURES/
+# CABLE_TYPE_FIXTURES above. QR payloads follow HomeBox's own scheme
+# (docs/research/homebox.md #39/#40): "https://{base}/a/{asset_id}" for
+# assets, "https://{base}/location/{uuid}" for locations -- composed here as
+# if by the (not-yet-built) browse page's caller, exactly like a real
+# LabelDefinition would arrive with `qr_data` already resolved.
+HOMEBOX_TYPE_FIXTURES: tuple[HomeboxTypeFixture, ...] = (
+    # (a) homebox_asset, WITH a resolved location breadcrumb and the default
+    # show_qr=True -- the common case: QR + all three text roles.
+    HomeboxTypeFixture(
+        name="homebox_asset_ups_garage_qr_24mm",
+        type="homebox_asset",
+        params=HomeboxAssetParams(
+            asset_id="000-042",
+            name="APC Smart-UPS 1500",
+            location="Garage › Shelf B",
+            qr_data="https://homebox.example.com/a/000-042",
+        ),
+        tape_mm=24,
+    ),
+    # (b) homebox_asset, show_qr=False (text-only tag) and no location --
+    # exercises both the "no QR" content_left_px collapse and the two-role
+    # (not three-role) height-weighting path in one fixture.
+    HomeboxTypeFixture(
+        name="homebox_asset_noqr_tool_24mm",
+        type="homebox_asset",
+        params=HomeboxAssetParams(
+            asset_id="000-118",
+            name="Impact Driver",
+            qr_data="https://homebox.example.com/a/000-118",
+            show_qr=False,
+        ),
+        tape_mm=24,
+    ),
+    # (c) homebox_location, WITH a resolved ancestor path and the default
+    # show_qr=True.
+    HomeboxTypeFixture(
+        name="homebox_location_workshop_path_qr_24mm",
+        type="homebox_location",
+        params=HomeboxLocationParams(
+            name="Workshop",
+            path="Garage › Workshop",
+            qr_data="https://homebox.example.com/location/3f9c2ea1-9b7b-4e9a-8c3d-2a6f9e1d4b70",
+        ),
+        tape_mm=24,
     ),
 )

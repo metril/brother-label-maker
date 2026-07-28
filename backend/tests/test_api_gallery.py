@@ -3,7 +3,7 @@
 Not a golden suite -- nothing here byte-locks a render (the golden files
 already do that for the underlying fixtures). These tests pin the gallery
 CONTRACT: every entry renders through the real preview pipeline into a
-decodable PNG of the right height, all nine registered types are covered,
+decodable PNG of the right height, all eleven registered types are covered,
 the response carries what the frontend needs (params for "Open in
 designer", min_feed_mm for DeckStrip, short_label warning parity with
 /api/render/preview), and the in-process cache actually short-circuits the
@@ -51,13 +51,13 @@ async def test_gallery_renders_every_entry_as_decodable_png(client):
         assert img.width > 0, item["id"]
 
 
-async def test_gallery_covers_all_nine_registered_types(client):
+async def test_gallery_covers_all_eleven_registered_types(client):
     resp = await client.get("/api/gallery")
     assert resp.status_code == 200
     covered = {item["type"] for item in resp.json()}
     registered = {info.type for info in list_types()}
     assert covered == registered
-    assert len(registered) == 9
+    assert len(registered) == 11
 
 
 async def test_gallery_item_shape_supports_open_in_designer_and_deckstrip(client):

@@ -1,5 +1,5 @@
 """Curated gallery data for GET /api/gallery (task 2.14): example label
-definitions spanning all nine registered types, for a single page a human
+definitions spanning all eleven registered types, for a single page a human
 can scan to visually QA the whole catalogue at once (the review artifact
 for Phase 2, and the fastest way to spot a rendering regression).
 
@@ -283,5 +283,28 @@ def gallery_entries() -> tuple[GalleryEntry, ...]:
             title="Breaker panel column",
             blurb="A panel schedule column with odd-numbered slots for 1- and 2-pole breakers.",
             type="breaker_box",
+        ),
+        # -- homebox / homebox_asset (2) --
+        _from_golden(
+            golden_fixtures.HOMEBOX_TYPE_FIXTURES[0],
+            id="homebox-asset-ups",
+            title="HomeBox asset tag, with QR",
+            blurb="Asset id, name, and a resolved location breadcrumb beside a scannable QR.",
+            type="homebox_asset",
+        ),
+        _from_golden(
+            golden_fixtures.HOMEBOX_TYPE_FIXTURES[1],
+            id="homebox-asset-noqr",
+            title="HomeBox asset tag, text-only",
+            blurb="The same asset tag with show_qr off — just the id and name.",
+            type="homebox_asset",
+        ),
+        # -- homebox / homebox_location (1) --
+        _from_golden(
+            golden_fixtures.HOMEBOX_TYPE_FIXTURES[2],
+            id="homebox-location-workshop",
+            title="HomeBox location tag",
+            blurb="A storage location's name and ancestor breadcrumb beside its own QR.",
+            type="homebox_location",
         ),
     )

@@ -5,11 +5,12 @@ import { useDesignerStore } from "../stores/designer";
 import { Pending } from "./ui/Pending";
 import { eyebrow } from "./ui/styles";
 
-const CATEGORY_ORDER = ["general", "network", "electrical"];
+const CATEGORY_ORDER = ["general", "network", "electrical", "homebox"];
 const CATEGORY_LABELS: Record<string, string> = {
   general: "General",
   network: "Network",
   electrical: "Electrical",
+  homebox: "HomeBox",
 };
 
 function groupByCategory(types: LabelTypeInfo[]): [string, LabelTypeInfo[]][] {
@@ -23,7 +24,7 @@ function groupByCategory(types: LabelTypeInfo[]): [string, LabelTypeInfo[]][] {
   return orderedKeys.map((key) => [key, groups.get(key)!]);
 }
 
-/** The design system's left rail: the 9 label types from GET /api/label-
+/** The design system's left rail: every label type from GET /api/label-
  * types, grouped by category, driving useDesignerStore's selectedType. A
  * roving-tabindex listbox -- ArrowUp/ArrowDown move focus across the WHOLE
  * flattened list (category grouping is visual only), Enter/Space activates

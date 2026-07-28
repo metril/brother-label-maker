@@ -139,6 +139,13 @@ def main() -> None:
         _write(fixture.name, get_renderer(fixture.type).render(fixture.params, tape))
         count += 1
 
+    # Task 3.3's two label types (homebox_asset/homebox_location) -- same
+    # get_renderer(...) convention as the fixture groups above.
+    for fixture in golden_fixtures.HOMEBOX_TYPE_FIXTURES:
+        tape = Tape(width_mm=fixture.tape_mm, family=fixture.tape_family).resolve()
+        _write(fixture.name, get_renderer(fixture.type).render(fixture.params, tape))
+        count += 1
+
     print(f"regenerated {count} golden(s) in {_GOLDEN_DIR}")
     print("INSPECT every new/changed golden visually before committing it.")
 

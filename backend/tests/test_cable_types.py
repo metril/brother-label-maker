@@ -75,14 +75,15 @@ def test_get_renderer_returns_expected_renderer_instances():
     assert isinstance(get_renderer("cable_flag"), CableFlagRenderer)
 
 
-def test_api_lists_nine_types():
+def test_api_lists_eleven_types():
     # text, barcode, patch_panel, punch_down, faceplate, cable_wrap,
-    # cable_flag, terminal_block, breaker_box.
+    # cable_flag, terminal_block, breaker_box, homebox_asset, homebox_location.
     assert {t.type for t in list_types()} == {
         "text", "barcode", "patch_panel", "punch_down", "faceplate",
         "cable_wrap", "cable_flag", "terminal_block", "breaker_box",
+        "homebox_asset", "homebox_location",
     }
-    assert len(list_types()) == 9
+    assert len(list_types()) == 11
 
 
 # --- 1. cable_wrap: Params validation ---------------------------------------

@@ -21,7 +21,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
 
 /** App frame per the design doc's layout ASCII: a top STATUS BAR (the
  * instrument readout -- PrinterStatusBadge + the WS event-stream state)
- * and a left TYPES rail (the 9 label types, grouped by category -- see
+ * and a left TYPES rail (every label type, grouped by category -- see
  * TypeRail) that drives which form Designer renders.
  *
  * Task 2.13: the app's own primary section nav lives here too --

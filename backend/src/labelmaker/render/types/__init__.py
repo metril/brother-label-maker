@@ -2,8 +2,9 @@
 
 Importing this package registers every built-in type ("text", task 2.2's
 patch_panel/punch_down/faceplate, task 2.3's terminal_block/breaker_box,
-task 2.5's barcode, and task 2.6's cable_wrap/cable_flag) as a side effect
-of importing its module below.
+task 2.5's barcode, task 2.6's cable_wrap/cable_flag, and task 3.3's
+homebox_asset/homebox_location) as a side effect of importing its module
+below.
 
 Registration order below IS the display order of list_types() (base.py's
 _REGISTRY is a plain dict, keyed by @register's type_name at class-
@@ -19,9 +20,9 @@ five "network" types together -- the task 2.2 brief's own order
 (patch_panel, punch_down, faceplate) followed by task 2.6's cable_wrap then
 cable_flag (that task's own brief/title order) -- then the two "electrical"
 types in the order the task 2.3 brief lists them (terminal_block,
-breaker_box), kept last so the two product-differentiator types (no Brother
-equivalent) stay together at the end rather than splitting up the "network"
-group task 2.6 just extended.
+breaker_box), then task 3.3's two "homebox" types (asset, location -- that
+task's own brief order) kept last as their own new category group, the same
+way "electrical" was appended after "network" rather than interleaved.
 """
 
 from labelmaker.render.types import text_label  # noqa: F401,I001 -- registers "text"
@@ -33,6 +34,8 @@ from labelmaker.render.types import cable_wrap  # noqa: F401 -- registers "cable
 from labelmaker.render.types import cable_flag  # noqa: F401 -- registers "cable_flag"
 from labelmaker.render.types import terminal_block  # noqa: F401 -- registers "terminal_block"
 from labelmaker.render.types import breaker_box  # noqa: F401 -- registers "breaker_box"
+from labelmaker.render.types import homebox_asset  # noqa: F401 -- registers "homebox_asset"
+from labelmaker.render.types import homebox_location  # noqa: F401 -- registers "homebox_location"
 from labelmaker.render.types.base import (
     LabelRenderer,
     LabelTypeInfo,

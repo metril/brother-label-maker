@@ -23,13 +23,14 @@ async def test_label_types_contains_text_with_schema(client):
     assert "icon" in text_type["params_schema"]["properties"]
 
 
-async def test_label_types_lists_nine_types_with_categories(client):
+async def test_label_types_lists_eleven_types_with_categories(client):
     # Task 2.2: patch_panel/punch_down/faceplate join "text". Task 2.3:
     # terminal_block/breaker_box join those. Task 2.5: barcode joins "text"
     # in category "general". Task 2.6: cable_wrap/cable_flag join the
-    # "network" group -- exactly these nine (the registry-isolation fixture
-    # in conftest.py, see test_render_registry.py, keeps test-only "dummy"
-    # types from leaking into this count).
+    # "network" group. Task 3.3: homebox_asset/homebox_location form their
+    # own "homebox" group -- exactly these eleven (the registry-isolation
+    # fixture in conftest.py, see test_render_registry.py, keeps test-only
+    # "dummy" types from leaking into this count).
     resp = await client.get("/api/label-types")
     body = resp.json()
     by_type = {t["type"]: t for t in body}
@@ -43,6 +44,8 @@ async def test_label_types_lists_nine_types_with_categories(client):
         "cable_flag",
         "terminal_block",
         "breaker_box",
+        "homebox_asset",
+        "homebox_location",
     }
 
     for general_type in ("text", "barcode"):
@@ -51,6 +54,14 @@ async def test_label_types_lists_nine_types_with_categories(client):
         assert by_type[network_type]["category"] == "network"
     for electrical_type in ("terminal_block", "breaker_box"):
         assert by_type[electrical_type]["category"] == "electrical"
+    for homebox_type in ("homebox_asset", "homebox_location"):
+        assert by_type[homebox_type]["category"] == "homebox"
 
-    # min_tape_mm is always present (None = usable on any tape width).
-    assert all(t["min_tape_mm"] is None for t in body)
+    # min_tape_mm is always present (None = usable on any tape width; the
+    # two homebox types are the first to advertise a non-None floor -- see
+    # homebox_asset.py's own module docstring's "-- min_tape_mm --" section).
+    for t in body:
+        if t["type"] in ("homebox_asset", "homebox_location"):
+            assert t["min_tape_mm"] == 12.0
+        else:
+            assert t["min_tape_mm"] is None
