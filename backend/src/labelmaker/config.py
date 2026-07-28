@@ -22,13 +22,17 @@ class AppConfig(BaseSettings):
 
     printer_mode: Literal["mock", "usb"] = "mock"
     data_dir: Path = Path("./data")
-    # UNVERIFIED default until physical checkpoint (docs/protocol-notes.md) --
-    # classic vs e310bt init strategy is one of the things it resolves.
+    # Verified 2026-07-28 (first physical print, browser path, 24mm TZe):
+    # classic printed successfully; e310bt remains untested.
     printer_init_strategy: Literal["classic", "e310bt"] = "classic"
-    # UNVERIFIED default until physical checkpoint -- see raster.py's
-    # RasterConfig docstring for the same caveat.
+    # Verified 2026-07-28: msb_first printed clean glyphs (a wrong bit order
+    # scrambles within each 8-pin byte -- see docs/protocol-notes.md RESULTS).
     printer_bit_order: Literal["msb_first", "lsb_first"] = "msb_first"
-    printer_flip_pins: bool = False
+    # Verified 2026-07-28: flip_pins=False printed mirrored across the tape
+    # width; True is correct for this printer. RasterConfig's dataclass
+    # default stays False (library-neutral; driver goldens pin it) -- this
+    # AppConfig default is the policy layer every real print goes through.
+    printer_flip_pins: bool = True
     # M3: pydantic-settings parses list-typed fields as JSON, not a bare
     # comma-separated string -- the env var value must be a JSON array,
     # quoted so the shell/compose file passes the brackets/quotes through

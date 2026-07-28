@@ -17,17 +17,14 @@ services:
       - "8000:8000"
     environment:
       PRINTER_MODE: usb
-      # UNVERIFIED default (see docs/protocol-notes.md) -- flip to e310bt
-      # after the physical checkpoint resolves which init strategy the
-      # PT-E720BT actually needs.
+      # Verified 2026-07-28 (first physical print, docs/protocol-notes.md
+      # RESULTS): classic works; e310bt was never needed.
       PRINTER_INIT_STRATEGY: classic
-      # M4: the OTHER two checkpoint-pending knobs (docs/protocol-notes.md
-      # step 5, "Orientation diagnosis") -- uncomment and set per the
-      # checkpoint's result if the arrow test print comes out mirrored/
-      # striped. Defaults (commented out): msb_first bit order, pins not
-      # flipped -- matching config.py's AppConfig field defaults.
+      # Orientation knobs, resolved at the same checkpoint: msb_first bit
+      # order and flipped pins are correct for the PT-E720BT and are now the
+      # AppConfig defaults -- only uncomment to EXPERIMENT away from them.
       # PRINTER_BIT_ORDER: lsb_first
-      # PRINTER_FLIP_PINS: "true"
+      # PRINTER_FLIP_PINS: "false"
       # M3: CORS_ORIGINS is a JSON array, not a bare string -- see config.py's
       # AppConfig.cors_origins field comment for the exact env-var syntax.
       # Only needed if the frontend is served from a different origin than

@@ -51,7 +51,12 @@ class BitOrder(StrEnum):
 
 @dataclass(frozen=True)
 class RasterConfig:
-    # UNVERIFIED: resolve at physical checkpoint (arrow test print)
+    # Resolved 2026-07-28 (first physical print): the PT-E720BT needs
+    # flip_pins=True and msb_first. These dataclass defaults are deliberately
+    # NOT the printer's values: they stay library-neutral so the hand-derived
+    # golden literals in test_raster.py/test_job.py remain valid, and the
+    # real defaults live in AppConfig (config.py), which the print worker
+    # always passes explicitly.
     bit_order: BitOrder = BitOrder.MSB_FIRST
     flip_pins: bool = False
 
