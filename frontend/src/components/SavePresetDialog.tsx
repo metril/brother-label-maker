@@ -33,6 +33,19 @@ export function SavePresetDialog({ labelType, labelTypeTitle, params, tape, disa
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [favorite, setFavorite] = useState(false);
+  // Task 4.3: the API has always supported `tape_width_mm: null` ("any
+  // tape" -- see api/types.ts's own Preset doc), but this dialog had no way
+  // to CREATE one -- only editing tape_width_mm back to null after the
+  // fact (not exposed anywhere either) got there. Unchecked by default: a
+  // saved preset pinning the tape it was captured at is the common case,
+  // matching the help text below when this is off. `tape_family` is still
+  // sent either way -- it's the OTHER half of the tape pair the backend
+  // validates against (never nullable server-side, see that same doc) and
+  // PresetCard's own "Any tape" label only reads `tape_width_mm`, so
+  // recording the family costs nothing and keeps a later "pin this preset
+  // to a width" edit starting from something sensible instead of the
+  // server's bare "tze" default.
+  const [anyTape, setAnyTape] = useState(false);
 
   const save = useMutation({
     mutationFn: () =>
@@ -40,7 +53,7 @@ export function SavePresetDialog({ labelType, labelTypeTitle, params, tape, disa
         name: name.trim(),
         label_type: labelType,
         definition: params,
-        tape_width_mm: tape.width_mm,
+        tape_width_mm: anyTape ? null : tape.width_mm,
         tape_family: tape.family,
         favorite,
       }),
@@ -52,6 +65,7 @@ export function SavePresetDialog({ labelType, labelTypeTitle, params, tape, disa
   function openDialog() {
     setName("");
     setFavorite(false);
+    setAnyTape(false);
     save.reset();
     dialog.open();
   }
@@ -102,7 +116,9 @@ export function SavePresetDialog({ labelType, labelTypeTitle, params, tape, disa
             }}
           >
             <p className="text-[12px] text-deck-400">
-              Saves this {labelTypeTitle.toLowerCase()} design at {tape.width_mm}mm so you can reuse it without rebuilding it.
+              {anyTape
+                ? `Saves this ${labelTypeTitle.toLowerCase()} design without pinning it to a tape width, so you can reuse it on any tape.`
+                : `Saves this ${labelTypeTitle.toLowerCase()} design at ${tape.width_mm}mm so you can reuse it without rebuilding it.`}
             </p>
             <div>
               <label htmlFor="preset-name" className={`${fieldLabelText} mb-1 block`}>
@@ -111,6 +127,7 @@ export function SavePresetDialog({ labelType, labelTypeTitle, params, tape, disa
               <TextInput id="preset-name" value={name} onChange={setName} placeholder="e.g. Rack uplink label" maxLength={80} />
             </div>
             <Checkbox id="preset-favorite" checked={favorite} onChange={setFavorite} label="Favorite" />
+            <Checkbox id="preset-any-tape" checked={anyTape} onChange={setAnyTape} label="Any tape (don't pin a width)" />
             {save.isError && (
               <p role="alert" className={errorText}>
                 {save.error instanceof ApiError ? save.error.message : "could not save preset"}

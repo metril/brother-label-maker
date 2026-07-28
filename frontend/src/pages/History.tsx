@@ -233,11 +233,10 @@ export function History() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.map((item, index) => (
+                    {data.items.map((item) => (
                       <HistoryRow
                         key={item.id}
                         item={item}
-                        index={index}
                         liveEvent={events[item.id]}
                         reprintJobId={reprintJobIds[item.id] ?? null}
                         reprintEvent={reprintJobIds[item.id] ? events[reprintJobIds[item.id]!] : undefined}

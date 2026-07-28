@@ -7,12 +7,6 @@ import type { HistoryItem, JobEvent } from "../api/types";
 
 interface HistoryRowProps {
   item: HistoryItem;
-  /** 0-based position in the current page -- used ONLY to give this row's
-   * otherwise-identical "Reprint"/"Details"/"Delete" buttons distinct
-   * accessible names (`Reprint job 3`, ...), the same "Move item N up"
-   * convention components/TrayItemRow.tsx already established for a
-   * repeated-row list. */
-  index: number;
   /** The latest WS event for THIS row's own job id, if any -- overlays
    * `item.status` for display (see StatusChip.tsx's statusFromEvent) so a
    * job that transitions while the page is open updates in place, without
@@ -41,7 +35,6 @@ interface HistoryRowProps {
  * and the three row actions. */
 export function HistoryRow({
   item,
-  index,
   liveEvent,
   reprintJobId,
   reprintEvent,
@@ -56,7 +49,21 @@ export function HistoryRow({
     liveEvent?.event === "job.progress" && liveEvent.sent !== undefined && liveEvent.total !== undefined && liveEvent.total > 0
       ? Math.round((liveEvent.sent / liveEvent.total) * 100)
       : null;
-  const rowLabel = `job ${index + 1}`;
+  // Task 4.3 fix-up: this used to be `job ${index + 1}` -- the row's
+  // position on the CURRENT page, not anything about the job itself. A
+  // live status transition (this page's own WS overlay, above) or a
+  // filter/page-size change re-sorts or re-pages the list at any moment,
+  // which silently RE-TARGETS "Reprint job 3" at a different job than the
+  // one a screen-reader user just heard announced -- and made a query like
+  // `getByRole("button", { name: "Reprint job 1" })` describe "whichever
+  // job is first" rather than a specific job. `item.id` is the row's own
+  // stable key (already what `<HistoryRow key={item.id} .../>` uses) and
+  // never changes for as long as the row exists, regardless of sort order
+  // -- and per the design doc's own type rules, a raw job id is exactly the
+  // kind of machine value this app is meant to expose as-is (see
+  // pages/Diagnostics.tsx's Print-worker section, which shows `job.id` the
+  // same unstyled way).
+  const rowLabel = `job ${item.id}`;
 
   return (
     <tr className="border-b border-deck-800/60 align-top">

@@ -137,7 +137,7 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Reprint job 1" }));
+    await user.click(within(table).getByRole("button", { name: "Reprint job job-1" }));
     await waitFor(() => expect(within(table).getByText("Queued")).toBeInTheDocument());
 
     await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
@@ -159,7 +159,7 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Reprint job 1" }));
+    await user.click(within(table).getByRole("button", { name: "Reprint job job-1" }));
     expect(await within(table).findByRole("alert")).toHaveTextContent("job not found");
     // No status chip is added for a reprint that never actually got a job id.
     expect(within(table).queryByText("Queued")).not.toBeInTheDocument();
@@ -181,7 +181,7 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Reprint job 1" }));
+    await user.click(within(table).getByRole("button", { name: "Reprint job job-1" }));
     expect(await within(table).findByRole("alert")).toHaveTextContent("font 'Deleted Font' is no longer available");
     expect(within(table).queryByText("Queued")).not.toBeInTheDocument();
   });
@@ -205,12 +205,54 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    expect(within(table).getByRole("button", { name: "Reprint job 1" })).toBeInTheDocument();
-    expect(within(table).getByRole("button", { name: "Reprint job 2" })).toBeInTheDocument();
-    expect(within(table).getByRole("button", { name: "View details for job 1" })).toBeInTheDocument();
-    expect(within(table).getByRole("button", { name: "View details for job 2" })).toBeInTheDocument();
-    expect(within(table).getByRole("button", { name: "Delete job 1" })).toBeInTheDocument();
-    expect(within(table).getByRole("button", { name: "Delete job 2" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Reprint job job-1" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Reprint job job-2" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "View details for job job-1" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "View details for job job-2" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Delete job job-1" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Delete job job-2" })).toBeInTheDocument();
+  });
+
+  // Task 4.3 fix-up: the distinct name used to be `job ${index + 1}` -- the
+  // row's position on the CURRENT page, not the job itself. Re-fetching the
+  // SAME two jobs in the opposite order (a filter change, a live-status
+  // invalidation, anything that re-renders the table with a new sort) used
+  // to silently swap which job "Reprint job 1" pointed at. Now that the name
+  // is keyed off `item.id`, it must follow its own job across that reorder,
+  // not stay pinned to a table position.
+  it("keeps each row's accessible name pinned to its own job id across a re-sort, not to table position", async () => {
+    let order: "asc" | "desc" = "asc";
+    server.use(
+      http.get("/api/history", () =>
+        HttpResponse.json({
+          items:
+            order === "asc"
+              ? [item({ id: "job-1" }), item({ id: "job-2" })]
+              : [item({ id: "job-2" }), item({ id: "job-1" })],
+          page: 1,
+          page_size: 20,
+          total: 2,
+        }),
+      ),
+    );
+    renderWithProviders(<History />);
+    const table = await findTable();
+    expect(await within(table).findByRole("button", { name: "Delete job job-1" })).toBeInTheDocument();
+
+    order = "desc";
+    // Same query key (status filter) re-triggers the same GET -- easiest
+    // deterministic way to force a refetch without waiting on a real WS
+    // event: toggling the status filter and back invalidates nothing
+    // itself, but changing pageSize does trigger a fresh fetch under this
+    // page's own query-key shape (see useHistory.ts).
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Per page"), "50");
+
+    await waitFor(() => {
+      const rows = within(table).getAllByRole("row").slice(1); // skip the header row
+      expect(within(rows[0]!).getByRole("button", { name: "Delete job job-2" })).toBeInTheDocument();
+      expect(within(rows[1]!).getByRole("button", { name: "Delete job job-1" })).toBeInTheDocument();
+    });
   });
 
   it("Details shows the job's full definition and offers Load into designer for a single label", async () => {
@@ -237,7 +279,7 @@ describe("History page", () => {
     renderWithProviders(<History />, { route: "/history" });
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "View details for job 1" }));
+    await user.click(within(table).getByRole("button", { name: "View details for job job-1" }));
     const dialog = await screen.findByRole("dialog", { name: "Job details" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByText(/FROM HISTORY/)).toBeInTheDocument();
@@ -262,7 +304,7 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Delete job 1" }));
+    await user.click(within(table).getByRole("button", { name: "Delete job job-1" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(deleteSpy).not.toHaveBeenCalled();

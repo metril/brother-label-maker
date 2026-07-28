@@ -2,7 +2,7 @@ import type { Tape, TapeFamily } from "../api/types";
 import { useTapes } from "../hooks/useTapes";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
-import { eyebrow, segmentedButtonClass } from "./ui/styles";
+import { errorText, eyebrow, segmentedButtonClass } from "./ui/styles";
 
 const FAMILY_ORDER: TapeFamily[] = ["tze", "hse_2_1", "hse_3_1"];
 const FAMILY_LABELS: Record<TapeFamily, string> = {
@@ -22,7 +22,29 @@ interface TapeSelectorProps {
  * brief. Switching family snaps the width to that family's own smallest
  * tape (the old width almost never exists in the new family's catalog). */
 export function TapeSelector({ tape, onChange }: TapeSelectorProps) {
-  const { data: tapes, isPending } = useTapes();
+  const { data: tapes, isPending, isError, refetch, isRefetching } = useTapes();
+
+  // Task 4.3 fix-up: a failed GET /api/tapes used to leave this stuck on
+  // the placeholder branch below forever. react-query's `isPending` DOES
+  // flip false once retries exhaust (status becomes "error") -- but `data`
+  // stays undefined, so the old `isPending || !tapes` guard kept rendering
+  // the quiet `···` with no error text and no way to try again short of a
+  // full reload. `isError` is checked FIRST and independently so the
+  // failure always shows once it has actually happened; the `!tapes` half
+  // of the guard below is still load-bearing for the pending case.
+  if (isError) {
+    return (
+      <div className="flex flex-col gap-2">
+        <span className={eyebrow}>Tape</span>
+        <p role="alert" className={errorText}>
+          Could not load tape types.{" "}
+          <button type="button" onClick={() => void refetch()} disabled={isRefetching} className="font-medium text-amber-300 hover:underline disabled:opacity-60">
+            {isRefetching ? "Retrying…" : "Retry"}
+          </button>
+        </p>
+      </div>
+    );
+  }
 
   if (isPending || !tapes) {
     return (
