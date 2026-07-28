@@ -10,7 +10,7 @@ export const TINY_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 export const healthHandler = http.get("/api/health", () =>
-  HttpResponse.json({ status: "ok", printer_mode: "mock" }),
+  HttpResponse.json({ status: "ok", printer_mode: "mock", version: "0.1.0" }),
 );
 
 /** Real params_schema JSON Schema for all 9 label types -- fixtured from a
@@ -382,6 +382,16 @@ export const homeboxSettingsHandler = http.get("/api/homebox/settings", () =>
   HttpResponse.json({ qr_base_url: null, effective_qr_base_url: null }),
 );
 
+/** PUT /api/homebox/settings (task 4.2's Settings page) -- a default that
+ * just echoes the posted value back as both fields (mirroring
+ * router_homebox.py's own no-config-fallback shape when config.homebox_url
+ * is unset); pages/Settings.test.tsx overrides with server.use(...) for
+ * the "captured request body" and "422" scenarios it actually asserts on. */
+export const putHomeboxSettingsHandler = http.put("/api/homebox/settings", async ({ request }) => {
+  const body = (await request.json()) as { qr_base_url: string | null };
+  return HttpResponse.json({ qr_base_url: body.qr_base_url, effective_qr_base_url: body.qr_base_url });
+});
+
 // -- task 4.1: optional OIDC auth --
 // AppShell mounts useAuth() on EVERY page (same reasoning as the HomeBox
 // status handler above), so a mode-"none" default here is required for
@@ -396,6 +406,26 @@ export const authMeNoneHandler = http.get("/api/auth/me", () =>
 export const authLogoutHandler = http.post(
   "/api/auth/logout",
   () => new HttpResponse(null, { status: 204 }),
+);
+
+// -- task 4.2: GET /api/settings/runtime (Settings page's read-only config
+// panel) -- an "everything off/default" shape mirroring AppConfig's own
+// class defaults (config.py; note printer_flip_pins defaults TRUE there
+// since the 2026-07-28 hardware verification -- the backend test
+// conftest deliberately pins it false for golden stability, so don't
+// expect parity with that file).
+
+export const runtimeSettingsHandler = http.get("/api/settings/runtime", () =>
+  HttpResponse.json({
+    printer_mode: "mock",
+    printer_init_strategy: "classic",
+    printer_bit_order: "msb_first",
+    printer_flip_pins: true,
+    els_enabled: false,
+    els_tape_mm: 24.0,
+    auth_mode: "none",
+    homebox_configured: false,
+  }),
 );
 
 /** Sane defaults for the app's own initial queries (health/label-types/
@@ -433,6 +463,8 @@ export const defaultHandlers = [
   homeboxEntityPathHandler,
   homeboxAssetMatchesHandler,
   homeboxSettingsHandler,
+  putHomeboxSettingsHandler,
   authMeNoneHandler,
   authLogoutHandler,
+  runtimeSettingsHandler,
 ];

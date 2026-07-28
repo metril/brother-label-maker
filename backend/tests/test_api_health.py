@@ -6,7 +6,15 @@ from __future__ import annotations
 async def test_health_reports_ok_and_printer_mode(client):
     resp = await client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "printer_mode": "mock"}
+    body = resp.json()
+    # task 4.2: `version` is additive (the diagnostics page's "App" section
+    # wants something honest to show next to backend reachability) --
+    # asserted as "a non-empty string" rather than pinned to "0.1.0" so this
+    # test doesn't need editing every version bump; main.py's own
+    # APP_VERSION docstring covers where the value comes from.
+    assert body["status"] == "ok"
+    assert body["printer_mode"] == "mock"
+    assert isinstance(body["version"], str) and body["version"] != ""
 
 
 async def test_label_types_contains_text_with_schema(client):

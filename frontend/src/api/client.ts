@@ -14,6 +14,7 @@ import type {
   HomeboxEntitySummary,
   HomeboxPathSegment,
   HomeboxSettings,
+  HomeboxSettingsUpdate,
   HomeboxStatus,
   HomeboxTreeItem,
   ImageUploadResponse,
@@ -30,6 +31,7 @@ import type {
   PrintRequest,
   PrinterStatusResponse,
   ReprintResponse,
+  RuntimeSettings,
   SymbolInfo,
   TapeInfo,
   ValidationIssue,
@@ -447,6 +449,15 @@ export function getHomeboxSettings(): Promise<HomeboxSettings> {
   return request<HomeboxSettings>("/homebox/settings");
 }
 
+/** PUT /api/homebox/settings (task 4.2's Settings page) -- `qr_base_url:
+ * null` clears the stored override back to the config.homebox_url
+ * fallback; any 422 (bad scheme, embedded whitespace, over max_length)
+ * comes back through the same ApiError/extractErrorDetail path as every
+ * other route. */
+export function putHomeboxSettings(body: HomeboxSettingsUpdate): Promise<HomeboxSettings> {
+  return request<HomeboxSettings>("/homebox/settings", { method: "PUT", body: JSON.stringify(body) });
+}
+
 // --- Auth (task 4.1) --------------------------------------------------
 // Mirrors backend/api/router_auth.py. Signing IN is a real browser
 // navigation, not a fetch: GET /api/auth/login 302s the WHOLE PAGE to the
@@ -466,4 +477,13 @@ export function getAuthMe(): Promise<AuthMe> {
  * of client-side state (query cache, zustand stores) itself. */
 export function postAuthLogout(): Promise<void> {
   return request<void>("/auth/logout", { method: "POST" });
+}
+
+// --- Runtime settings (task 4.2) ----------------------------------------
+
+/** GET /api/settings/runtime -- the Settings page's read-only config panel:
+ * an allowlist of non-secret, env-derived fields (see api/router_settings.py's
+ * own docstring for exactly which, and why nothing else). */
+export function getRuntimeSettings(): Promise<RuntimeSettings> {
+  return request<RuntimeSettings>("/settings/runtime");
 }

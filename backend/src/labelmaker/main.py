@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -26,6 +28,7 @@ from labelmaker.api import (
     router_presets,
     router_print,
     router_printer,
+    router_settings,
     ws,
 )
 from labelmaker.api.auth_gate import AuthGateMiddleware
@@ -39,6 +42,19 @@ from labelmaker.jobs.worker import run_worker
 # "session" default so it reads unambiguously in browser devtools/a proxy
 # log as belonging to this app specifically.
 _SESSION_COOKIE_NAME = "lm_session"
+
+# Task 4.2 (diagnostics page's "App" section): the installed package
+# version, read from this project's own pyproject.toml via importlib
+# metadata rather than a hand-duplicated string constant that could drift
+# from it. Computed once at import time (static for the life of the
+# process) -- PackageNotFoundError only happens if labelmaker somehow isn't
+# installed at all (shouldn't happen for `uv run`, which installs the
+# project in editable mode), and "0.0.0-dev" says so honestly rather than
+# guessing a real-looking version number.
+try:
+    APP_VERSION = _pkg_version("labelmaker")
+except PackageNotFoundError:
+    APP_VERSION = "0.0.0-dev"
 
 
 def _require_oidc_config(cfg: AppConfig) -> None:
@@ -179,7 +195,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/api/health")
     async def health() -> dict:
-        return {"status": "ok", "printer_mode": cfg.printer_mode}
+        # `version` (task 4.2): additive field -- this app's own installed
+        # version, so the diagnostics page can show it next to backend
+        # reachability without a separate build-info endpoint.
+        return {"status": "ok", "printer_mode": cfg.printer_mode, "version": APP_VERSION}
 
     # Registered in every mode -- /api/auth/me must answer 200 even in
     # "none" mode (see router_auth.py's own docstring), and the auth gate
@@ -194,6 +213,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(router_presets.router, prefix="/api")
     app.include_router(router_history.router, prefix="/api")
     app.include_router(router_homebox.router, prefix="/api")
+    app.include_router(router_settings.router, prefix="/api")
     # Unauthenticated by design (HomeBox's ELS caller sends no auth, see
     # router_els.py's module docstring) -- registered only when an operator
     # opts in, so a disabled deployment 404s (the route doesn't exist) not

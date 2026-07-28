@@ -4,10 +4,12 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ApiError } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { Designer } from "./pages/Designer";
+import { Diagnostics } from "./pages/Diagnostics";
 import { Gallery } from "./pages/Gallery";
 import { History } from "./pages/History";
 import { Homebox } from "./pages/Homebox";
 import { Presets } from "./pages/Presets";
+import { Settings } from "./pages/Settings";
 import { AUTH_ME_QUERY_KEY } from "./hooks/useAuth";
 import { JobEventsProvider } from "./hooks/useJobEvents";
 
@@ -55,7 +57,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <JobEventsProvider>
-        <BrowserRouter>
+        {/* Task 4.3: opt into the two v7 future flags react-router-dom v6
+            warns about on every load (state updates wrapped in
+            React.startTransition; relative "." splat-route resolution) --
+            this app never relies on the pre-v7 behavior either flag
+            changes, so there's no reason to keep shipping the warning.
+            test/utils.tsx's MemoryRouter sets the same pair for parity
+            between what tests render and what production ships. */}
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AppShell>
             <Routes>
               <Route path="/" element={<Designer />} />
@@ -63,6 +72,8 @@ function App() {
               <Route path="/history" element={<History />} />
               <Route path="/gallery" element={<Gallery />} />
               <Route path="/homebox" element={<Homebox />} />
+              <Route path="/diagnostics" element={<Diagnostics />} />
+              <Route path="/settings" element={<Settings />} />
             </Routes>
           </AppShell>
         </BrowserRouter>

@@ -90,7 +90,9 @@ async def test_real_api_endpoint_still_wins_over_the_catch_all(spa_client):
     genuinely-real endpoint like /api/health is never shadowed by it."""
     resp = await spa_client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "printer_mode": "mock"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["printer_mode"] == "mock"
 
 
 async def test_nul_byte_path_falls_back_to_index_html_not_a_500(spa_client):

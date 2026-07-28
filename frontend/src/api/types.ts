@@ -64,6 +64,11 @@ export interface TextLabelParams {
 export interface HealthResponse {
   status: string;
   printer_mode: "mock" | "usb";
+  /** task 4.2: this app's own installed version (backend/main.py's
+   * APP_VERSION, read from pyproject.toml via importlib.metadata) -- the
+   * Diagnostics page's "App" section shows this next to backend
+   * reachability. */
+  version: string;
 }
 
 export interface LabelTypeInfo {
@@ -607,6 +612,16 @@ export interface HomeboxSettings {
   effective_qr_base_url: string | null;
 }
 
+/** PUT /api/homebox/settings' request body (task 4.2's Settings page).
+ * `null` clears the stored override back to the config.homebox_url
+ * fallback -- mirrors backend/api/router_homebox.py's
+ * HomeBoxSettingsUpdate; the max_length=255 / http(s)-scheme / no-
+ * whitespace checks are all server-side (a 422's `detail` comes back
+ * through the same extractErrorDetail path as every other route). */
+export interface HomeboxSettingsUpdate {
+  qr_base_url: string | null;
+}
+
 // --- Auth (task 4.1) -------------------------------------------------------
 // Mirrors backend/api/router_auth.py + api/auth_gate.py.
 
@@ -632,4 +647,25 @@ export interface AuthMe {
   auth_mode: "none" | "oidc";
   authenticated: boolean;
   user: AuthUser | null;
+}
+
+// --- Runtime settings (task 4.2) -------------------------------------------
+// Mirrors backend/api/router_settings.py's RuntimeSettings -- an ALLOWLIST
+// of non-secret, env-derived config fields the Settings page's read-only
+// panel renders. Never homebox_url/homebox_api_key/oidc_client_secret/
+// session_secret -- see that module's own docstring for why.
+
+/** GET /api/settings/runtime's response -- every field is env-configured
+ * (see backend/config.py's AppConfig); the Settings page notes, next to
+ * each row, that changing it means editing the environment and restarting,
+ * not anything in this UI. */
+export interface RuntimeSettings {
+  printer_mode: "mock" | "usb";
+  printer_init_strategy: "classic" | "e310bt";
+  printer_bit_order: "msb_first" | "lsb_first";
+  printer_flip_pins: boolean;
+  els_enabled: boolean;
+  els_tape_mm: number;
+  auth_mode: "none" | "oidc";
+  homebox_configured: boolean;
 }
