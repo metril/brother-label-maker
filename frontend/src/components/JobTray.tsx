@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { usePrintJob } from "../hooks/usePrintJob";
 import { useTrayStore } from "../stores/tray";
@@ -95,11 +95,33 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
   const clearTray = useTrayStore((s) => s.clear);
 
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  // Review fix-up (a11y): the mobile sheet needs real dialog focus
+  // handling, not just a visual slide-up -- `triggerRef` remembers whatever
+  // had focus before it opened (the compact bar itself, in practice) so it
+  // can be restored on close, and `closeButtonRef` is where focus MOVES to
+  // the instant it opens, so a keyboard/screen-reader user lands inside the
+  // sheet rather than still "behind" it. A full focus TRAP (Tab wrapping
+  // back to the first/last element) is deliberately not implemented -- the
+  // brief's own review called that optional -- but placement in/out is not.
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  function openMobileSheet() {
+    triggerRef.current = document.activeElement as HTMLElement | null;
+    setMobileExpanded(true);
+  }
+
+  function closeMobileSheet() {
+    setMobileExpanded(false);
+    triggerRef.current?.focus?.();
+    triggerRef.current = null;
+  }
 
   useEffect(() => {
     if (!mobileExpanded) return;
+    closeButtonRef.current?.focus();
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setMobileExpanded(false);
+      if (e.key === "Escape") closeMobileSheet();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -141,7 +163,13 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
   );
   const delta = needsBaseline && estimate && baseline.estimate ? baseline.estimate.total_mm - estimate.total_mm : null;
 
-  const job = usePrintJob();
+  // Review fix-up: usePrintJob's own "done" state needs to know whether the
+  // body it printed still matches what's on screen (see that hook's own
+  // docstring) -- passed fresh every render, compared only against the
+  // signature that was active at the LAST submit() call, never used to
+  // fire anything itself.
+  const bodyKey = JSON.stringify({ bodyLabels, options, bodySerialization });
+  const job = usePrintJob(bodyKey);
 
   const blockedBySerializationAndTray = current.serializationEnabled && trayHasItems;
 
@@ -319,18 +347,34 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
           or screen-reader user a SECOND "Print" control any time the sheet
           is collapsed. `lg:visible` unconditionally overrides at the
           sticky-sidebar breakpoint, where this is always meant to be
-          present regardless of `mobileExpanded`. */}
+          present regardless of `mobileExpanded`.
+
+          `role="dialog"`/`aria-modal` are applied only while `mobileExpanded`
+          -- this same div is the plain (non-dialog) desktop sidebar
+          otherwise, and `lg:sticky` is the ONLY positioning intent there
+          (a stray `lg:static` alongside it, from the first version of this
+          component, was a genuine contradiction -- Tailwind's generated
+          CSS order decides which wins, not the order written here). Focus
+          moves onto the close button the instant the sheet opens (see the
+          effect above) and returns to whatever triggered it on close --
+          `closeMobileSheet` is the ONLY way this component closes the
+          sheet (× button, backdrop click, Escape) so that restoration is
+          never skipped. */}
       <div
         data-testid="job-tray-panel"
+        role={mobileExpanded ? "dialog" : undefined}
+        aria-modal={mobileExpanded ? true : undefined}
+        aria-label={mobileExpanded ? "Job tray" : undefined}
         className={`flex w-full flex-col gap-4 lg:order-2 lg:w-80 lg:shrink-0 fixed inset-x-0 bottom-14 z-50 max-h-[75vh] overflow-y-auto rounded-t-xl border-t border-deck-700 bg-deck-900 p-5 shadow-lg transition-transform duration-150 motion-reduce:transition-none ${
           mobileExpanded ? "visible translate-y-0" : "invisible translate-y-[120%]"
-        } lg:visible lg:static lg:z-auto lg:max-h-none lg:translate-y-0 lg:overflow-visible lg:rounded-xl lg:border lg:border-deck-800 lg:bg-deck-900/60 lg:p-5 lg:shadow-none lg:sticky lg:top-6`}
+        } lg:visible lg:sticky lg:top-6 lg:z-auto lg:max-h-none lg:translate-y-0 lg:overflow-visible lg:rounded-xl lg:border lg:border-deck-800 lg:bg-deck-900/60 lg:p-5 lg:shadow-none`}
       >
         <div className="flex items-center justify-between lg:hidden">
           <span className={eyebrow}>Job</span>
           <button
             type="button"
-            onClick={() => setMobileExpanded(false)}
+            ref={closeButtonRef}
+            onClick={closeMobileSheet}
             aria-label="Close job tray"
             className={iconButtonClass}
           >
@@ -342,17 +386,13 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
       </div>
 
       {mobileExpanded && (
-        <div
-          aria-hidden
-          onClick={() => setMobileExpanded(false)}
-          className="fixed inset-0 z-40 bg-deck-950/70 lg:hidden"
-        />
+        <div aria-hidden onClick={closeMobileSheet} className="fixed inset-0 z-40 bg-deck-950/70 lg:hidden" />
       )}
 
       <button
         type="button"
         data-testid="job-tray-mobile-bar"
-        onClick={() => setMobileExpanded(true)}
+        onClick={openMobileSheet}
         aria-label={`Open job tray — ${itemCountLabel}${estimate ? `, ${estimate.total_mm.toFixed(1)} millimeters` : ""}`}
         className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-deck-800 bg-deck-900 px-4 py-3 lg:hidden"
       >

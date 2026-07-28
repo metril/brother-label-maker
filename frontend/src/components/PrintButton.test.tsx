@@ -17,6 +17,7 @@ function fakeJob(overrides: Partial<UsePrintJobResult> = {}): UsePrintJobResult 
     jobId: null,
     progress: null,
     errorText: null,
+    submittedCount: null,
     canCancel: false,
     isCanceling: false,
     cancelError: null,
@@ -53,14 +54,17 @@ describe("PrintButton -- label semantics (task 2.12)", () => {
 });
 
 describe("PrintButton -- submit wiring", () => {
-  it("clicking Print calls job.submit with the exact labels/options/serialization body", async () => {
+  it("clicking Print calls job.submit with the exact labels/options/serialization body AND the live printed count", async () => {
     const user = userEvent.setup();
     const job = fakeJob();
     render(<PrintButton job={job} labels={[def("A")]} options={OPTIONS} />);
 
     await user.click(screen.getByRole("button", { name: "Print 1 label" }));
 
-    expect(job.submit).toHaveBeenCalledWith({ labels: [def("A")], options: OPTIONS, serialization: undefined });
+    expect(job.submit).toHaveBeenCalledWith(
+      { labels: [def("A")], options: OPTIONS, serialization: undefined },
+      1,
+    );
   });
 
   it("a blockedMessage disables Print, shows the message, and never calls submit (task 2.12 carry-forward: serialization + non-empty tray)", async () => {
@@ -111,9 +115,36 @@ describe("PrintButton -- progress, cancel, done, failed", () => {
   });
 
   it('on done, shows a success line and relabels the button "Print again"', () => {
-    render(<PrintButton job={fakeJob({ phase: "done" })} labels={[def("A"), def("B")]} options={OPTIONS} isTray />);
+    render(
+      <PrintButton
+        job={fakeJob({ phase: "done", submittedCount: 2 })}
+        labels={[def("A"), def("B")]}
+        options={OPTIONS}
+        isTray
+      />,
+    );
     expect(screen.getByRole("button", { name: "Print again" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Printed 2 labels.");
+  });
+
+  // Review fix-up: confirmed live -- printed a 2-label tray, then duplicated
+  // it to 64 items AFTER the job finished, and the (still-mounted) success
+  // line silently rewrote itself from "Printed 2 labels." to "Printed 64
+  // labels.", a role="status" region asserting a false fact about a
+  // completed machine action. `job.submittedCount` (frozen by
+  // hooks/usePrintJob.ts at submit() time) must win over whatever `labels`
+  // happens to be on THIS render, however stale or fresh `job.phase` is.
+  it("the done-state success line uses the FROZEN submittedCount, never re-derived from the current (possibly since-changed) labels prop", () => {
+    render(
+      <PrintButton
+        job={fakeJob({ phase: "done", submittedCount: 2 })}
+        labels={Array.from({ length: 64 }, (_, i) => def(`ITEM-${i}`))}
+        options={OPTIONS}
+        isTray
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Printed 2 labels.");
+    expect(screen.queryByText(/64 labels/)).not.toBeInTheDocument();
   });
 
   it("on failed, shows the job's error text and keeps the button clickable (tray stays intact for a retry)", () => {

@@ -78,9 +78,14 @@ export function PrintButton({
   const active = job.phase === "queued" || job.phase === "printing";
   const busy = job.isSubmitting || active;
 
+  // The count to show RIGHT NOW if the user clicked print this instant --
+  // always derived from LIVE props, since it drives the idle/queued/
+  // printing label (which must track the tray/design as it's edited).
+  const liveCount = serialization && totalLabels != null ? totalLabels : labels.length;
+
   function handleClick() {
     if (busy || disabled || blockedMessage) return;
-    job.submit({ labels, options, serialization: serialization ?? undefined });
+    job.submit({ labels, options, serialization: serialization ?? undefined }, liveCount);
   }
 
   let label = idleLabel(labels, serialization, totalLabels, isTray);
@@ -96,7 +101,18 @@ export function PrintButton({
         ? "border-rust-500 bg-rust-500/15 text-rust-500"
         : "border-amber-500 bg-amber-500 text-deck-950 hover:bg-amber-300";
 
-  const printedCount = serialization && totalLabels != null ? totalLabels : labels.length;
+  // Review fix-up: the done-state success line must describe the job that
+  // ACTUALLY printed, not whatever the tray/current design happens to look
+  // like right now -- `job.submittedCount` is frozen by usePrintJob at the
+  // moment `submit()` was called (see that hook's own docstring); using
+  // `liveCount` here instead let duplicating/removing tray items AFTER a
+  // print finished silently rewrite this role="status" region (confirmed
+  // live: "Printed 2 labels." became "Printed 64 labels." after
+  // duplicating the tray post-print -- the job that actually printed still
+  // only had 2). Falls back to `liveCount` only for the impossible case of
+  // `phase === "done"` with a null `submittedCount` (never happens via
+  // this component's own `submit` call, which always supplies one).
+  const printedCount = job.submittedCount ?? liveCount;
 
   return (
     <div className="flex w-full flex-col items-start gap-2">

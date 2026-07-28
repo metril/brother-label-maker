@@ -280,4 +280,108 @@ describe("JobTray -- mobile compact bar", () => {
     expect(panel.className).toContain("translate-y-0");
     expect(panel.className).not.toContain("translate-y-[120%]");
   });
+
+  it("moves focus into the sheet (the close button) on open, and restores focus to the trigger on close", async () => {
+    const user = userEvent.setup();
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+
+    renderWithProviders(<JobTray current={currentDesign()} onAddToTray={vi.fn()} />);
+
+    const bar = await screen.findByTestId("job-tray-mobile-bar");
+    await user.click(bar);
+
+    const closeButton = screen.getByRole("button", { name: "Close job tray" });
+    await waitFor(() => expect(closeButton).toHaveFocus());
+
+    const panel = screen.getByTestId("job-tray-panel");
+    expect(panel).toHaveAttribute("role", "dialog");
+    expect(panel).toHaveAttribute("aria-modal", "true");
+
+    await user.click(closeButton);
+    await waitFor(() => expect(bar).toHaveFocus());
+  });
+});
+
+// Review fix-up (reported live): the done-state success line used to be
+// re-derived from LIVE props every render instead of freezing what was
+// actually printed, AND `phase` stayed "done" (and the button "Print
+// again") forever once reached, regardless of later tray edits. Both bugs
+// share one root cause (hooks/usePrintJob.ts had no notion of "the body
+// that was actually submitted" at all) and are fixed together there; this
+// integration test drives the real store + real JobTray to pin both
+// symptoms at once, the way they were actually caught live: print a
+// 2-item tray, mutate it AFTER the job finishes, and confirm the success
+// line never lies about the mutated tray while the button itself recovers
+// its live, count-bearing label.
+describe("JobTray -- done-state freeze and reset (review fix-up)", () => {
+  it("freezes the printed count in the success line and returns Print to a live count-bearing label once the tray changes post-print", async () => {
+    const user = userEvent.setup();
+    seedTrayItems(2);
+    server.use(
+      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
+      http.post("/api/print", () => HttpResponse.json({ job_id: "job-freeze" }, { status: 202 })),
+    );
+
+    renderWithProviders(<JobTray current={currentDesign()} onAddToTray={vi.fn()} />);
+    const printButton = await screen.findByRole("button", { name: "Print 2 labels (tray)" });
+    await user.click(printButton);
+
+    // The default poll handler (test/msw/handlers.ts) reports "done"
+    // immediately -- no WS frame needed to reach the state under test.
+    expect(await screen.findByText("Printed 2 labels.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Print again" })).toBeInTheDocument();
+
+    // Mutate the tray AFTER the print finished: duplicate item 1, now 3.
+    await user.click(screen.getByRole("button", { name: "Duplicate item 1" }));
+
+    // The success line must never be silently rewritten to describe the
+    // NEW (3-item) tray -- it either still reads "2" or has been cleared
+    // away entirely by the phase reset below, but "3" must never appear.
+    expect(screen.queryByText(/Printed 3 labels/)).not.toBeInTheDocument();
+
+    // The button must give the live, count-bearing label back -- not
+    // "Print again" persisting forever regardless of what the tray now is.
+    expect(await screen.findByRole("button", { name: "Print 3 labels (tray)" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Print again" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Printed 2 labels.")).not.toBeInTheDocument();
+  });
+
+  it("a failed print is unaffected: the tray stays intact and the error/retry state doesn't reset just because the tray is edited", async () => {
+    const user = userEvent.setup();
+    seedTrayItems(1);
+    server.use(
+      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/print", () => HttpResponse.json({ job_id: "job-fail" }, { status: 202 })),
+      http.get("/api/print/jobs/:jobId", () =>
+        HttpResponse.json({
+          id: "job-fail",
+          created_at: "2026-07-27T00:00:00.000000Z",
+          status: "failed",
+          error: "printer out of tape",
+          definition: {},
+          label_count: 1,
+          chain_mode: "cut_each",
+          strategy: null,
+          tape_width_mm: 24,
+          media_raw_byte: null,
+          tape_used_mm: null,
+          thumbnail_png_b64: null,
+        }),
+      ),
+    );
+
+    renderWithProviders(<JobTray current={currentDesign()} onAddToTray={vi.fn()} />);
+    const printButton = await screen.findByRole("button", { name: "Print 1 label (tray)" });
+    await user.click(printButton);
+
+    expect(await screen.findByText("printer out of tape")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Duplicate item 1" }));
+
+    // failed was never part of the bug this fixes -- editing the tray
+    // (still 2 items now) must not clear the error, and Print keeps
+    // reflecting the LIVE count the way it always did outside "done".
+    expect(screen.getByText("printer out of tape")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Print 2 labels (tray)" })).toBeInTheDocument();
+  });
 });
