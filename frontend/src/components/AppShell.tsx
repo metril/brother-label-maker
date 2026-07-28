@@ -1,12 +1,80 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
+import { postAuthLogout } from "../api/client";
+import type { AuthUser } from "../api/types";
 import { PrinterStatusBadge } from "./PrinterStatusBadge";
 import { TypeRail } from "./TypeRail";
+import { eyebrow, helpText, panel, primaryButtonClass, typeHeading } from "./ui/styles";
+import { useAuth } from "../hooks/useAuth";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
 import { useJobEventsContext } from "../hooks/useJobEvents";
 
 interface AppShellProps {
   children: ReactNode;
+}
+
+/** Task 4.1: rendered INSTEAD of the app's own shell whenever
+ * `auth_mode === "oidc"` and the session probe (useAuth) reports
+ * unauthenticated -- a plain browser navigation to the login route (an
+ * `<a href>`, not an onClick handler calling fetch: `/api/auth/login` 302s
+ * the WHOLE PAGE to the IdP, which fetch() cannot do -- see api/client.ts's
+ * own docstring on this). */
+function SignInPanel() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-deck-950 p-6 text-deck-200">
+      <div className={`${panel} w-full max-w-sm text-center`}>
+        <p className={eyebrow}>Label Studio</p>
+        <h1 className={`${typeHeading} mt-2`}>Sign in required</h1>
+        <p className={helpText}>This deployment requires signing in before you can use it.</p>
+        <a href="/api/auth/login" className={`${primaryButtonClass} mt-6 inline-block`}>
+          Sign in
+        </a>
+      </div>
+    </div>
+  );
+}
+
+/** Task 4.1: the signed-in user's name/email (whichever the IdP actually
+ * sent -- either can legitimately be missing depending on the configured
+ * `oidc_scopes`) plus a sign-out button, rendered in the header only in
+ * oidc mode while authenticated. */
+function UserMenu({ user }: { user: AuthUser | null }) {
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await postAuthLogout();
+    } finally {
+      // A full reload (not a query-cache invalidation) so every piece of
+      // client state -- query cache, zustand stores, the WS connection --
+      // starts over clean against the now-signed-out session, same as a
+      // real user closing and reopening the tab. Reloading unconditionally
+      // (even if the logout call itself failed, e.g. a dropped connection)
+      // means the fresh page load's own /auth/me probe is always the
+      // final word on whether the session actually ended.
+      window.location.reload();
+    }
+  }
+
+  const label = user?.name ?? user?.email ?? user?.sub ?? "Signed in";
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-[11px] text-deck-400" title={user?.email ?? undefined}>
+        {label}
+      </span>
+      <button
+        type="button"
+        onClick={() => void handleSignOut()}
+        disabled={signingOut}
+        className="rounded-md border border-deck-600 px-2 py-1 font-condensed text-[11px] font-medium uppercase tracking-wide text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Sign out
+      </button>
+    </div>
+  );
 }
 
 const NAV_LINK_BASE =
@@ -31,11 +99,22 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * once GET /api/homebox/status reports `configured` (useHomeboxStatus) --
  * until then (still loading, or genuinely unconfigured) it stays the
  * disabled, non-interactive placeholder pre-3.4 always was: deliberately
- * not a link at all, so it's never a tab stop that goes nowhere. */
+ * not a link at all, so it's never a tab stop that goes nowhere.
+ *
+ * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
+ * `auth_mode === "none"` (the default) always reports `authenticated: true`
+ * (see that route's own docstring), so this branch is a pure no-op in the
+ * zero-auth default; only a REAL `oidc` deployment with no valid session
+ * ever renders SignInPanel instead of the app below. */
 export function AppShell({ children }: AppShellProps) {
   const { connectionState } = useJobEventsContext();
   const { data: homeboxStatus } = useHomeboxStatus();
   const homeboxEnabled = homeboxStatus?.configured === true;
+  const { data: auth } = useAuth();
+
+  if (auth?.auth_mode === "oidc" && !auth.authenticated) {
+    return <SignInPanel />;
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-deck-950 text-deck-200">
@@ -84,6 +163,7 @@ export function AppShell({ children }: AppShellProps) {
           >
             {connectionState === "live" ? "live" : connectionState === "reconnecting" ? "reconnecting…" : ""}
           </span>
+          {auth?.auth_mode === "oidc" && auth.authenticated ? <UserMenu user={auth.user} /> : null}
         </div>
       </header>
 

@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -64,6 +65,53 @@ class AppConfig(BaseSettings):
     # knob that actually decides the returned PNG's pixel geometry -- see
     # router_els.py's module docstring for the full contract.
     els_tape_mm: float = 24.0
+    # Optional OIDC auth (task 4.1) -- this app is LAN-first and auth is
+    # opt-in: "none" (the default) is exactly today's zero-auth behavior,
+    # byte-for-byte (main.py adds no session/gate middleware at all in this
+    # mode). "oidc" gates every /api/* route (except /api/health,
+    # /api/auth/*, and /api/els/* -- see api/auth_gate.py's own docstring
+    # for why each is exempt) behind a signed session cookie, populated via
+    # a standard authorization-code round trip through the IdP named below
+    # (api/router_auth.py). main.create_app fails FAST (raises, at startup,
+    # not a 500 on the first login attempt) if auth_mode is "oidc" but any
+    # of the four fields below is left unset -- see main.py's
+    # `_require_oidc_config`.
+    auth_mode: Literal["none", "oidc"] = "none"
+    # The IdP's issuer URL, e.g. https://auth.example.com/realms/labelmaker
+    # -- authlib discovers the rest (authorize/token/jwks endpoints) from
+    # `{oidc_issuer}/.well-known/openid-configuration` lazily, on first use,
+    # not at startup (so a briefly-unreachable IdP doesn't block this app's
+    # own boot).
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    # Confidential client secret -- stays server-side, exchanged for tokens
+    # only in api/router_auth.py's callback handler, never sent to the
+    # browser.
+    oidc_client_secret: str | None = None
+    # Space-separated, passed to the IdP's authorize endpoint verbatim
+    # (authlib's own `client_kwargs={"scope": ...}` convention) -- "openid"
+    # must stay in this list (it's what makes authlib treat the flow as
+    # OIDC at all, e.g. generating+checking the nonce; see
+    # authlib.integrations.base_client.sync_app._create_oauth2_authorization_url).
+    oidc_scopes: str = "openid profile email"
+    # Signs/verifies the session cookie (starlette.middleware.sessions.
+    # SessionMiddleware, itsdangerous under the hood) -- a long random
+    # string (e.g. `openssl rand -hex 32`), operator-supplied so restarting
+    # the container doesn't silently invalidate every signed-in session
+    # against a freshly-generated one. min_length is a hard floor (review):
+    # a guessable secret lets anyone on the network FORGE the cookie and
+    # bypass auth entirely -- the HMAC is the whole gate.
+    session_secret: str | None = Field(default=None, min_length=32)
+    # THIS APP'S OWN session lifetime, seconds (default 8h). Deliberately
+    # NOT the id_token's `exp` claim (review): that is an authentication-
+    # freshness claim most IdPs cap at minutes (Keycloak: 5m), and reusing
+    # it as the session clock would force a full re-login mid-print job.
+    # authlib already validates the id_token's exp once, at callback time.
+    session_max_age_s: int = Field(default=8 * 3600, ge=300)
+    # Set true when serving over TLS (any real OIDC deployment): stamps
+    # `Secure` on the session cookie so it never rides plain http. Default
+    # false only because plain-HTTP LAN is this app's documented baseline.
+    session_cookie_secure: bool = False
 
 
 @lru_cache

@@ -75,6 +75,17 @@ _DEFAULT_APP_CONFIG_KWARGS = {
     # disabled-by-default test (or re-tape the enabled ones) from ambient env.
     "els_enabled": False,
     "els_tape_mm": 24.0,
+    # task 4.1: same hermeticity rule again for auth -- an ambient
+    # AUTH_MODE=oidc (or a stray OIDC_*/SESSION_SECRET) in a dev shell or CI
+    # runner must not flip the whole suite into requiring a session it never
+    # sets up. test_api_auth.py's own `_OIDC_CONFIGURED` indirect
+    # parametrize is the only place these are overridden.
+    "auth_mode": "none",
+    "oidc_issuer": None,
+    "oidc_client_id": None,
+    "oidc_client_secret": None,
+    "oidc_scopes": "openid profile email",
+    "session_secret": None,
 }
 
 

@@ -1,5 +1,6 @@
 import type {
   ApiErrorBody,
+  AuthMe,
   CsvUploadResponse,
   ExpandRequest,
   ExpandResponse,
@@ -444,4 +445,25 @@ export function getHomeboxAssetMatches(assetId: string): Promise<HomeboxEntitySu
  * buildHomeboxLabelDefinition); never fabricate a base URL when it's null. */
 export function getHomeboxSettings(): Promise<HomeboxSettings> {
   return request<HomeboxSettings>("/homebox/settings");
+}
+
+// --- Auth (task 4.1) --------------------------------------------------
+// Mirrors backend/api/router_auth.py. Signing IN is a real browser
+// navigation, not a fetch: GET /api/auth/login 302s the WHOLE PAGE to the
+// IdP, which a fetch() call cannot do (it would follow the redirect
+// in-band and hand back the IdP's own login HTML as this app's response
+// body) -- so there is deliberately no postAuthLogin() here; AppShell's
+// sign-in panel links to it directly via a plain <a href>.
+
+/** GET /api/auth/me -- always 200, in BOTH auth modes; see hooks/useAuth.ts,
+ * the only intended caller. */
+export function getAuthMe(): Promise<AuthMe> {
+  return request<AuthMe>("/auth/me");
+}
+
+/** POST /api/auth/logout -- 204/no body. AppShell's sign-out button calls
+ * this and then reloads the page, rather than hand-resetting every piece
+ * of client-side state (query cache, zustand stores) itself. */
+export function postAuthLogout(): Promise<void> {
+  return request<void>("/auth/logout", { method: "POST" });
 }

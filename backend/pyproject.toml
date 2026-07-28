@@ -19,6 +19,17 @@ dependencies = [
     # Runtime dep since task 3.1 (homebox/client.py); was previously
     # dev-only for the API test suite's ASGI transport.
     "httpx>=0.27",
+    # task 4.1 (optional OIDC auth): authorization-code flow + id_token/jwks
+    # validation (api/router_auth.py). Only ever exercised when an operator
+    # sets AUTH_MODE=oidc -- see config.py's AppConfig.auth_mode.
+    # >=1.7 floor (review): <1.3.1 has CVE-2024-37568 (JWS algorithm
+    # confusion) in exactly the id_token-verification path oidc mode uses;
+    # 1.7 matches what uv.lock actually pins.
+    "authlib>=1.7",
+    # Signs the session cookie Starlette's SessionMiddleware sets (main.py) --
+    # a plain runtime dependency of starlette.middleware.sessions itself, not
+    # bundled with the `starlette`/`fastapi` wheels.
+    "itsdangerous>=2.1",
 ]
 
 [dependency-groups]

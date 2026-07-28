@@ -382,6 +382,22 @@ export const homeboxSettingsHandler = http.get("/api/homebox/settings", () =>
   HttpResponse.json({ qr_base_url: null, effective_qr_base_url: null }),
 );
 
+// -- task 4.1: optional OIDC auth --
+// AppShell mounts useAuth() on EVERY page (same reasoning as the HomeBox
+// status handler above), so a mode-"none" default here is required for
+// every existing suite to keep passing, not just this task's own tests.
+// AppShell.test.tsx overrides with server.use(...) for the oidc-mode
+// scenarios it actually exercises.
+
+export const authMeNoneHandler = http.get("/api/auth/me", () =>
+  HttpResponse.json({ auth_mode: "none", authenticated: true, user: null }),
+);
+
+export const authLogoutHandler = http.post(
+  "/api/auth/logout",
+  () => new HttpResponse(null, { status: 204 }),
+);
+
 /** Sane defaults for the app's own initial queries (health/label-types/
  * fonts/tapes/symbols/printer-status) plus preview/estimate/print/presets/
  * history/homebox -- individual tests override with server.use(...) for the
@@ -417,4 +433,6 @@ export const defaultHandlers = [
   homeboxEntityPathHandler,
   homeboxAssetMatchesHandler,
   homeboxSettingsHandler,
+  authMeNoneHandler,
+  authLogoutHandler,
 ];

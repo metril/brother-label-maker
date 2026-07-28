@@ -606,3 +606,30 @@ export interface HomeboxSettings {
   qr_base_url: string | null;
   effective_qr_base_url: string | null;
 }
+
+// --- Auth (task 4.1) -------------------------------------------------------
+// Mirrors backend/api/router_auth.py + api/auth_gate.py.
+
+/** The subset of the IdP's id_token claims this app actually keeps in the
+ * session (api/router_auth.py's callback) -- `name`/`email` are whatever the
+ * IdP itself sent (either can legitimately be missing depending on the
+ * `oidc_scopes` the IdP honors), `exp` is the id_token's own expiry
+ * (seconds since epoch), re-checked server-side on every request (see
+ * `auth_gate.get_session_user`) -- this app never re-derives it client-side. */
+export interface AuthUser {
+  sub: string | null;
+  name: string | null;
+  email: string | null;
+  exp: number | null;
+}
+
+/** GET /api/auth/me's response -- the ONE probe hooks/useAuth.ts needs, in
+ * EITHER auth mode: mode "none" always answers a CONSTANT
+ * `{auth_mode: "none", authenticated: true, user: null}` (see that route's
+ * own docstring), so callers should branch on this shape, never on
+ * `auth_mode` fetched/cached separately. */
+export interface AuthMe {
+  auth_mode: "none" | "oidc";
+  authenticated: boolean;
+  user: AuthUser | null;
+}

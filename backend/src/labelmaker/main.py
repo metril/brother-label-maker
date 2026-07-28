@@ -13,8 +13,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from labelmaker.api import (
+    router_auth,
     router_els,
     router_gallery,
     router_history,
@@ -26,11 +28,52 @@ from labelmaker.api import (
     router_printer,
     ws,
 )
+from labelmaker.api.auth_gate import AuthGateMiddleware
 from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
 from labelmaker.homebox import HomeBoxClient
 from labelmaker.jobs.events import EventBus
 from labelmaker.jobs.worker import run_worker
+
+# The session cookie's own name -- distinct from Starlette's generic
+# "session" default so it reads unambiguously in browser devtools/a proxy
+# log as belonging to this app specifically.
+_SESSION_COOKIE_NAME = "lm_session"
+
+
+def _require_oidc_config(cfg: AppConfig) -> None:
+    """Fails FAST -- at create_app time, i.e. at process startup for the
+    real server entry point below, never on the first browser hit to
+    `/api/auth/login` -- when `AUTH_MODE=oidc` is missing any setting the
+    flow cannot function without. See config.py's `AppConfig` for what each
+    of these actually configures.
+    """
+    missing = [
+        env_name
+        for env_name, value in (
+            ("OIDC_ISSUER", cfg.oidc_issuer),
+            ("OIDC_CLIENT_ID", cfg.oidc_client_id),
+            ("OIDC_CLIENT_SECRET", cfg.oidc_client_secret),
+            ("SESSION_SECRET", cfg.session_secret),
+        )
+        if not value
+    ]
+    if missing:
+        raise ValueError(
+            "AUTH_MODE=oidc requires the following environment variable(s) to be "
+            f"set: {', '.join(missing)} (see config.py's AppConfig for what each one "
+            "configures; SESSION_SECRET wants >=32 random chars, e.g. "
+            "`openssl rand -hex 32`)"
+        )
+    # Without "openid" authlib treats this as plain OAuth2: no nonce, and --
+    # far worse -- NO id_token signature/iss/aud/exp verification at all,
+    # while the callback still 302s like a success (review). Fail here, at
+    # startup, with the reason spelled out.
+    if "openid" not in (cfg.oidc_scopes or "").split():
+        raise ValueError(
+            f"OIDC_SCOPES must include 'openid' (got {cfg.oidc_scopes!r}) -- without "
+            "it the id_token is never verified and sign-in cannot complete"
+        )
 
 
 def _resolve_static_dir() -> Path | None:
@@ -53,6 +96,8 @@ def _resolve_static_dir() -> Path | None:
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
     cfg = config if config is not None else get_config()
+    if cfg.auth_mode == "oidc":
+        _require_oidc_config(cfg)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -85,7 +130,44 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 await app.state.homebox.close()
             await db.close()
 
-    app = FastAPI(lifespan=lifespan)
+    # In oidc mode the interactive API docs are withheld entirely (review):
+    # the gate only covers /api/*, and FastAPI's own /docs + /openapi.json
+    # would otherwise hand an unauthenticated caller the complete API
+    # surface in a locked-down deployment.
+    if cfg.auth_mode == "oidc":
+        app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    else:
+        app = FastAPI(lifespan=lifespan)
+
+    # Auth (task 4.1) -- ONLY added in oidc mode, so `auth_mode == "none"`
+    # (the default) never runs a byte of this: no SessionMiddleware, no
+    # gate, request/response behavior identical to every pre-4.1 release.
+    #
+    # Registration order matters: Starlette's `add_middleware` is LIFO (the
+    # LAST-added ends up OUTERMOST -- see Starlette.build_middleware_stack),
+    # so registering AuthGateMiddleware, then SessionMiddleware, THEN
+    # CORSMiddleware last produces this actual per-request order:
+    #
+    #     CORS -> Session -> AuthGate -> routing -> the endpoint
+    #
+    # CORS outermost means a 401 the gate manufactures still gets
+    # Access-Control-* headers on the way back out (otherwise a
+    # cross-origin dev frontend couldn't even read the 401 body). Session
+    # running before AuthGate means `scope["session"]` is already decoded
+    # by the time the gate reads it, for both "http" and "websocket" scopes
+    # (see auth_gate.py's own docstring for the full reasoning).
+    if cfg.auth_mode == "oidc":
+        app.state.oauth = router_auth.build_oauth_client(cfg)
+        app.add_middleware(AuthGateMiddleware)
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=cfg.session_secret,
+            session_cookie=_SESSION_COOKIE_NAME,
+            # Cookie max_age and the server-side deadline router_auth stores
+            # come from the SAME config field, so they can't disagree.
+            max_age=cfg.session_max_age_s,
+            https_only=cfg.session_cookie_secure,
+        )
 
     app.add_middleware(
         CORSMiddleware,
@@ -99,6 +181,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def health() -> dict:
         return {"status": "ok", "printer_mode": cfg.printer_mode}
 
+    # Registered in every mode -- /api/auth/me must answer 200 even in
+    # "none" mode (see router_auth.py's own docstring), and the auth gate
+    # itself exempts the whole /api/auth/* prefix so login/callback/logout
+    # stay reachable by a not-yet-signed-in session.
+    app.include_router(router_auth.router, prefix="/api")
     app.include_router(router_labels.router, prefix="/api")
     app.include_router(router_gallery.router, prefix="/api")
     app.include_router(router_images.router, prefix="/api")
