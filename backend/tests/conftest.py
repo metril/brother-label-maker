@@ -70,6 +70,11 @@ _DEFAULT_APP_CONFIG_KWARGS = {
     "printer_flip_pins": False,
     "homebox_url": None,
     "homebox_api_key": None,
+    # Same hermeticity rule for the ELS knobs: an operator shell with
+    # ELS_ENABLED=true / ELS_TAPE_MM exported must not flip the
+    # disabled-by-default test (or re-tape the enabled ones) from ambient env.
+    "els_enabled": False,
+    "els_tape_mm": 24.0,
 }
 
 

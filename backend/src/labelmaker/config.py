@@ -46,6 +46,24 @@ class AppConfig(BaseSettings):
     # literally, e.g.: CORS_ORIGINS='["https://labels.example.com"]'
     # (multiple origins: '["https://a.example.com","https://b.example.com"]').
     cors_origins: list[str] = ["http://localhost:5173"]
+    # HomeBox External Label Service (ELS, task 3.5) -- HomeBox's
+    # HBOX_LABEL_MAKER_LABEL_SERVICE_URL delegates its own label PNG
+    # rendering to a GET endpoint this app exposes. That endpoint is
+    # unauthenticated by design (HomeBox sends no credentials -- see
+    # backend/pkgs/labelmaker/labelmaker.go's fetchLabelFromURL, verified
+    # 2026-07-28), so it must be OFF unless an operator opts in explicitly:
+    # main.create_app only registers router_els's routes when this is True
+    # (disabled -> a plain 404, not a 503, since the routes don't exist at
+    # all rather than existing-but-refusing).
+    els_enabled: bool = False
+    # The tze tape width (mm) ELS labels render at -- HomeBox's own
+    # Width/Height/Dpi query params describe ITS internal generator's
+    # canvas at 72dpi and are not enforced on whatever image a configured
+    # LabelServiceUrl returns (fetchLabelFromURL copies the response bytes
+    # through verbatim, no resize/dimension check), so this is the one
+    # knob that actually decides the returned PNG's pixel geometry -- see
+    # router_els.py's module docstring for the full contract.
+    els_tape_mm: float = 24.0
 
 
 @lru_cache

@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from labelmaker.api import (
+    router_els,
     router_gallery,
     router_history,
     router_homebox,
@@ -106,6 +107,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(router_presets.router, prefix="/api")
     app.include_router(router_history.router, prefix="/api")
     app.include_router(router_homebox.router, prefix="/api")
+    # Unauthenticated by design (HomeBox's ELS caller sends no auth, see
+    # router_els.py's module docstring) -- registered only when an operator
+    # opts in, so a disabled deployment 404s (the route doesn't exist) not
+    # 503s (the route exists but refuses).
+    if cfg.els_enabled:
+        app.include_router(router_els.router, prefix="/api")
     app.include_router(ws.router, prefix="/api")
 
     # Registered last (after every /api/* route above) so it only ever
