@@ -352,9 +352,11 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
           `role="dialog"`/`aria-modal` are applied only while `mobileExpanded`
           -- this same div is the plain (non-dialog) desktop sidebar
           otherwise, and `lg:sticky` is the ONLY positioning intent there
-          (a stray `lg:static` alongside it, from the first version of this
-          component, was a genuine contradiction -- Tailwind's generated
-          CSS order decides which wins, not the order written here). Focus
+          (a stray lg-prefixed `static` alongside it, from the first version
+          of this component, was a genuine contradiction -- Tailwind's
+          generated CSS order decides which wins, not the order written
+          here; the class is also spelled dash-joined in this comment so
+          Tailwind's source scanner doesn't emit a dead rule for it). Focus
           moves onto the close button the instant the sheet opens (see the
           effect above) and returns to whatever triggered it on close --
           `closeMobileSheet` is the ONLY way this component closes the

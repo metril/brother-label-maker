@@ -464,9 +464,10 @@ class BarcodeLabelRenderer(LabelRenderer):
         result = _attempt(params, tape, caption_enabled=caption_wanted)
         if result is None:
             result = _attempt(params, tape, caption_enabled=False)
-            assert result is not None, (
-                "caption_enabled=False must always succeed or raise -- it never itself "
-                "requests a retry"
-            )
+            if result is None:  # pragma: no cover -- caption_enabled=False never retries
+                raise RuntimeError(
+                    "caption_enabled=False must always succeed or raise -- it never "
+                    "itself requests a retry"
+                )
             result.warnings.append(_caption_omitted_warning(params.symbology))
         return result
