@@ -165,6 +165,27 @@ describe("History page", () => {
     expect(within(table).queryByText("Queued")).not.toBeInTheDocument();
   });
 
+  // The SECOND real backend failure mode -- router_history.py's own
+  // reprint_job docstring: a stored definition that no longer validates
+  // (e.g. a font/image it referenced was since removed) is a SERVER-side
+  // resource having gone stale, hence 409 (not 422/404) -- was never
+  // covered by a test on its own (only the 404 case above was).
+  it("Reprint 409 (a stale stored definition) also surfaces a readable role=alert message", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.post("/api/history/job-1/reprint", () =>
+        HttpResponse.json({ detail: "font 'Deleted Font' is no longer available" }, { status: 409 }),
+      ),
+    );
+    renderWithProviders(<History />);
+    const table = await findTable();
+
+    await user.click(within(table).getByRole("button", { name: "Reprint job 1" }));
+    expect(await within(table).findByRole("alert")).toHaveTextContent("font 'Deleted Font' is no longer available");
+    expect(within(table).queryByText("Queued")).not.toBeInTheDocument();
+  });
+
   // Review fix-up: History row actions used to share the exact same
   // accessible name ("Reprint"/"Details"/"Delete") across every row --
   // indistinguishable to a screen-reader user tabbing through the table.

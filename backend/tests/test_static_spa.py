@@ -93,6 +93,43 @@ async def test_real_api_endpoint_still_wins_over_the_catch_all(spa_client):
     assert resp.json() == {"status": "ok", "printer_mode": "mock"}
 
 
+async def test_nul_byte_path_falls_back_to_index_html_not_a_500(spa_client):
+    """Review fix-up (2nd round), confirmed live via an A/B probe harness:
+    `(static_dir / full_path).resolve()` raises `ValueError` ("embedded
+    null character") for a path containing a NUL byte -- an unauthenticated
+    one-request 500 (with the old StaticFiles mount, this 404'd). Caught
+    and treated as "not a real file", same as any other nonexistent path."""
+    resp = await spa_client.get("/%00")
+    assert resp.status_code == 200
+    assert "Label Studio" in resp.text
+
+
+async def test_overlong_path_segment_falls_back_to_index_html_not_a_500(spa_client):
+    """Review fix-up (2nd round), confirmed live: a >255-byte path segment
+    (any directory-brute-force scanner's own wordlist eventually produces
+    one) raises `OSError` (ENAMETOOLONG) out of `Path.is_file()` -- also
+    caught and treated as "not a real file" instead of a 500."""
+    resp = await spa_client.get(f"/{'a' * 5000}")
+    assert resp.status_code == 200
+    assert "Label Studio" in resp.text
+
+
+async def test_head_root_and_head_real_asset_still_200(spa_client):
+    """Review fix-up (2nd round): `@app.get` only ever registered GET --
+    Starlette's StaticFiles mount it replaced auto-added HEAD, so `HEAD /`
+    and `HEAD` on a real asset had regressed to 405 (confirmed live),
+    breaking any uptime monitor/reverse proxy that HEADs before GETing."""
+    root = await spa_client.head("/")
+    assert root.status_code == 200
+    assert root.headers["content-type"].startswith("text/html")
+
+    asset = await spa_client.head("/assets/app.js")
+    assert asset.status_code == 200
+    assert "javascript" in asset.headers["content-type"]
+    # A HEAD response carries no body -- Content-Length/headers only.
+    assert asset.content == b""
+
+
 async def test_no_static_dir_leaves_app_bootable_and_unmatched_paths_404(tmp_path, monkeypatch):
     """`_resolve_static_dir()`'s own contract: no dist yet (or STATIC_DIR
     pointing nowhere) -- the API must still boot standalone, and since no

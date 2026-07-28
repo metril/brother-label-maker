@@ -130,17 +130,46 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # attacker-controlled request text, and `(static_dir / full_path)`
     # alone would follow a `..` segment right out of `static_dir` onto the
     # rest of the filesystem.
+    #
+    # Review fix-up (2nd round): `full_path` is entirely attacker-supplied
+    # text, and `Path.resolve()`/`Path.is_file()` are NOT pure string
+    # operations -- both make real filesystem/OS calls that can raise for
+    # input that's syntactically fine as a URL path but not as a filesystem
+    # path. Confirmed live (an A/B probe harness against both the old
+    # StaticFiles mount and this route): `GET /%00` (an embedded NUL byte)
+    # raised `ValueError` ("embedded null character") out of `.resolve()`,
+    # and a >255-byte path segment (any scanner's own directory-brute-force
+    # wordlist will eventually produce one) raised `OSError`
+    # (`ENAMETOOLONG`) out of `.is_file()` -- both surfaced as an
+    # unhandled-exception 500 with a stack trace, where the OLD mount (and
+    # every genuinely nonexistent path here) 404/200-index.html'd instead.
+    # Caught broadly and treated the SAME as "not a real file" -- fall
+    # through to `index.html` -- rather than distinguishing the reason: the
+    # SPA itself is the right place to render a "not found" for a path this
+    # malformed, not a 500.
     static_dir = _resolve_static_dir()
     if static_dir is not None:
         static_root = static_dir.resolve()
 
-        @app.get("/{full_path:path}", include_in_schema=False)
+        # Review fix-up (2nd round): `@app.get` only registers GET --
+        # Starlette's StaticFiles mount it replaced auto-added HEAD (its
+        # own `Route(..., methods=["GET", "HEAD"])`), so `HEAD /`,
+        # `HEAD /favicon.svg`, `HEAD /assets/*.js` had regressed from 200
+        # to 405 (confirmed live) -- breaking any uptime monitor or reverse
+        # proxy that HEADs before GETing. `api_route` with both methods
+        # restores that.
+        @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
         async def spa_fallback(full_path: str) -> FileResponse:
             if full_path == "api" or full_path.startswith("api/"):
                 raise HTTPException(status_code=404, detail="not found")
 
-            candidate = (static_dir / full_path).resolve()
-            if candidate.is_file() and static_root in candidate.parents:
+            try:
+                candidate = (static_dir / full_path).resolve()
+                is_real_file = candidate.is_file() and static_root in candidate.parents
+            except (ValueError, OSError):
+                is_real_file = False
+
+            if is_real_file:
                 return FileResponse(candidate)
             return FileResponse(static_dir / "index.html")
 
