@@ -271,10 +271,91 @@ export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ param
   }),
 );
 
+// -- task 2.13: presets + history --
+// Realistic-shaped defaults (mirroring api/router_presets.py/
+// router_history.py) so most Presets/History tests need no server.use()
+// at all -- individual tests override for the scenario they specifically
+// care about (an empty list, a captured request body, a 404, ...), same
+// convention as everywhere else in this file.
+
+let mockPresetSeq = 0;
+
+export const presetsListHandler = http.get("/api/presets", () => HttpResponse.json([]));
+
+export const createPresetHandler = http.post("/api/presets", async ({ request }) => {
+  const body = (await request.json()) as Record<string, unknown>;
+  mockPresetSeq += 1;
+  return HttpResponse.json(
+    {
+      id: `preset-${mockPresetSeq}`,
+      name: body.name,
+      label_type: body.label_type,
+      definition: body.definition,
+      tape_width_mm: body.tape_width_mm ?? null,
+      tape_family: body.tape_family ?? "tze",
+      favorite: body.favorite ?? false,
+      created_at: "2026-07-27T00:00:00.000000Z",
+      updated_at: "2026-07-27T00:00:00.000000Z",
+    },
+    { status: 201 },
+  );
+});
+
+export const updatePresetHandler = http.put("/api/presets/:id", async ({ params, request }) => {
+  const body = (await request.json()) as Record<string, unknown>;
+  return HttpResponse.json({
+    id: params.id,
+    name: body.name ?? "Preset",
+    label_type: body.label_type ?? "text",
+    definition: body.definition ?? { lines: ["A"] },
+    tape_width_mm: "tape_width_mm" in body ? body.tape_width_mm : 24,
+    tape_family: body.tape_family ?? "tze",
+    favorite: body.favorite ?? false,
+    created_at: "2026-07-27T00:00:00.000000Z",
+    updated_at: "2026-07-27T00:05:00.000000Z",
+  });
+});
+
+export const deletePresetHandler = http.delete("/api/presets/:id", () => new HttpResponse(null, { status: 204 }));
+
+export const printPresetHandler = http.post("/api/presets/:id/print", () =>
+  HttpResponse.json({ job_id: "preset-print-job-1" }, { status: 202 }),
+);
+
+export const historyListHandler = http.get("/api/history", () =>
+  HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 }),
+);
+
+export const historyDetailHandler = http.get("/api/history/:id", ({ params }) =>
+  HttpResponse.json({
+    id: params.id,
+    created_at: "2026-07-27T00:00:00.000000Z",
+    status: "done",
+    error: null,
+    definition: {
+      labels: [{ type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: ["A"] } }],
+      options: { chain_mode: "cut_each", margin_mm: 2.0, auto_cut: true },
+    },
+    label_count: 1,
+    chain_mode: "cut_each",
+    strategy: "classic",
+    tape_width_mm: 24,
+    media_raw_byte: null,
+    tape_used_mm: 30,
+    thumbnail_png_b64: null,
+  }),
+);
+
+export const reprintHistoryHandler = http.post("/api/history/:id/reprint", () =>
+  HttpResponse.json({ job_id: "reprint-job-1" }, { status: 202 }),
+);
+
+export const deleteHistoryHandler = http.delete("/api/history/:id", () => new HttpResponse(null, { status: 204 }));
+
 /** Sane defaults for the app's own initial queries (health/label-types/
- * fonts/tapes/symbols/printer-status) plus preview/estimate/print --
- * individual tests override with server.use(...) for the scenario they
- * care about. */
+ * fonts/tapes/symbols/printer-status) plus preview/estimate/print/presets/
+ * history -- individual tests override with server.use(...) for the
+ * scenario they care about. */
 export const defaultHandlers = [
   healthHandler,
   labelTypesHandler,
@@ -291,4 +372,13 @@ export const defaultHandlers = [
   cancelPrintJobHandler,
   expandHandler,
   serializeCsvHandler,
+  presetsListHandler,
+  createPresetHandler,
+  updatePresetHandler,
+  deletePresetHandler,
+  printPresetHandler,
+  historyListHandler,
+  historyDetailHandler,
+  reprintHistoryHandler,
+  deleteHistoryHandler,
 ];

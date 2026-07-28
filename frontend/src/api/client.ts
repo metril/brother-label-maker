@@ -5,8 +5,15 @@ import type {
   ExpandResponse,
   FontInfo,
   HealthResponse,
+  HistoryJob,
+  HistoryListParams,
+  HistoryListResponse,
   ImageUploadResponse,
   LabelTypeInfo,
+  Preset,
+  PresetCreateRequest,
+  PresetPrintRequest,
+  PresetUpdateRequest,
   PreviewRequest,
   PreviewResponse,
   PrintEstimateResponse,
@@ -14,6 +21,7 @@ import type {
   PrintJobResponse,
   PrintRequest,
   PrinterStatusResponse,
+  ReprintResponse,
   SymbolInfo,
   TapeInfo,
   ValidationIssue,
@@ -148,6 +156,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // non-JSON error body (network layer, proxy, etc.) -- keep the fallback.
     }
     throw new ApiError(res.status, detail);
+  }
+
+  // task 2.13: DELETE /api/presets/{id} and DELETE /api/history/{id} both
+  // respond 204 No Content (router_presets.py/router_history.py) -- no
+  // earlier caller of request() ever hit a 204 before this task, so
+  // `await res.json()` unconditionally would throw on the empty body.
+  if (res.status === 204) {
+    return undefined as T;
   }
 
   return (await res.json()) as T;
@@ -287,4 +303,70 @@ export function getPrinterStatus(): Promise<PrinterStatusResponse> {
  * (png_b64) or a print job's thumbnail_png_b64. */
 export function pngDataUrl(pngB64: string): string {
   return `data:image/png;base64,${pngB64}`;
+}
+
+// --- Presets (task 2.13) ------------------------------------------------
+
+/** GET /api/presets?label_type=&q= -- both filters are optional and combine
+ * with AND server-side (db.list_presets). Already sorted favorite-first,
+ * then most-recently-updated (see that function's own ORDER BY) -- the
+ * Presets page renders this order as-is. */
+export function getPresets(params: { label_type?: string; q?: string } = {}): Promise<Preset[]> {
+  const search = new URLSearchParams();
+  if (params.label_type) search.set("label_type", params.label_type);
+  if (params.q) search.set("q", params.q);
+  const qs = search.toString();
+  return request<Preset[]>(`/presets${qs ? `?${qs}` : ""}`);
+}
+
+export function postPreset(body: PresetCreateRequest): Promise<Preset> {
+  return request<Preset>("/presets", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** PUT /api/presets/{id} -- a true partial update; only send the fields
+ * that actually changed (an omitted field is left untouched server-side,
+ * see api/router_presets.py's PresetUpdate docstring). */
+export function putPreset(id: string, body: PresetUpdateRequest): Promise<Preset> {
+  return request<Preset>(`/presets/${id}`, { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function deletePreset(id: string): Promise<void> {
+  return request<void>(`/presets/${id}`, { method: "DELETE" });
+}
+
+/** POST /api/presets/{id}/print -- `body` may be omitted entirely (every
+ * field of PresetPrintRequest is itself optional server-side); passing
+ * `undefined` here sends no request body at all (matches request()'s own
+ * "no Content-Type when body is undefined" branch), not an empty `{}`. */
+export function postPresetPrint(id: string, body?: PresetPrintRequest): Promise<PrintJobResponse> {
+  return request<PrintJobResponse>(`/presets/${id}/print`, {
+    method: "POST",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+// --- History (task 2.13) -------------------------------------------------
+
+export function getHistory(params: HistoryListParams = {}): Promise<HistoryListResponse> {
+  const search = new URLSearchParams();
+  if (params.page !== undefined) search.set("page", String(params.page));
+  if (params.page_size !== undefined) search.set("page_size", String(params.page_size));
+  if (params.status) search.set("status", params.status);
+  if (params.q) search.set("q", params.q);
+  const qs = search.toString();
+  return request<HistoryListResponse>(`/history${qs ? `?${qs}` : ""}`);
+}
+
+/** GET /api/history/{id} -- the FULL job resource (definition included),
+ * unlike GET /api/history's own deliberately light list items. */
+export function getHistoryJob(id: string): Promise<HistoryJob> {
+  return request<HistoryJob>(`/history/${id}`);
+}
+
+export function postHistoryReprint(id: string): Promise<ReprintResponse> {
+  return request<ReprintResponse>(`/history/${id}/reprint`, { method: "POST" });
+}
+
+export function deleteHistoryJob(id: string): Promise<void> {
+  return request<void>(`/history/${id}`, { method: "DELETE" });
 }

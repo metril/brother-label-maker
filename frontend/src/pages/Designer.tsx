@@ -3,6 +3,7 @@ import { HighlightContext } from "../components/schema/HighlightContext";
 import { SchemaForm } from "../components/schema/SchemaForm";
 import { FeedDeck } from "../components/FeedDeck";
 import { JobTray, type CurrentDesign } from "../components/JobTray";
+import { SavePresetDialog } from "../components/SavePresetDialog";
 import { SequenceEditor } from "../components/SequenceEditor";
 import { TapeSelector } from "../components/TapeSelector";
 import { Pending } from "../components/ui/Pending";
@@ -291,6 +292,21 @@ export function Designer() {
         </section>
 
         <JobTray current={currentDesign} onAddToTray={handleAddToTray} />
+      </div>
+
+      {/* task 2.13: "Save current design as preset", placed directly below
+          the tray it saves a snapshot of (the brief's own "near the tray")
+          -- full-width so it reads clearly on every viewport rather than
+          only living inside the desktop sidebar column. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-deck-800 bg-deck-900/40 px-4 py-3">
+        <p className="text-[13px] text-deck-400">Like this design? Save it to reuse later without rebuilding it.</p>
+        <SavePresetDialog
+          labelType={selectedType}
+          labelTypeTitle={typeInfo.title}
+          params={params}
+          tape={tape}
+          disabled={!currentDesign.canSubmit}
+        />
       </div>
 
       {/* task 2.11: a third, full-width panel BELOW the parameters-form/
