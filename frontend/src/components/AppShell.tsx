@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { PrinterStatusBadge } from "./PrinterStatusBadge";
 import { TypeRail } from "./TypeRail";
+import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
 import { useJobEventsContext } from "../hooks/useJobEvents";
 
 interface AppShellProps {
@@ -25,14 +26,16 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * TypeRail) that drives which form Designer renders.
  *
  * Task 2.13: the app's own primary section nav lives here too --
- * Design/Presets/History, real routes for the first time (App.tsx now
- * wraps this in a BrowserRouter). `HomeBox` stays a disabled, non-
- * interactive placeholder -- not a general "landing page" but the Phase-3
- * HomeBox inventory integration (docs/research/homebox.md: syncing/
- * printing labels for HomeBox items/locations) -- deliberately not a link
- * at all, so it's never a tab stop that goes nowhere. */
+ * Design/Presets/History, real routes (App.tsx wraps this in a
+ * BrowserRouter). Task 3.4: `HomeBox` becomes a real NavLink to /homebox
+ * once GET /api/homebox/status reports `configured` (useHomeboxStatus) --
+ * until then (still loading, or genuinely unconfigured) it stays the
+ * disabled, non-interactive placeholder pre-3.4 always was: deliberately
+ * not a link at all, so it's never a tab stop that goes nowhere. */
 export function AppShell({ children }: AppShellProps) {
   const { connectionState } = useJobEventsContext();
+  const { data: homeboxStatus } = useHomeboxStatus();
+  const homeboxEnabled = homeboxStatus?.configured === true;
 
   return (
     <div className="flex min-h-screen flex-col bg-deck-950 text-deck-200">
@@ -45,13 +48,19 @@ export function AppShell({ children }: AppShellProps) {
         </div>
 
         <nav aria-label="Sections" className="flex items-center gap-1">
-          <span
-            aria-disabled="true"
-            title="HomeBox inventory integration — coming in a future phase"
-            className="cursor-not-allowed select-none rounded-md px-3 py-1.5 font-condensed text-[13px] font-medium uppercase tracking-wide text-deck-600"
-          >
-            HomeBox
-          </span>
+          {homeboxEnabled ? (
+            <NavLink to="/homebox" className={navLinkClass}>
+              HomeBox
+            </NavLink>
+          ) : (
+            <span
+              aria-disabled="true"
+              title="HomeBox inventory integration — set HOMEBOX_URL and HOMEBOX_API_KEY to enable it"
+              className="cursor-not-allowed select-none rounded-md px-3 py-1.5 font-condensed text-[13px] font-medium uppercase tracking-wide text-deck-600"
+            >
+              HomeBox
+            </span>
+          )}
           <NavLink to="/" end className={navLinkClass}>
             Design
           </NavLink>

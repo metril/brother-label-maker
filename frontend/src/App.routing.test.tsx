@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import App from "./App";
+import { server } from "./test/msw/server";
 import { useDesignerStore } from "./stores/designer";
 import { useTrayStore } from "./stores/tray";
 
@@ -24,10 +26,12 @@ describe("App routing (task 2.13)", () => {
     const nav = screen.getByRole("navigation", { name: "Sections" });
     expect(await within(nav).findByRole("link", { name: "Design" })).toHaveAttribute("aria-current", "page");
 
-    // The HomeBox placeholder is a disabled, non-interactive stand-in for
-    // the Phase-3 HomeBox inventory integration -- never a link at all.
-    expect(within(nav).queryByRole("link", { name: "HomeBox" })).not.toBeInTheDocument();
-    expect(within(nav).getByText("HomeBox")).toHaveAttribute("aria-disabled", "true");
+    // Task 3.4: HomeBox is a real NavLink once GET /api/homebox/status
+    // reports `configured` -- the default msw handler does. The
+    // unconfigured placeholder branch is covered by this suite's own
+    // "disabled placeholder" test below.
+    const homeboxLink = await within(nav).findByRole("link", { name: "HomeBox" });
+    expect(homeboxLink).not.toHaveAttribute("aria-current");
 
     await user.click(within(nav).getByRole("link", { name: "Presets" }));
     expect(await screen.findByRole("heading", { name: "Presets" })).toBeInTheDocument();
@@ -37,6 +41,10 @@ describe("App routing (task 2.13)", () => {
     await user.click(within(nav).getByRole("link", { name: "History" }));
     expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "History" })).toHaveAttribute("aria-current", "page");
+
+    await user.click(within(nav).getByRole("link", { name: "HomeBox" }));
+    expect(await screen.findByRole("heading", { name: "HomeBox" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "HomeBox" })).toHaveAttribute("aria-current", "page");
 
     await user.click(within(nav).getByRole("link", { name: "Design" }));
     expect(await screen.findByRole("heading", { name: "Text" })).toBeInTheDocument();
@@ -56,5 +64,25 @@ describe("App routing (task 2.13)", () => {
 
     await user.click(within(nav).getByRole("link", { name: "Design" }));
     expect(await screen.findByLabelText("Lines 1")).toHaveValue("PORT 12");
+  });
+
+  it("renders HomeBox as a disabled placeholder, not a link, when status reports unconfigured", async () => {
+    server.use(
+      http.get("/api/homebox/status", () =>
+        HttpResponse.json({
+          configured: false, reachable: null, healthy: null, version: null, error: null,
+        }),
+      ),
+    );
+    render(<App />);
+
+    const nav = screen.getByRole("navigation", { name: "Sections" });
+    // The placeholder also renders while status is still LOADING, so a
+    // too-eager assertion would pass before the query settles. Anchor on a
+    // sibling default-handler query resolving first (the printer badge),
+    // by which point the status response has landed too.
+    await screen.findByText(/connected/);
+    expect(within(nav).queryByRole("link", { name: "HomeBox" })).not.toBeInTheDocument();
+    expect(within(nav).getByText("HomeBox")).toHaveAttribute("aria-disabled", "true");
   });
 });

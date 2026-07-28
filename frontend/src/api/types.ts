@@ -500,3 +500,109 @@ export interface GalleryItem {
   total_labels: number | null;
   sequence_value: string | null;
 }
+
+// --- HomeBox (task 3.4) --------------------------------------------------
+// Mirrors backend/api/router_homebox.py + backend/homebox/client.py's own
+// response models. That client's `_ApiModel` parses HomeBox's camelCase wire
+// shape via `validation_alias` only (never a plain `alias`), so every field
+// name below -- including nested ones -- is already snake_case by the time
+// it crosses the proxy; there is no camelCase form to also model here.
+
+/** GET /api/homebox/status -- always 200 (see that route's own docstring):
+ * the frontend's entire show/hide signal for HomeBox UI, both the AppShell
+ * nav item and the /homebox route's own state machine. `reachable`/
+ * `healthy`/`version` are null together only when `configured` is false;
+ * `reachable: false` (HomeBox down/unreachable/bad key) leaves `healthy`
+ * null too (never got far enough to ask); `healthy: false` with
+ * `reachable: true` is the pre-v0.26 API-generation mismatch, `error`
+ * carrying the upgrade instructions. */
+export interface HomeboxStatus {
+  configured: boolean;
+  reachable: boolean | null;
+  healthy: boolean | null;
+  version: string | null;
+  error: string | null;
+}
+
+/** Mirrors homebox/client.py's EntityTypeSummary -- the item-vs-location
+ * discriminator in the unified entities API. */
+export interface HomeboxEntityType {
+  id: string;
+  name: string;
+  is_location: boolean;
+}
+
+/** Mirrors homebox/client.py's TagSummary. */
+export interface HomeboxTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+/** Mirrors homebox/client.py's EntitySummary -- the list/search/asset-lookup
+ * row shape. `parent` is the immediate container (recursively another
+ * summary), NOT the nearest LOCATION ancestor -- that's what
+ * GET /api/homebox/entities/{id}/path (HomeboxPathSegment[] below) is for. */
+export interface HomeboxEntitySummary {
+  id: string;
+  name: string;
+  description: string;
+  asset_id: string;
+  archived: boolean;
+  quantity: number | null;
+  entity_type: HomeboxEntityType | null;
+  parent: HomeboxEntitySummary | null;
+  tags: HomeboxTag[];
+  thumbnail_id: string | null;
+  image_id: string | null;
+}
+
+/** Mirrors homebox/client.py's Entity (GET /api/homebox/entities/{id}) --
+ * every EntitySummary field plus the single-entity extras. */
+export interface HomeboxEntity extends HomeboxEntitySummary {
+  serial_number: string;
+  model_number: string;
+  manufacturer: string;
+  notes: string;
+  children: HomeboxEntitySummary[];
+}
+
+/** Mirrors homebox/client.py's EntityPage -- GET /api/homebox/entities'
+ * response. */
+export interface HomeboxEntityPage {
+  items: HomeboxEntitySummary[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+/** Mirrors homebox/client.py's TreeItem -- one node of
+ * GET /api/homebox/entities/tree. `type` is HomeBox's own lowercase
+ * "location"/"item" vocabulary. */
+export interface HomeboxTreeItem {
+  id: string;
+  name: string;
+  type: string;
+  children: HomeboxTreeItem[];
+}
+
+/** Mirrors homebox/client.py's PathSegment -- one ancestor in
+ * GET /api/homebox/entities/{id}/path's root-first chain (the entity itself
+ * is the LAST segment, per that route's own docstring). */
+export interface HomeboxPathSegment {
+  id: string;
+  name: string;
+  type: string;
+}
+
+/** GET/PUT /api/homebox/settings -- `qr_base_url` is the stored override
+ * (null when unset); `effective_qr_base_url` already falls back to
+ * `config.homebox_url` server-side (see router_homebox.py's
+ * `_settings_response`) and is null only when NEITHER is configured --
+ * callers building a label's `qr_data` read this field, never
+ * `qr_base_url` directly, and must never fabricate a base URL when it's
+ * null. */
+export interface HomeboxSettings {
+  qr_base_url: string | null;
+  effective_qr_base_url: string | null;
+}

@@ -9,6 +9,12 @@ import type {
   HistoryJob,
   HistoryListParams,
   HistoryListResponse,
+  HomeboxEntityPage,
+  HomeboxEntitySummary,
+  HomeboxPathSegment,
+  HomeboxSettings,
+  HomeboxStatus,
+  HomeboxTreeItem,
   ImageUploadResponse,
   LabelTypeInfo,
   Preset,
@@ -379,4 +385,63 @@ export function deleteHistoryJob(id: string): Promise<void> {
  * in-process there (cheap after the first call). */
 export function getGallery(): Promise<GalleryItem[]> {
   return request<GalleryItem[]>("/gallery");
+}
+
+// --- HomeBox (task 3.4) --------------------------------------------------
+// Mirrors backend/api/router_homebox.py. The browser never talks to
+// HomeBox directly -- every one of these is a proxied, read-only GET (plus
+// PUT .../settings, this app's OWN setting, not HomeBox's).
+
+/** GET /api/homebox/status -- always 200; see HomeboxStatus's own doc. */
+export function getHomeboxStatus(): Promise<HomeboxStatus> {
+  return request<HomeboxStatus>("/homebox/status");
+}
+
+export interface HomeboxEntitiesParams {
+  q?: string;
+  page?: number;
+  page_size?: number;
+  parent_id?: string;
+}
+
+/** GET /api/homebox/entities -- `q` and `parent_id` combine server-side
+ * (see router_homebox.py's list_entities); 503 while unconfigured, 502 for
+ * a genuine HomeBox-side problem (both surface through ApiError same as
+ * every other route). */
+export function getHomeboxEntities(params: HomeboxEntitiesParams = {}): Promise<HomeboxEntityPage> {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.page !== undefined) search.set("page", String(params.page));
+  if (params.page_size !== undefined) search.set("page_size", String(params.page_size));
+  if (params.parent_id) search.set("parent_id", params.parent_id);
+  const qs = search.toString();
+  return request<HomeboxEntityPage>(`/homebox/entities${qs ? `?${qs}` : ""}`);
+}
+
+/** GET /api/homebox/entities/tree -- `with_items` defaults to false (the
+ * browse page's own left rail is locations-only; see components/
+ * HomeboxLocationTree.tsx, which also filters defensively on `type` itself). */
+export function getHomeboxTree(withItems = false): Promise<HomeboxTreeItem[]> {
+  return request<HomeboxTreeItem[]>(`/homebox/entities/tree${withItems ? "?with_items=true" : ""}`);
+}
+
+/** GET /api/homebox/entities/{id}/path -- root-first ancestor chain,
+ * entity itself last (see HomeboxPathSegment's own doc); the "Add to tray"
+ * breadcrumb source (lib/homebox.ts's buildBreadcrumb). */
+export function getHomeboxEntityPath(id: string): Promise<HomeboxPathSegment[]> {
+  return request<HomeboxPathSegment[]>(`/homebox/entities/${encodeURIComponent(id)}/path`);
+}
+
+/** GET /api/homebox/assets/{assetId} -- zero, one, or many matches (asset
+ * ids are NOT unique); the browse page's own asset-id-jump disambiguation
+ * renders all of them as cards for the user to pick from. */
+export function getHomeboxAssetMatches(assetId: string): Promise<HomeboxEntitySummary[]> {
+  return request<HomeboxEntitySummary[]>(`/homebox/assets/${encodeURIComponent(assetId)}`);
+}
+
+/** GET /api/homebox/settings -- `effective_qr_base_url` is what "Add to
+ * tray" reads to compose a label's `qr_data` (see lib/homebox.ts's
+ * buildHomeboxLabelDefinition); never fabricate a base URL when it's null. */
+export function getHomeboxSettings(): Promise<HomeboxSettings> {
+  return request<HomeboxSettings>("/homebox/settings");
 }

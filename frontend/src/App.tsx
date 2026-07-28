@@ -5,14 +5,15 @@ import { AppShell } from "./components/AppShell";
 import { Designer } from "./pages/Designer";
 import { Gallery } from "./pages/Gallery";
 import { History } from "./pages/History";
+import { Homebox } from "./pages/Homebox";
 import { Presets } from "./pages/Presets";
 import { JobEventsProvider } from "./hooks/useJobEvents";
 
-/** Task 2.13: the app stops being a single screen here -- three routes
- * (Designer at "/", Presets, History), all inside the SAME AppShell (its
- * own primary nav + status bar persist across navigation) and the SAME
- * QueryClient/JobEventsProvider (one WS connection, one query cache, for
- * the whole app regardless of route). stores/designer.ts and
+/** Task 2.13: the app stops being a single screen here -- Designer at "/",
+ * Presets, History, Gallery, and (task 3.4) Homebox, all inside the SAME
+ * AppShell (its own primary nav + status bar persist across navigation) and
+ * the SAME QueryClient/JobEventsProvider (one WS connection, one query
+ * cache, for the whole app regardless of route). stores/designer.ts and
  * stores/tray.ts are module-level zustand stores, not component state --
  * navigating away from Designer unmounts it, but the store itself lives on
  * unchanged, so a design in progress survives a round trip through
@@ -33,6 +34,7 @@ function App() {
               <Route path="/presets" element={<Presets />} />
               <Route path="/history" element={<History />} />
               <Route path="/gallery" element={<Gallery />} />
+              <Route path="/homebox" element={<Homebox />} />
             </Routes>
           </AppShell>
         </BrowserRouter>

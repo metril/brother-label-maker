@@ -352,9 +352,39 @@ export const reprintHistoryHandler = http.post("/api/history/:id/reprint", () =>
 
 export const deleteHistoryHandler = http.delete("/api/history/:id", () => new HttpResponse(null, { status: 204 }));
 
+// -- task 3.4: HomeBox proxy routes --
+// A "configured, reachable, healthy" default (AppShell mounts
+// useHomeboxStatus on EVERY page via its own nav item, so every existing
+// suite that renders AppShell/App now makes this request too -- msw's
+// onUnhandledRequest: "error" means a missing default here would fail
+// every one of those, not just Homebox's own tests) plus empty-ish
+// defaults for the rest of the surface; pages/Homebox.test.tsx overrides
+// with server.use(...) for the scenarios it actually exercises, same
+// convention as everywhere else in this file.
+
+export const homeboxStatusConfiguredHandler = http.get("/api/homebox/status", () =>
+  HttpResponse.json({ configured: true, reachable: true, healthy: true, version: "0.26.2", error: null }),
+);
+
+export const homeboxTreeHandler = http.get("/api/homebox/entities/tree", () => HttpResponse.json([]));
+
+export const homeboxEntitiesHandler = http.get("/api/homebox/entities", () =>
+  HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 }),
+);
+
+export const homeboxEntityPathHandler = http.get("/api/homebox/entities/:id/path", ({ params }) =>
+  HttpResponse.json([{ id: params.id, name: "Entity", type: "item" }]),
+);
+
+export const homeboxAssetMatchesHandler = http.get("/api/homebox/assets/:assetId", () => HttpResponse.json([]));
+
+export const homeboxSettingsHandler = http.get("/api/homebox/settings", () =>
+  HttpResponse.json({ qr_base_url: null, effective_qr_base_url: null }),
+);
+
 /** Sane defaults for the app's own initial queries (health/label-types/
  * fonts/tapes/symbols/printer-status) plus preview/estimate/print/presets/
- * history -- individual tests override with server.use(...) for the
+ * history/homebox -- individual tests override with server.use(...) for the
  * scenario they care about. */
 export const defaultHandlers = [
   healthHandler,
@@ -381,4 +411,10 @@ export const defaultHandlers = [
   historyDetailHandler,
   reprintHistoryHandler,
   deleteHistoryHandler,
+  homeboxStatusConfiguredHandler,
+  homeboxTreeHandler,
+  homeboxEntitiesHandler,
+  homeboxEntityPathHandler,
+  homeboxAssetMatchesHandler,
+  homeboxSettingsHandler,
 ];
