@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Designer } from "./Designer";
 import { useDesignerStore } from "../stores/designer";
+import { useTrayStore } from "../stores/tray";
 import { buildDefaultParams } from "../schema/defaults";
 import type { JsonSchemaObject } from "../schema/jsonSchema";
 import { renderWithProviders } from "../test/utils";
@@ -24,9 +25,11 @@ const PATCH_PANEL_TYPE = LABEL_TYPES.find((t) => t.type === "patch_panel")!;
 // each test so a click on a different tape width (or typed content) in one
 // test can't leak into the next.
 const INITIAL_STORE_STATE = useDesignerStore.getState();
+const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 afterEach(() => {
   useDesignerStore.setState(INITIAL_STORE_STATE, true);
+  useTrayStore.setState(INITIAL_TRAY_STATE, true);
 });
 
 function connectedStatusBody(mediaWidthMm: number) {
@@ -115,6 +118,56 @@ describe("Designer tape-mismatch banner (I1)", () => {
     await waitFor(() =>
       expect(screen.queryByText(/this label is designed for/)).not.toBeInTheDocument(),
     );
+  });
+});
+
+// task 2.12: the Job tray's mobile presentation moved from an in-flow panel
+// (task 2.11's own "order-1 before the form" reorder trick) to a `position:
+// fixed` bottom bar/sheet -- it can no longer push the parametric form down
+// the page or require scrolling past it, on ANY viewport, since it never
+// occupies flow space in the first place. Asserted via a class contract
+// (fixed/bottom-0/lg:hidden) and DOM containment, not real computed
+// layout/pixel positions -- jsdom doesn't apply Tailwind's actual responsive
+// CSS the way a real browser does (see JobTray.tsx's own docstring), so a
+// getBoundingClientRect-based "above the fold" check would be meaningless
+// here regardless of viewport.
+describe("Designer -- mobile layout (task 2.12)", () => {
+  it("the tray's mobile bar/sheet is out of normal document flow, and the first form input is not nested inside it", async () => {
+    renderWithProviders(<Designer />);
+
+    const firstInput = await screen.findByLabelText("Lines 1");
+    const mobileBar = screen.getByTestId("job-tray-mobile-bar");
+    const panel = screen.getByTestId("job-tray-panel");
+
+    expect(mobileBar.className).toContain("fixed");
+    expect(mobileBar.className).toContain("bottom-0");
+    expect(mobileBar.className).toContain("lg:hidden");
+    expect(panel.className).toContain("fixed");
+
+    expect(panel.contains(firstInput)).toBe(false);
+    expect(mobileBar.contains(firstInput)).toBe(false);
+  });
+});
+
+describe("Designer -- Add to tray (task 2.12)", () => {
+  it("snapshots the current design as a DEEP COPY -- editing the form afterward never retroactively changes the queued item", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Designer />);
+
+    const lines1 = await screen.findByLabelText("Lines 1");
+    await user.type(lines1, "UPLINK-A");
+
+    const addButton = await screen.findByRole("button", { name: "+ Add to tray" });
+    await waitFor(() => expect(addButton).not.toBeDisabled());
+    await user.click(addButton);
+
+    expect(await screen.findByText("Text — UPLINK-A")).toBeInTheDocument();
+
+    await user.clear(lines1);
+    await user.type(lines1, "CHANGED");
+
+    expect(screen.getByText("Text — UPLINK-A")).toBeInTheDocument();
+    expect(screen.queryByText("Text — CHANGED")).not.toBeInTheDocument();
   });
 });
 

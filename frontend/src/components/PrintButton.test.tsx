@@ -1,174 +1,135 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
 import { PrintButton } from "./PrintButton";
-import { renderWithProviders } from "../test/utils";
-import { server } from "../test/msw/server";
-import { mockWebSocketInstances } from "../test/setup";
-import type { LabelDefinition, PrintJob } from "../api/types";
+import type { UsePrintJobResult } from "../hooks/usePrintJob";
+import type { LabelDefinition, PrintOptions } from "../api/types";
 
-const DEFINITION: LabelDefinition = {
-  type: "text",
-  tape: { width_mm: 24, family: "tze" },
-  params: {
-    lines: ["HELLO"],
-    font_family: "Inter",
-    bold: false,
-    font_size_px: null,
-    h_align: "center",
-    length_mm: null,
-    padding_mm: 2,
-  },
-};
+const OPTIONS: PrintOptions = { chain_mode: "cut_each", margin_mm: 2, auto_cut: true };
 
-function job(overrides: Partial<PrintJob>): PrintJob {
+function def(text: string): LabelDefinition {
+  return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
+}
+
+function fakeJob(overrides: Partial<UsePrintJobResult> = {}): UsePrintJobResult {
   return {
-    id: "job-1",
-    created_at: "2026-07-27T00:00:00.000000Z",
-    status: "printing",
-    error: null,
-    definition: {},
-    label_count: 1,
-    chain_mode: "cut_each",
-    strategy: null,
-    tape_width_mm: 24,
-    media_raw_byte: null,
-    tape_used_mm: null,
-    thumbnail_png_b64: null,
+    phase: "idle",
+    jobId: null,
+    progress: null,
+    errorText: null,
+    canCancel: false,
+    isCanceling: false,
+    cancelError: null,
+    isSubmitting: false,
+    submit: vi.fn(),
+    cancel: vi.fn(),
     ...overrides,
   };
 }
 
-describe("PrintButton", () => {
-  it("POSTs a print job whose body contains the current definition", async () => {
-    const user = userEvent.setup();
-    let capturedBody: unknown;
-    server.use(
-      http.post("/api/print", async ({ request }) => {
-        capturedBody = await request.json();
-        return HttpResponse.json({ job_id: "job-1" }, { status: 202 });
-      }),
-      http.get("/api/print/jobs/:jobId", () => HttpResponse.json(job({ status: "printing" }))),
-    );
-
-    renderWithProviders(<PrintButton definition={DEFINITION} />);
-    await user.click(screen.getByRole("button", { name: "Print" }));
-
-    await waitFor(() => expect(capturedBody).toBeDefined());
-    expect(capturedBody).toEqual({
-      labels: [DEFINITION],
-      options: { chain_mode: "cut_each", margin_mm: 2, auto_cut: true },
-    });
+describe("PrintButton -- label semantics (task 2.12)", () => {
+  it('shows "Print 1 label" for the plain empty-tray, non-serialized path', () => {
+    render(<PrintButton job={fakeJob()} labels={[def("A")]} options={OPTIONS} />);
+    expect(screen.getByRole("button", { name: "Print 1 label" })).toBeInTheDocument();
   });
 
-  it("shows the success state once the job is polled as done", async () => {
-    const user = userEvent.setup();
-    server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-done" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () => HttpResponse.json(job({ id: "job-done", status: "done" }))),
-    );
-
-    renderWithProviders(<PrintButton definition={DEFINITION} />);
-    await user.click(screen.getByRole("button", { name: "Print" }));
-
-    await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("Printed"));
+  it('shows "Print N labels (tray)" once labels come from a non-empty tray', () => {
+    render(<PrintButton job={fakeJob()} labels={[def("A"), def("B"), def("C")]} options={OPTIONS} isTray />);
+    expect(screen.getByRole("button", { name: "Print 3 labels (tray)" })).toBeInTheDocument();
   });
 
-  it("shows the job's error text inline when it fails", async () => {
-    const user = userEvent.setup();
-    server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-failed" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () =>
-        HttpResponse.json(
-          job({ id: "job-failed", status: "failed", error: "printer out of tape" }),
-        ),
-      ),
+  it('shows "Print N labels" (no "(tray)" suffix) for a confirmed serialized run', () => {
+    render(
+      <PrintButton
+        job={fakeJob()}
+        labels={[def("PORT-{seq}")]}
+        options={OPTIONS}
+        serialization={{ kind: "numeric", count: 24 }}
+        totalLabels={24}
+      />,
     );
+    expect(screen.getByRole("button", { name: "Print 24 labels" })).toBeInTheDocument();
+  });
+});
 
-    renderWithProviders(<PrintButton definition={DEFINITION} />);
-    await user.click(screen.getByRole("button", { name: "Print" }));
+describe("PrintButton -- submit wiring", () => {
+  it("clicking Print calls job.submit with the exact labels/options/serialization body", async () => {
+    const user = userEvent.setup();
+    const job = fakeJob();
+    render(<PrintButton job={job} labels={[def("A")]} options={OPTIONS} />);
 
-    expect(await screen.findByText("printer out of tape")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Print 1 label" }));
+
+    expect(job.submit).toHaveBeenCalledWith({ labels: [def("A")], options: OPTIONS, serialization: undefined });
   });
 
-  it("shows the success state when job.done arrives over the WS event stream (no polling)", async () => {
+  it("a blockedMessage disables Print, shows the message, and never calls submit (task 2.12 carry-forward: serialization + non-empty tray)", async () => {
     const user = userEvent.setup();
-    server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-ws-done" }, { status: 202 })),
-      // Poll handler deliberately never reports a terminal status itself --
-      // if this test passes, the "done" state came from the WS frame below,
-      // not from polling.
-      http.get("/api/print/jobs/:jobId", () => HttpResponse.json(job({ id: "job-ws-done", status: "printing" }))),
+    const job = fakeJob();
+    render(
+      <PrintButton
+        job={job}
+        labels={[def("A")]}
+        options={OPTIONS}
+        isTray
+        blockedMessage="Turn off Serialize or clear the tray to print."
+      />,
     );
 
-    renderWithProviders(<PrintButton definition={DEFINITION} />);
-    await user.click(screen.getByRole("button", { name: "Print" }));
+    const button = screen.getByRole("button", { name: "Print 1 label (tray)" });
+    expect(button).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Turn off Serialize or clear the tray to print.");
 
-    await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
-    const socket = mockWebSocketInstances.at(-1)!;
+    await user.click(button);
+    expect(job.submit).not.toHaveBeenCalled();
+  });
+});
 
-    act(() => {
-      socket.emit({ event: "job.done", job_id: "job-ws-done" });
-    });
+describe("PrintButton -- progress, cancel, done, failed", () => {
+  it("shows a Cancel button while queued/printing, enabled only when job.canCancel", () => {
+    const { rerender } = render(
+      <PrintButton job={fakeJob({ phase: "queued", canCancel: true })} labels={[def("A")]} options={OPTIONS} />,
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeDisabled();
 
-    await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("Printed"));
+    rerender(<PrintButton job={fakeJob({ phase: "printing", canCancel: false })} labels={[def("A")]} options={OPTIONS} />);
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    rerender(<PrintButton job={fakeJob({ phase: "idle" })} labels={[def("A")]} options={OPTIONS} />);
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 
-  it("shows the job's error text when job.failed arrives over the WS event stream (no polling)", async () => {
-    const user = userEvent.setup();
-    server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-ws-failed" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () => HttpResponse.json(job({ id: "job-ws-failed", status: "printing" }))),
+  it("renders a progress bar reflecting job.progress's sent/total", () => {
+    render(
+      <PrintButton
+        job={fakeJob({ phase: "printing", progress: { sent: 50, total: 200 } })}
+        labels={[def("A")]}
+        options={OPTIONS}
+      />,
     );
-
-    renderWithProviders(<PrintButton definition={DEFINITION} />);
-    await user.click(screen.getByRole("button", { name: "Print" }));
-
-    await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
-    const socket = mockWebSocketInstances.at(-1)!;
-
-    act(() => {
-      socket.emit({ event: "job.failed", job_id: "job-ws-failed", error: "printer jammed" });
-    });
-
-    expect(await screen.findByText("printer jammed")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
   });
 
-  it("times out after 30s when the job never resolves, even when the polled status never changes", async () => {
-    // Regression test for a bug where the button wedged in "Printing…"
-    // forever: the old terminal-state effect depended on `pollQuery.data`
-    // itself, and TanStack Query's structural sharing keeps `data`
-    // reference-stable across polls that return an identical payload -- so
-    // an unchanging "printing" status (this handler, deliberately) never
-    // re-triggered the effect that was supposed to catch a timeout. The
-    // fix drives the 30s cap from a real timer instead, armed independently
-    // of any query data.
-    server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-stuck" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () => HttpResponse.json(job({ id: "job-stuck", status: "printing" }))),
+  it('on done, shows a success line and relabels the button "Print again"', () => {
+    render(<PrintButton job={fakeJob({ phase: "done" })} labels={[def("A"), def("B")]} options={OPTIONS} isTray />);
+    expect(screen.getByRole("button", { name: "Print again" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Printed 2 labels.");
+  });
+
+  it("on failed, shows the job's error text and keeps the button clickable (tray stays intact for a retry)", () => {
+    render(<PrintButton job={fakeJob({ phase: "failed", errorText: "printer out of tape" })} labels={[def("A")]} options={OPTIONS} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("printer out of tape");
+    expect(screen.getByRole("button", { name: "Print 1 label" })).not.toBeDisabled();
+  });
+
+  it("shows cancelError inline (e.g. a 409) without hiding the job's own phase UI", () => {
+    render(
+      <PrintButton
+        job={fakeJob({ phase: "printing", canCancel: false, cancelError: "cannot cancel job in status 'printing'" })}
+        labels={[def("A")]}
+        options={OPTIONS}
+      />,
     );
-
-    vi.useFakeTimers();
-    try {
-      renderWithProviders(<PrintButton definition={DEFINITION} />);
-      fireEvent.click(screen.getByRole("button", { name: "Print" }));
-
-      // Advance in 1s steps (not one 31s jump) so ~30 real polls actually
-      // get served the identical "printing" payload -- a single big jump
-      // only advances render count enough to coincidentally trip a
-      // dead-branch check on the mutation's own late render, without
-      // genuinely exercising repeated polls against unchanging data.
-      for (let i = 0; i < 35; i++) {
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(1000);
-        });
-      }
-
-      expect(screen.getByRole("button")).toHaveTextContent("Print");
-      expect(screen.getByText("timed out waiting for print status")).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(screen.getByText("cannot cancel job in status 'printing'")).toBeInTheDocument();
   });
 });

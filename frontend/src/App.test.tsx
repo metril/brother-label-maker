@@ -12,7 +12,10 @@ describe("App", () => {
     // without throwing -- the Designer panel's own heading names the active
     // type ("Text", the first type registered by the backend).
     expect(await screen.findByRole("heading", { name: "Text" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Print" })).toBeInTheDocument();
+    // task 2.12: an empty tray's Print button reads "Print 1 label" (an
+    // explicit count, unambiguous against the tray's own "N labels (tray)"
+    // wording) rather than a bare "Print".
+    expect(screen.getByRole("button", { name: "Print 1 label" })).toBeInTheDocument();
 
     // Scoped to the printer status badge specifically, since "24mm" could
     // otherwise also match a TapeSelector button in the designer form.

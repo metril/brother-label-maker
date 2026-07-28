@@ -233,6 +233,18 @@ export function getPrintJob(jobId: string): Promise<PrintJob> {
   return request<PrintJob>(`/print/jobs/${jobId}`);
 }
 
+/** POST /api/print/jobs/{id}/cancel (task 2.9's CAS contract, task 2.12's
+ * UI): 200 with `{status: "canceled"}` only when the job was still queued
+ * at the moment the server processed this request; 409 (a readable message
+ * naming the job's real current status, e.g. "cannot cancel job in status
+ * 'printing'") once the worker has already dequeued it; 404 for an unknown
+ * id. The 409/404 message comes back through exactly the same ApiError/
+ * extractErrorDetail path as every other endpoint -- see hooks/
+ * usePrintJob.ts, which is the only caller. */
+export function postCancelPrintJob(jobId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/print/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
 /** POST /api/render/expand (task 2.11): the distinct values a Sequence
  * produces (and, with `sample`, those values substituted for `{seq}`/
  * `{csv.<col>}` in a template string) -- see hooks/useSequenceExpand.ts,

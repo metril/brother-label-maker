@@ -125,6 +125,52 @@ describe("firstTextFieldValue", () => {
     };
     expect(firstTextFieldValue(schema, { block_length_mm: 40 })).toBe("");
   });
+
+  // Task 2.12 fix: confirmed live before this recursion existed -- a
+  // patch_panel design captioned itself "Patch Panel — Inter" (the FONT
+  // FAMILY, an unrelated later plain-string field) because the array-of-
+  // OBJECT `blocks` field (whose own nested `lines` is where the actual
+  // text lives) was invisible to this function entirely, so the search
+  // walked straight past it to the next plain-string field it happened to
+  // find non-blank.
+  it("recurses into an array-of-OBJECT field's items, using each item's own schema (patch_panel's blocks/lines shape)", () => {
+    const blockSchema: JsonSchemaObject = {
+      type: "object",
+      properties: { lines: { type: "array", items: { type: "string" } } },
+    };
+    const schema: JsonSchemaObject = {
+      type: "object",
+      properties: {
+        block_length_mm: { type: "number" },
+        blocks: { type: "array", items: { $ref: "#/$defs/Block" } },
+        font_family: { type: "string" },
+      },
+      $defs: { Block: blockSchema },
+    };
+    expect(
+      firstTextFieldValue(schema, {
+        block_length_mm: 15,
+        blocks: [{ lines: [] }, { lines: ["PP-RACK-3"] }],
+        font_family: "Inter",
+      }),
+    ).toBe("PP-RACK-3");
+  });
+
+  it("array-of-object recursion still falls through to a later plain field when no item has any text", () => {
+    const blockSchema: JsonSchemaObject = {
+      type: "object",
+      properties: { lines: { type: "array", items: { type: "string" } } },
+    };
+    const schema: JsonSchemaObject = {
+      type: "object",
+      properties: {
+        blocks: { type: "array", items: { $ref: "#/$defs/Block" } },
+        font_family: { type: "string" },
+      },
+      $defs: { Block: blockSchema },
+    };
+    expect(firstTextFieldValue(schema, { blocks: [{ lines: [""] }], font_family: "Inter" })).toBe("Inter");
+  });
 });
 
 describe("collationPattern -- copies_adjacent vs sequence_repeated ordering", () => {

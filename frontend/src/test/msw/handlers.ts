@@ -246,6 +246,14 @@ export const serializeCsvHandler = http.post("/api/serialize/csv", () =>
   }),
 );
 
+/** task 2.12: POST /api/print/jobs/:jobId/cancel -- default handler assumes
+ * the job is still queued (200/{status:"canceled"}); individual tests
+ * override with server.use() for the 409 ("already printing")/404 (unknown
+ * id) cases per router_print.py's cancel_print_job. */
+export const cancelPrintJobHandler = http.post("/api/print/jobs/:jobId/cancel", () =>
+  HttpResponse.json({ status: "canceled" }),
+);
+
 export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ params }) =>
   HttpResponse.json({
     id: params.jobId,
@@ -280,6 +288,7 @@ export const defaultHandlers = [
   printEstimateHandler,
   printHandler,
   printJobDoneHandler,
+  cancelPrintJobHandler,
   expandHandler,
   serializeCsvHandler,
 ];

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { HighlightContext } from "../components/schema/HighlightContext";
 import { SchemaForm } from "../components/schema/SchemaForm";
 import { FeedDeck } from "../components/FeedDeck";
-import { JobTray } from "../components/JobTray";
+import { JobTray, type CurrentDesign } from "../components/JobTray";
 import { SequenceEditor } from "../components/SequenceEditor";
 import { TapeSelector } from "../components/TapeSelector";
 import { Pending } from "../components/ui/Pending";
@@ -13,10 +13,12 @@ import { useLabelTypes } from "../hooks/useLabelTypes";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
 import { useSequenceExpand } from "../hooks/useSequenceExpand";
 import { useTapes } from "../hooks/useTapes";
+import { describeCurrentDesign } from "../lib/tray";
 import { hasSequenceFieldError, sequenceTotalLabels } from "../lib/sequence";
 import { hasNumberOutOfRange } from "../schema/numberValidity";
 import { hasRenderableContent } from "../schema/renderable";
 import { buildDefinition, tapeMismatchWarning, useDesignerStore } from "../stores/designer";
+import { useTrayStore } from "../stores/tray";
 import type { LabelDefinition } from "../api/types";
 
 const HIGHLIGHT_MS = 2000;
@@ -37,6 +39,7 @@ export function Designer() {
   const setParams = useDesignerStore((s) => s.setParams);
   const serializationEnabled = useDesignerStore((s) => s.serializationEnabled);
   const sequence = useDesignerStore((s) => s.sequence);
+  const addTrayItem = useTrayStore((s) => s.addItem);
 
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -194,8 +197,34 @@ export function Designer() {
     );
   }
 
+  // task 2.12: the "current, unsaved design" half of what the Job tray can
+  // print (see components/JobTray.tsx's own CurrentDesign doc) -- built
+  // here since this page owns the schema/params/preview it's derived from.
+  const currentDesign: CurrentDesign = {
+    definition,
+    canSubmit: jobTrayCanSubmit,
+    isRenderable: canSubmit,
+    png: preview.png,
+    lengthMm: preview.lengthMm,
+    label: describeCurrentDesign(typeInfo.title, schema, params),
+    serializationEnabled,
+    serialization: activeSerialization,
+    totalLabels: sequenceTotal,
+    serializationHasVisibleError: sequenceExpand.error !== null,
+  };
+
+  function handleAddToTray() {
+    if (!currentDesign.canSubmit) return;
+    addTrayItem({
+      definition: structuredClone(currentDesign.definition),
+      png: currentDesign.png,
+      lengthMm: currentDesign.lengthMm,
+      label: currentDesign.label,
+    });
+  }
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6 pb-24 lg:pb-0">
       <section className={panel}>
         <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
           <h2 className={typeHeading}>{typeInfo.title}</h2>
@@ -210,8 +239,9 @@ export function Designer() {
         {/* The ONE place this warning shows -- see JobTray/Designer's own
             history for why a second copy next to Print was removed: the
             role="alert" here is announced immediately regardless, and the
-            Job panel sits right below this on every viewport (the mobile
-            reorder below puts it directly under the deck). */}
+            Job tray (task 2.12: a sticky sidebar at lg:, a fixed bottom
+            bar/sheet below that) is reachable from every viewport without
+            needing a second copy. */}
         {tapeWarning && (
           <div role="alert" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-300">
             {tapeWarning}
@@ -242,12 +272,13 @@ export function Designer() {
       </section>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        {/* Mobile: the Job tray (chain mode, estimate, Print) comes right
-            after the feed deck, before the parametric form -- so the
-            primary action is reachable without scrolling past a
-            potentially long form first. Desktop: back to the design doc's
-            own left-form/right-tray order via lg:order-*. */}
-        <section className={`${panel} order-2 min-w-0 flex-1 lg:order-1`}>
+        {/* JobTray (task 2.12) owns its OWN full responsive shell now --
+            a sticky sidebar here at lg: and above, and a `position: fixed`
+            bottom bar/sheet below that (out of normal document flow, so it
+            no longer needs the old mobile reorder trick to keep the form
+            reachable without scrolling past it -- see that component's own
+            docstring). */}
+        <section className={`${panel} min-w-0 flex-1`}>
           <h2 className={panelHeading}>Parameters</h2>
           <HighlightContext.Provider value={highlightId}>
             <SchemaForm
@@ -259,16 +290,7 @@ export function Designer() {
           </HighlightContext.Provider>
         </section>
 
-        <section className={`${panel} order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-80 lg:shrink-0`}>
-          <h2 className={panelHeading}>Job</h2>
-          <JobTray
-            definition={definition}
-            canSubmit={jobTrayCanSubmit}
-            isRenderable={canSubmit}
-            serialization={activeSerialization}
-            totalLabels={sequenceTotal}
-          />
-        </section>
+        <JobTray current={currentDesign} onAddToTray={handleAddToTray} />
       </div>
 
       {/* task 2.11: a third, full-width panel BELOW the parameters-form/

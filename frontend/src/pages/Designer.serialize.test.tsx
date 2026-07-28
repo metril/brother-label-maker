@@ -4,16 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Designer } from "./Designer";
 import { useDesignerStore } from "../stores/designer";
+import { useTrayStore } from "../stores/tray";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
 import { TINY_PNG_B64 } from "../test/msw/handlers";
 
-// useDesignerStore is a module-level singleton (zustand) -- reset after
-// each test, same convention as Designer.test.tsx.
+// useDesignerStore/useTrayStore are module-level singletons (zustand) --
+// reset after each test, same convention as Designer.test.tsx.
 const INITIAL_STORE_STATE = useDesignerStore.getState();
+const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 afterEach(() => {
   useDesignerStore.setState(INITIAL_STORE_STATE, true);
+  useTrayStore.setState(INITIAL_TRAY_STATE, true);
 });
 
 /** The fixture's "text" type defaults to a single blank line -- give it
@@ -39,7 +42,9 @@ describe("Designer + serialization -- Print button label and request body", () =
     renderWithProviders(<Designer />);
     await typeLineWithToken(user);
 
-    const printButton = await screen.findByRole("button", { name: "Print" });
+    // task 2.12: the empty-tray plain path now reads "Print 1 label" (an
+    // explicit count) rather than a bare "Print".
+    const printButton = await screen.findByRole("button", { name: "Print 1 label" });
     await waitFor(() => expect(printButton).not.toBeDisabled());
     await user.click(printButton);
 
@@ -90,11 +95,11 @@ describe("Designer + serialization -- over-cap blocks print", () => {
     await user.type(copies, "3");
 
     expect(await screen.findByText(/exceeds the 1000 maximum/, {}, { timeout: 3000 })).toBeInTheDocument();
-    // Still on the plain "Print" label (never resolved to a real N), and
-    // disabled -- serialization is on, so the plain-path label doesn't
-    // apply, but a total the server rejects must never leave Print
-    // clickable either.
-    const printButton = screen.getByRole("button", { name: "Print" });
+    // Still on the plain-count "Print 1 label" (never resolved to a real,
+    // serialized N), and disabled -- serialization is on, so the resolved-N
+    // label doesn't apply, but a total the server rejects must never leave
+    // Print clickable either.
+    const printButton = screen.getByRole("button", { name: "Print 1 label" });
     expect(printButton).toBeDisabled();
   });
 });

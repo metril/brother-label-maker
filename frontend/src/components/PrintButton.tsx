@@ -1,201 +1,157 @@
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, getPrintJob, postPrint } from "../api/client";
-import { useJobEvent } from "../hooks/useJobEvents";
+import type { UsePrintJobResult } from "../hooks/usePrintJob";
+import { errorText } from "./ui/styles";
 import type { LabelDefinition, PrintOptions, Sequence } from "../api/types";
 
-const POLL_INTERVAL_MS = 1000;
-const POLL_TIMEOUT_MS = 30_000;
-const DONE_FLASH_MS = 2000;
-
-const DEFAULT_OPTIONS: PrintOptions = { chain_mode: "cut_each", margin_mm: 2.0, auto_cut: true };
-
-type Phase = "idle" | "printing" | "done" | "failed";
-
 interface PrintButtonProps {
-  definition: LabelDefinition;
-  disabled?: boolean;
-  /** Job Tray's chosen chain mode/margin/auto-cut -- defaults to the
-   * classic single-label cut-each behavior when the caller doesn't (yet)
-   * offer a choice. */
-  options?: PrintOptions;
-  /** task 2.11: the confirmed serialization spec to print -- null for the
-   * plain (non-serialized) path, which must send NO `serialization` key
-   * at all in the request body (see mutationFn below; JSON.stringify
-   * drops an `undefined`-valued key, so `serialization ?? undefined`
-   * achieves exactly that). */
+  /** Task 2.12: the job's OWN lifecycle state, from a SINGLE `usePrintJob()`
+   * call made once in JobTray.tsx -- not owned here, so the desktop panel
+   * and the mobile compact bar (both of which render a PrintButton) always
+   * agree about what's currently in flight instead of each tracking its
+   * own, independently-polled job. */
+  job: UsePrintJobResult;
+  /** The exact `labels` array POST /api/print's body will carry -- either
+   * the tray's own item definitions, or a one-element array wrapping the
+   * current (unsaved) design when the tray is empty (see JobTray.tsx's
+   * `bodyLabels`). */
+  labels: LabelDefinition[];
+  options: PrintOptions;
+  /** task 2.11: the confirmed serialization spec -- null on every tray path
+   * (mutually exclusive with a non-empty tray; see JobTray.tsx) and on the
+   * plain empty-tray path with serialization off. */
   serialization?: Sequence | null;
-  /** The confirmed total label count for `serialization` -- drives the
-   * idle label ("Print N labels" vs plain "Print"); null while off/
-   * unresolved (the button stays disabled in that case regardless, via
-   * `disabled`, so a plain "Print" fallback is never actually clickable). */
+  /** The confirmed total label count for `serialization`; null otherwise. */
   totalLabels?: number | null;
+  /** True when `labels` came from a non-empty tray (as opposed to the
+   * empty-tray "just print the current design" path) -- purely a label-
+   * wording flag ("(tray)" suffix, brief's own "Print 4 labels (tray)"
+   * example): `labels.length` alone can't distinguish a one-ITEM tray from
+   * the plain single-design path, both of which send a one-element array. */
+  isTray?: boolean;
+  disabled?: boolean;
+  /** task 2.12 carry-forward: serialization + a non-empty tray are
+   * mutually exclusive server-side (POST /api/print requires exactly one
+   * template label when `serialization` is set) -- when set, Print is
+   * blocked and this message shown instead of ever attempting the request. */
+  blockedMessage?: string | null;
 }
 
-/** POST /api/print, then track the job to a terminal state two ways at
- * once: the shared WS event stream (useJobEvent, live push) and a 1s poll
- * of GET /api/print/jobs/{id} as a fallback -- whichever source reports
- * "done"/"failed" first wins. A REAL timer (not query data) enforces the
- * 30s cap -- see its effect below for why. */
+function idleLabel(labels: LabelDefinition[], serialization: Sequence | null, totalLabels: number | null, isTray: boolean): string {
+  if (serialization && totalLabels != null) {
+    return `Print ${totalLabels} label${totalLabels === 1 ? "" : "s"}`;
+  }
+  const n = labels.length;
+  return `Print ${n} label${n === 1 ? "" : "s"}${isTray ? " (tray)" : ""}`;
+}
+
+function ProgressBar({ sent, total }: { sent: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, Math.round((sent / total) * 100)) : 0;
+  return (
+    <div
+      role="progressbar"
+      aria-label="Print progress"
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-deck-800"
+    >
+      <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** The Print action itself: submits `labels`/`options`/`serialization` via
+ * `job.submit`, then renders `job`'s own phase as a progress bar (driven by
+ * `job.progress`'s WS `job.progress` bytes) with a Cancel button enabled
+ * only while `job.canCancel` (the CAS contract's "still queued" window --
+ * see hooks/usePrintJob.ts), a success line + "Print again" on done, and
+ * the job's error (kept, tray intact) on failure. */
 export function PrintButton({
-  definition,
-  disabled,
-  options = DEFAULT_OPTIONS,
+  job,
+  labels,
+  options,
   serialization = null,
   totalLabels = null,
+  isTray = false,
+  disabled,
+  blockedMessage = null,
 }: PrintButtonProps) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [errorText, setErrorText] = useState<string | null>(null);
-  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const wsEvent = useJobEvent(jobId);
-  const wsStatus = wsEvent?.event;
-  const wsError = wsEvent?.error;
-
-  const mutation = useMutation({
-    mutationFn: (def: LabelDefinition) =>
-      postPrint({
-        labels: [def],
-        options,
-        serialization: serialization ?? undefined,
-      }),
-    onSuccess: (data) => {
-      setJobId(data.job_id);
-      setPhase("printing");
-    },
-    onError: (err) => {
-      setPhase("failed");
-      setErrorText(err instanceof ApiError ? err.message : "print request failed");
-    },
-  });
-
-  const pollEnabled =
-    phase === "printing" && jobId !== null && wsStatus !== "job.done" && wsStatus !== "job.failed";
-
-  const pollQuery = useQuery({
-    queryKey: ["print-job-poll", jobId],
-    queryFn: () => getPrintJob(jobId as string),
-    enabled: pollEnabled,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "done" || status === "failed" || status === "canceled" ? false : POLL_INTERVAL_MS;
-    },
-  });
-
-  // Read out only the PRIMITIVE fields the derivation below cares about
-  // (not `pollQuery.data` itself) -- TanStack Query's structural sharing
-  // keeps `data` reference-STABLE across polls that return an equal
-  // payload, so depending on the object would mean this effect silently
-  // stops re-running the moment the server starts replying with the same
-  // status every time (e.g. stuck "printing"). That was exactly the bug
-  // that made the old 30s-timeout branch dead code -- see the timer effect
-  // below for the actual fix to that (a real timer, independent of any
-  // query/WS data reference at all).
-  const polledStatus = pollQuery.data?.status;
-  const polledError = pollQuery.data?.error;
-  const pollErrorMessage = pollQuery.error
-    ? pollQuery.error instanceof ApiError
-      ? pollQuery.error.message
-      : "failed to check print status"
-    : null;
-
-  useEffect(() => {
-    if (phase !== "printing" || !jobId) return;
-
-    if (wsStatus === "job.done") {
-      setPhase("done");
-    } else if (wsStatus === "job.failed") {
-      setPhase("failed");
-      setErrorText(wsError ?? "print job failed");
-    } else if (polledStatus === "done") {
-      setPhase("done");
-    } else if (polledStatus === "failed") {
-      setPhase("failed");
-      setErrorText(polledError ?? "print job failed");
-    } else if (polledStatus === "canceled") {
-      setPhase("failed");
-      setErrorText("print job was canceled");
-    } else if (pollErrorMessage) {
-      setPhase("failed");
-      setErrorText(pollErrorMessage);
-    }
-  }, [phase, jobId, wsStatus, wsError, polledStatus, polledError, pollErrorMessage]);
-
-  // Hard 30s cap, driven by a REAL timer armed the moment we enter
-  // "printing" -- deliberately NOT derived from query/WS data, so it fires
-  // even when nothing ever changes at all (job wedged "queued"/"printing"
-  // forever, or both the WS and poll paths silently going nowhere). Self-
-  // cancels via the effect cleanup once `phase` leaves "printing" for any
-  // other reason (the derivation effect above already resolved it first).
-  useEffect(() => {
-    if (phase !== "printing") return;
-    const timer = setTimeout(() => {
-      setPhase("failed");
-      setErrorText("timed out waiting for print status");
-    }, POLL_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [phase]);
-
-  // Flash "done" briefly, then return to idle so the button is usable again.
-  useEffect(() => {
-    if (phase !== "done") return;
-    flashTimerRef.current = setTimeout(() => {
-      setPhase("idle");
-      setJobId(null);
-    }, DONE_FLASH_MS);
-    return () => {
-      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
-    };
-  }, [phase]);
-
-  const busy = phase === "printing" || mutation.isPending;
+  const active = job.phase === "queued" || job.phase === "printing";
+  const busy = job.isSubmitting || active;
 
   function handleClick() {
-    if (busy || disabled) return;
-    // Clear the previous job's id/error BEFORE mutating -- otherwise a
-    // re-click after a failure briefly re-reads the old job's terminal WS
-    // event / poll data (still keyed on the old jobId) and flashes its
-    // error again before the new job id ever arrives.
-    setJobId(null);
-    setErrorText(null);
-    setPhase("printing");
-    mutation.mutate(definition);
+    if (busy || disabled || blockedMessage) return;
+    job.submit({ labels, options, serialization: serialization ?? undefined });
   }
 
-  // "Print 8 labels" not "Print" -- the design doc's own copy-voice
-  // example -- once serialization is on AND its total label count is
-  // confirmed (see JobTray's own doc on `totalLabels`); plain "Print"
-  // otherwise (off, or the serialization hasn't resolved yet -- `disabled`
-  // already covers that case, so this is never a live, clickable "Print"
-  // that quietly means something different from what it says). Singular
-  // "1 label" for the (legal, if unusual -- a one-value run) N=1 case.
-  let label =
-    serialization && totalLabels != null ? `Print ${totalLabels} label${totalLabels === 1 ? "" : "s"}` : "Print";
-  if (mutation.isPending) label = "Sending…";
-  else if (phase === "printing") label = "Printing…";
-  else if (phase === "done") label = "Printed";
+  let label = idleLabel(labels, serialization, totalLabels, isTray);
+  if (job.isSubmitting) label = "Sending…";
+  else if (job.phase === "queued") label = "Queued…";
+  else if (job.phase === "printing") label = "Printing…";
+  else if (job.phase === "done") label = "Print again";
 
   const buttonClass =
-    phase === "done"
+    job.phase === "done"
       ? "border-sage-400 bg-sage-400/15 text-sage-400"
-      : phase === "failed"
+      : job.phase === "failed"
         ? "border-rust-500 bg-rust-500/15 text-rust-500"
         : "border-amber-500 bg-amber-500 text-deck-950 hover:bg-amber-300";
 
+  const printedCount = serialization && totalLabels != null ? totalLabels : labels.length;
+
   return (
-    <div className="flex flex-col items-start gap-2">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={busy || disabled}
-        className={`rounded-md border px-5 py-2 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
-      >
-        {label}
-      </button>
-      {phase === "failed" && errorText && (
-        <p role="alert" className="text-[12px] text-rust-500">
-          {errorText}
+    <div className="flex w-full flex-col items-start gap-2">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleClick}
+          disabled={busy || disabled || blockedMessage !== null}
+          className={`rounded-md border px-5 py-2 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass}`}
+        >
+          {label}
+        </button>
+        {active && (
+          <button
+            type="button"
+            onClick={job.cancel}
+            disabled={!job.canCancel || job.isCanceling}
+            className="rounded-md border border-deck-600 bg-deck-800 px-3 py-2 text-[13px] font-medium text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {job.isCanceling ? "Canceling…" : "Cancel"}
+          </button>
+        )}
+      </div>
+
+      {blockedMessage && (
+        <p role="alert" className={errorText}>
+          {blockedMessage}
+        </p>
+      )}
+
+      {active && (
+        <div className="w-full">
+          <p className="font-mono text-[11px] text-deck-400">
+            {job.phase === "queued" ? "Queued" : "Printing"}
+            {job.progress ? ` — ${Math.min(100, Math.round((job.progress.sent / job.progress.total) * 100))}%` : "…"}
+          </p>
+          <ProgressBar sent={job.progress?.sent ?? 0} total={job.progress?.total ?? 0} />
+        </div>
+      )}
+
+      {job.phase === "done" && (
+        <p role="status" className="text-[12px] text-sage-400">
+          Printed {printedCount} label{printedCount === 1 ? "" : "s"}.
+        </p>
+      )}
+
+      {job.phase === "failed" && job.errorText && (
+        <p role="alert" className={errorText}>
+          {job.errorText}
+        </p>
+      )}
+
+      {job.cancelError && (
+        <p role="alert" className={errorText}>
+          {job.cancelError}
         </p>
       )}
     </div>

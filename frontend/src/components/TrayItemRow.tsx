@@ -1,0 +1,62 @@
+import { indexBadge, iconButtonClass } from "./ui/styles";
+import type { TrayItem } from "../stores/tray";
+
+interface TrayItemRowProps {
+  item: TrayItem;
+  index: number;
+  isFirst: boolean;
+  isLast: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+}
+
+/** One queued label in the Job tray: a small thumbnail (the exact preview
+ * PNG captured when it was added to the tray -- never re-rendered), its
+ * short "type + first text line" caption, length, and the reorder/
+ * duplicate/remove controls (up/down buttons per WCAG 2.5.7, same
+ * convention as SchemaField's own repeatable rows -- see
+ * components/schema/ArrayOfObjects.tsx).
+ *
+ * Two rows, not one: the sidebar is only `lg:w-80` (320px, minus padding),
+ * and a badge + thumbnail + label + length + four icon buttons all on one
+ * line left almost no room for the label -- it truncated down to a
+ * character or two and wrapped badly (confirmed live). Splitting the four
+ * controls onto their own row underneath gives the label column real width
+ * to breathe. */
+export function TrayItemRow({ item, index, isFirst, isLast, onMoveUp, onMoveDown, onDuplicate, onRemove }: TrayItemRowProps) {
+  return (
+    <li className="flex flex-col gap-2 rounded-lg border border-deck-700 bg-deck-800/40 p-2">
+      <div className="flex items-center gap-2">
+        <span className={indexBadge}>{index + 1}</span>
+        <div
+          className="flex h-7 w-10 shrink-0 items-center justify-center overflow-hidden rounded-sm"
+          style={{ backgroundColor: "var(--color-tape)" }}
+        >
+          {item.png ? (
+            <img src={item.png} alt="" style={{ imageRendering: "pixelated", maxHeight: "100%", maxWidth: "100%" }} />
+          ) : null}
+        </div>
+        <p className="min-w-0 flex-1 truncate text-[13px] text-deck-200">{item.label}</p>
+        <span className="shrink-0 font-mono text-[11px] text-deck-400">
+          {item.lengthMm !== null ? `${item.lengthMm.toFixed(1)} mm` : "···"}
+        </span>
+      </div>
+      <div className="flex justify-end gap-1">
+        <button type="button" aria-label={`Move item ${index + 1} up`} disabled={isFirst} onClick={onMoveUp} className={iconButtonClass}>
+          ↑
+        </button>
+        <button type="button" aria-label={`Move item ${index + 1} down`} disabled={isLast} onClick={onMoveDown} className={iconButtonClass}>
+          ↓
+        </button>
+        <button type="button" aria-label={`Duplicate item ${index + 1}`} onClick={onDuplicate} className={iconButtonClass}>
+          ⧉
+        </button>
+        <button type="button" aria-label={`Remove item ${index + 1}`} onClick={onRemove} className={iconButtonClass}>
+          ×
+        </button>
+      </div>
+    </li>
+  );
+}

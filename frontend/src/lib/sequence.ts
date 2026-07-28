@@ -157,16 +157,23 @@ export function csvColumns(rows: Record<string, string>[]): string[] {
 
 /** The FIRST field in `schema` (its own declared order) that carries real,
  * non-blank text content right now -- string fields read directly, array-
- * of-string fields read their first non-blank entry. Feeds POST
- * /api/render/expand's `sample` (see useSequenceExpand.ts) so the live
- * value chips can show real token substitution ("PORT-{seq}" ->
- * "PORT-01") for whichever field the user is actually likely to
- * serialize -- deliberately NOT necessarily the schema's literal first
- * property (several types lead with a number field, e.g. patch_panel's
- * block_length_mm) and NOT a currently-blank field (which would just demo
- * as empty). Returns "" when nothing qualifies (e.g. patch_panel before
- * any block has text) -- callers fall back to showing raw sequence values
- * instead of token-substituted samples in that case. */
+ * of-string fields read their first non-blank entry, array-of-OBJECT
+ * fields (patch_panel's `blocks`, breaker_box's `breakers`, ...) recurse
+ * into each item in turn using this SAME function against the item's own
+ * schema+params (so e.g. a block's `lines` is found exactly the way a
+ * top-level `lines` field would be). Feeds POST /api/render/expand's
+ * `sample` (see useSequenceExpand.ts) so the live value chips can show real
+ * token substitution ("PORT-{seq}" -> "PORT-01") for whichever field the
+ * user is actually likely to serialize, and lib/tray.ts's
+ * describeCurrentDesign (task 2.12's tray-item captions) -- deliberately
+ * NOT necessarily the schema's literal first property (several types lead
+ * with a number field, e.g. patch_panel's block_length_mm) and NOT a
+ * currently-blank field (which would just demo as empty, or -- for a tray
+ * caption -- silently skip straight to an unrelated later field, e.g.
+ * font_family, and caption a patch panel "Patch Panel — Inter"; confirmed
+ * live before this recursion was added). Returns "" when nothing qualifies
+ * (e.g. patch_panel before any block has text) -- callers fall back to
+ * showing raw sequence values (or just the type name) in that case. */
 export function firstTextFieldValue(schema: JsonSchemaObject, params: Record<string, unknown>): string {
   for (const [key, propSchema] of Object.entries(schema.properties ?? {})) {
     const { inner } = splitNullable(propSchema, schema);
@@ -180,6 +187,16 @@ export function firstTextFieldValue(schema: JsonSchemaObject, params: Record<str
       if (Array.isArray(value)) {
         const first = value.find((v) => typeof v === "string" && v.trim() !== "");
         if (typeof first === "string") return first;
+      }
+    } else if (kind === "array-object") {
+      const value = params[key];
+      if (Array.isArray(value)) {
+        const itemSchema = resolveRef(resolved.items ?? {}, schema);
+        for (const item of value) {
+          if (item === null || typeof item !== "object") continue;
+          const found = firstTextFieldValue(itemSchema, item as Record<string, unknown>);
+          if (found !== "") return found;
+        }
       }
     }
   }
