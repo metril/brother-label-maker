@@ -59,9 +59,13 @@ class HomeBoxUnavailableError(HomeBoxError):
 
 
 class _ApiModel(BaseModel):
-    """Field names are snake_case locally, aliased to HomeBox's camelCase
-    wire names; unknown wire fields are ignored (pydantic's default), so a
-    HomeBox point release adding fields can't break parsing."""
+    """Field names are snake_case locally; HomeBox's camelCase wire names
+    are `validation_alias`es (NOT plain `alias`), so parsing accepts the
+    wire form but serialization -- including FastAPI response models and
+    their OpenAPI schemas in the proxy routes -- emits snake_case by
+    construction, matching every other route in this app. Unknown wire
+    fields are ignored (pydantic's default), so a HomeBox point release
+    adding fields can't break parsing."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -70,7 +74,7 @@ class EntityTypeSummary(_ApiModel):
     id: str = ""
     name: str = ""
     # The item-vs-location discriminator in the unified entities API.
-    is_location: bool = Field(False, alias="isLocation")
+    is_location: bool = Field(False, validation_alias="isLocation")
 
 
 class TagSummary(_ApiModel):
@@ -88,22 +92,22 @@ class EntitySummary(_ApiModel):
     id: str
     name: str
     description: str = ""
-    asset_id: str = Field("", alias="assetId")
+    asset_id: str = Field("", validation_alias="assetId")
     archived: bool = False
     quantity: float | None = None
-    entity_type: EntityTypeSummary | None = Field(None, alias="entityType")
+    entity_type: EntityTypeSummary | None = Field(None, validation_alias="entityType")
     parent: EntitySummary | None = None
     tags: list[TagSummary] = []
-    thumbnail_id: str | None = Field(None, alias="thumbnailId")
-    image_id: str | None = Field(None, alias="imageId")
+    thumbnail_id: str | None = Field(None, validation_alias="thumbnailId")
+    image_id: str | None = Field(None, validation_alias="imageId")
 
 
 class Entity(EntitySummary):
     """repo.EntityOut -- the full single-entity shape (label-relevant
     subset; purchase/sold/warranty fields deliberately unmodeled)."""
 
-    serial_number: str = Field("", alias="serialNumber")
-    model_number: str = Field("", alias="modelNumber")
+    serial_number: str = Field("", validation_alias="serialNumber")
+    model_number: str = Field("", validation_alias="modelNumber")
     manufacturer: str = ""
     notes: str = ""
     children: list[EntitySummary] = []
@@ -116,7 +120,7 @@ class EntityPage(_ApiModel):
 
     items: list[EntitySummary] = []
     page: int = 1
-    page_size: int = Field(0, alias="pageSize")
+    page_size: int = Field(0, validation_alias="pageSize")
     total: int = 0
 
 

@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 
 from labelmaker.config import AppConfig
 from labelmaker.db.database import Database
+from labelmaker.homebox import HomeBoxClient
 from labelmaker.jobs.events import EventBus
 
 
@@ -32,10 +33,29 @@ def get_queue(request: Request) -> asyncio.Queue[str]:
     return request.app.state.queue
 
 
+def get_homebox(request: Request) -> HomeBoxClient:
+    """503 (not 404) when unconfigured: the route exists, the deployment
+    just hasn't been given HOMEBOX_URL/HOMEBOX_API_KEY -- the message says
+    exactly that so the fix is obvious from the error alone. Routes that
+    must answer 200 even when unconfigured (GET /api/homebox/status) skip
+    this dependency and check the config themselves."""
+    client = request.app.state.homebox
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "HomeBox integration is not configured -- set HOMEBOX_URL and "
+                "HOMEBOX_API_KEY (an hb_-prefixed API key) in the environment"
+            ),
+        )
+    return client
+
+
 AppConfigDep = Annotated[AppConfig, Depends(get_app_config)]
 DbDep = Annotated[Database, Depends(get_db)]
 BusDep = Annotated[EventBus, Depends(get_bus)]
 QueueDep = Annotated["asyncio.Queue[str]", Depends(get_queue)]
+HomeBoxDep = Annotated[HomeBoxClient, Depends(get_homebox)]
 
 
 def error_message(exc: Exception) -> str:

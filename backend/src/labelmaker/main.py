@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from labelmaker.api import (
     router_gallery,
     router_history,
+    router_homebox,
     router_images,
     router_labels,
     router_presets,
@@ -26,6 +27,7 @@ from labelmaker.api import (
 )
 from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
+from labelmaker.homebox import HomeBoxClient
 from labelmaker.jobs.events import EventBus
 from labelmaker.jobs.worker import run_worker
 
@@ -63,6 +65,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.state.db = db
         app.state.bus = bus
         app.state.queue = queue
+        # None when unconfigured -- deps.get_homebox turns that into a 503
+        # with a setup hint instead of a crash at startup.
+        app.state.homebox = (
+            HomeBoxClient(cfg.homebox_url, cfg.homebox_api_key)
+            if cfg.homebox_url and cfg.homebox_api_key
+            else None
+        )
 
         worker_task = asyncio.create_task(run_worker(app.state))
         try:
@@ -71,6 +80,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             worker_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker_task
+            if app.state.homebox is not None:
+                await app.state.homebox.close()
             await db.close()
 
     app = FastAPI(lifespan=lifespan)
@@ -94,6 +105,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(router_printer.router, prefix="/api")
     app.include_router(router_presets.router, prefix="/api")
     app.include_router(router_history.router, prefix="/api")
+    app.include_router(router_homebox.router, prefix="/api")
     app.include_router(ws.router, prefix="/api")
 
     # Registered last (after every /api/* route above) so it only ever

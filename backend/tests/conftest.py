@@ -60,11 +60,16 @@ def _isolated_render_registry():
 # values for these three -- if the ambient environment disagreed with that
 # assumption, those tests would fail for a reason with nothing to do with
 # the code under test. Pinning them here, explicitly, on every app_config
-# the suite builds makes the whole suite hermetic against that.
+# the suite builds makes the whole suite hermetic against that. The same
+# applies to homebox_url/homebox_api_key: an ambient HOMEBOX_URL/
+# HOMEBOX_API_KEY in a dev shell or CI runner must not silently enable the
+# HomeBox integration (and its outbound calls) in tests unrelated to it.
 _DEFAULT_APP_CONFIG_KWARGS = {
     "printer_init_strategy": "classic",
     "printer_bit_order": "msb_first",
     "printer_flip_pins": False,
+    "homebox_url": None,
+    "homebox_api_key": None,
 }
 
 

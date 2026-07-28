@@ -33,6 +33,13 @@ class AppConfig(BaseSettings):
     # default stays False (library-neutral; driver goldens pin it) -- this
     # AppConfig default is the policy layer every real print goes through.
     printer_flip_pins: bool = True
+    # HomeBox integration (Phase 3) -- enabled iff BOTH are set. The URL is
+    # the instance root (https://homebox.example.com); the key is an
+    # hb_-prefixed static API key (HomeBox v0.26+ user settings). The key
+    # stays server-side: the browser only ever talks to this app's
+    # /api/homebox/* proxy routes.
+    homebox_url: str | None = None
+    homebox_api_key: str | None = None
     # M3: pydantic-settings parses list-typed fields as JSON, not a bare
     # comma-separated string -- the env var value must be a JSON array,
     # quoted so the shell/compose file passes the brackets/quotes through
