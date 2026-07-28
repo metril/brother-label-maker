@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { buildFieldDefault } from "../../schema/defaults";
 import { humanizeEnumValue, humanizeFieldName } from "../../schema/humanize";
 import { classifyField, resolveRef, splitNullable, type JsonSchemaObject } from "../../schema/jsonSchema";
@@ -9,6 +10,7 @@ import { errorText, fieldLabelText, helpText } from "../ui/styles";
 import { ArrayOfNumbers } from "./ArrayOfNumbers";
 import { ArrayOfObjects } from "./ArrayOfObjects";
 import { ArrayOfStrings } from "./ArrayOfStrings";
+import { TokenInsertButtons } from "./TokenInsertButtons";
 
 export interface SchemaFieldProps {
   fieldKey: string;
@@ -149,6 +151,12 @@ interface FieldControlProps {
 function FieldControl({ fieldKey, schema, root, value, onChange, path, id, label, help }: FieldControlProps) {
   const resolved = resolveRef(schema, root);
   const kind = classifyField(resolved);
+  // Declared unconditionally (Rules of Hooks) even though only the
+  // "string" case below uses it -- a field's shape never changes across
+  // this component instance's own re-renders (it's derived from the
+  // schema, not runtime state), but hooks still can't live inside the
+  // switch itself.
+  const stringInputRef = useRef<HTMLInputElement>(null);
 
   switch (kind) {
     case "string": {
@@ -158,7 +166,8 @@ function FieldControl({ fieldKey, schema, root, value, onChange, path, id, label
           <label htmlFor={id} className={`${fieldLabelText} mb-1 block`}>
             {label}
           </label>
-          <TextInput id={id} value={strValue} maxLength={resolved.maxLength} onChange={onChange} />
+          <TextInput ref={stringInputRef} id={id} value={strValue} maxLength={resolved.maxLength} onChange={onChange} />
+          <TokenInsertButtons inputRef={stringInputRef} value={strValue} onChange={onChange} fieldLabel={label} />
           {help && <p className={helpText}>{help}</p>}
         </div>
       );

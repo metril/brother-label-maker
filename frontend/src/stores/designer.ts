@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { LabelDefinition, Tape, TapeFamily } from "../api/types";
+import type { LabelDefinition, Sequence, Tape, TapeFamily } from "../api/types";
+import { DEFAULT_SEQUENCE } from "../lib/sequence";
 import { buildDefaultParams } from "../schema/defaults";
 import type { JsonSchemaObject } from "../schema/jsonSchema";
 
@@ -14,6 +15,19 @@ interface DesignerState {
   tape: Tape;
   selectedType: string | null;
   paramsByType: Record<string, Record<string, unknown>>;
+  /** task 2.11: off by default -- a single toggle in the Serialize panel
+   * (components/SequenceEditor.tsx) turns a plain single-label print into
+   * a serialized run. Store-level (not component-local state) because it
+   * gates behavior across several siblings at once: the feed deck's
+   * preview-index stepper, the Job Tray/Print button's request body and
+   * "Print N labels" label, and the small per-field token-insert
+   * affordances SchemaField/ArrayOfStrings render next to text inputs. */
+  serializationEnabled: boolean;
+  /** The current (possibly still-invalid-while-editing) Sequence spec --
+   * see lib/sequence.ts's validateSequence for the client-side bounds
+   * checks, and hooks/useSequenceExpand.ts for the debounced POST
+   * /api/render/expand call that confirms it's actually printable. */
+  sequence: Sequence;
 
   setTapeWidthMm: (widthMm: number) => void;
   setTapeFamily: (family: TapeFamily) => void;
@@ -23,12 +37,16 @@ interface DesignerState {
    * keeps whatever was already there. */
   selectType: (type: string, schema: JsonSchemaObject) => void;
   setParams: (type: string, params: Record<string, unknown>) => void;
+  setSerializationEnabled: (enabled: boolean) => void;
+  setSequence: (sequence: Sequence) => void;
 }
 
 export const useDesignerStore = create<DesignerState>((set) => ({
   tape: { width_mm: 24, family: "tze" },
   selectedType: null,
   paramsByType: {},
+  serializationEnabled: false,
+  sequence: DEFAULT_SEQUENCE,
 
   setTapeWidthMm: (widthMm) => set((state) => ({ tape: { ...state.tape, width_mm: widthMm } })),
 
@@ -45,6 +63,10 @@ export const useDesignerStore = create<DesignerState>((set) => ({
 
   setParams: (type, params) =>
     set((state) => ({ paramsByType: { ...state.paramsByType, [type]: params } })),
+
+  setSerializationEnabled: (enabled) => set({ serializationEnabled: enabled }),
+
+  setSequence: (sequence) => set({ sequence }),
 }));
 
 export function buildDefinition(type: string, tape: Tape, params: Record<string, unknown>): LabelDefinition {

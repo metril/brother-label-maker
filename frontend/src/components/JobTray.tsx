@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChainMode, LabelDefinition, PrintOptions } from "../api/types";
+import type { ChainMode, LabelDefinition, PrintOptions, Sequence } from "../api/types";
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { PrintButton } from "./PrintButton";
 import { Checkbox } from "./ui/inputs";
@@ -23,18 +23,28 @@ interface JobTrayProps {
    * perpetual "···", until this is true. */
   canSubmit: boolean;
   isRenderable: (definition: LabelDefinition) => boolean;
+  /** task 2.11: the confirmed serialization spec to estimate/print against
+   * -- null for the plain (non-serialized) path, which stays byte-for-byte
+   * unchanged (no `serialization` key in the request body at all -- see
+   * PrintButton's own mutationFn). "Confirmed" means POST /api/render/
+   * expand already succeeded for it (hooks/useSequenceExpand.ts) -- this
+   * component doesn't re-validate it, only forwards it. */
+  serialization?: Sequence | null;
+  /** The confirmed total label count for `serialization` -- drives the
+   * Print button's "Print N labels" label; null while off/unresolved. */
+  totalLabels?: number | null;
 }
 
 /** The design doc's "JOB TRAY (sticky, estimate, chain mode, print)" --
  * chain mode/auto-cut choice feeds both the live tape-usage estimate
  * (POST /api/print/estimate) and the actual print request, so the number
  * shown is always the number that would actually get used. */
-export function JobTray({ definition, canSubmit, isRenderable }: JobTrayProps) {
+export function JobTray({ definition, canSubmit, isRenderable, serialization = null, totalLabels = null }: JobTrayProps) {
   const [chainMode, setChainMode] = useState<ChainMode>("cut_each");
   const [autoCut, setAutoCut] = useState(true);
   const options: PrintOptions = { chain_mode: chainMode, margin_mm: 2.0, auto_cut: autoCut };
 
-  const { estimate, error } = usePrintEstimate(definition, options, isRenderable);
+  const { estimate, error } = usePrintEstimate(definition, options, isRenderable, serialization);
 
   return (
     <div className="flex flex-col gap-4">
@@ -84,7 +94,13 @@ export function JobTray({ definition, canSubmit, isRenderable }: JobTrayProps) {
         )}
       </div>
 
-      <PrintButton definition={definition} disabled={!canSubmit} options={options} />
+      <PrintButton
+        definition={definition}
+        disabled={!canSubmit}
+        options={options}
+        serialization={serialization}
+        totalLabels={totalLabels}
+      />
     </div>
   );
 }

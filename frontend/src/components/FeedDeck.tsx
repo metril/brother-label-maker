@@ -1,6 +1,19 @@
 import type { RenderWarning, Tape, TapeInfo } from "../api/types";
 import { computeFeedDeckGeometry, formatMm, PX_PER_MM } from "../lib/feedDeckGeometry";
 import { Pending } from "./ui/Pending";
+import { iconButtonClass } from "./ui/styles";
+
+export interface SequenceStepperProps {
+  /** 0-based, into the FULL expanded run (copies_per_value/collation
+   * already applied -- see backend/render/serialize.py's ordered_values). */
+  index: number;
+  total: number;
+  /** The sequence value that produced the CURRENTLY rendered preview at
+   * `index` -- from POST /api/render/preview's own `sequence_value` (see
+   * api/types.ts's PreviewResponse doc), not re-derived client-side. */
+  sequenceValue: string | null;
+  onIndexChange: (index: number) => void;
+}
 
 interface FeedDeckProps {
   tape: Tape;
@@ -37,6 +50,12 @@ interface FeedDeckProps {
   /** Warning chips with an `object_id` (e.g. "block-3") call this to
    * focus/highlight the matching form row -- see Designer.tsx. */
   onFocusObject?: (objectId: string) => void;
+  /** task 2.11: "when serialization is on, the feed deck gains a compact
+   * stepper" (brief) -- null/omitted for the plain (non-serialized) path,
+   * which renders exactly as before. Owned by pages/Designer.tsx (the
+   * index itself is UI-only state that drives usePreview's own `index`
+   * argument), not this component -- FeedDeck stays presentational. */
+  sequenceStepper?: SequenceStepperProps | null;
 }
 
 /** The feed deck: the design system's signature element (see the design
@@ -59,6 +78,7 @@ export function FeedDeck({
   isFetching,
   error,
   onFocusObject,
+  sequenceStepper,
 }: FeedDeckProps) {
   const warningList = warnings.filter((w) => w.severity === "warning");
   const infoList = warnings.filter((w) => w.severity === "info");
@@ -72,6 +92,36 @@ export function FeedDeck({
 
   return (
     <div className="flex flex-col gap-3">
+      {sequenceStepper && (
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[13px] text-deck-200">
+          <button
+            type="button"
+            aria-label="Previous label"
+            disabled={sequenceStepper.index <= 0}
+            onClick={() => sequenceStepper.onIndexChange(Math.max(0, sequenceStepper.index - 1))}
+            className={iconButtonClass}
+          >
+            ◀
+          </button>
+          <span>
+            {sequenceStepper.index + 1} / {sequenceStepper.total}
+          </span>
+          <button
+            type="button"
+            aria-label="Next label"
+            disabled={sequenceStepper.index >= sequenceStepper.total - 1}
+            onClick={() => sequenceStepper.onIndexChange(Math.min(sequenceStepper.total - 1, sequenceStepper.index + 1))}
+            className={iconButtonClass}
+          >
+            ▶
+          </button>
+          {sequenceStepper.sequenceValue && (
+            <span className="rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300">
+              {sequenceStepper.sequenceValue}
+            </span>
+          )}
+        </div>
+      )}
       <div className="relative overflow-x-auto rounded-xl border border-deck-700 bg-deck-900 px-6 py-8">
         {error ? (
           <div role="alert" className="max-w-sm text-[13px] text-rust-500">

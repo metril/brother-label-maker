@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, getPrintJob, postPrint } from "../api/client";
 import { useJobEvent } from "../hooks/useJobEvents";
-import type { LabelDefinition, PrintOptions } from "../api/types";
+import type { LabelDefinition, PrintOptions, Sequence } from "../api/types";
 
 const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 30_000;
@@ -19,6 +19,17 @@ interface PrintButtonProps {
    * classic single-label cut-each behavior when the caller doesn't (yet)
    * offer a choice. */
   options?: PrintOptions;
+  /** task 2.11: the confirmed serialization spec to print -- null for the
+   * plain (non-serialized) path, which must send NO `serialization` key
+   * at all in the request body (see mutationFn below; JSON.stringify
+   * drops an `undefined`-valued key, so `serialization ?? undefined`
+   * achieves exactly that). */
+  serialization?: Sequence | null;
+  /** The confirmed total label count for `serialization` -- drives the
+   * idle label ("Print N labels" vs plain "Print"); null while off/
+   * unresolved (the button stays disabled in that case regardless, via
+   * `disabled`, so a plain "Print" fallback is never actually clickable). */
+  totalLabels?: number | null;
 }
 
 /** POST /api/print, then track the job to a terminal state two ways at
@@ -26,7 +37,13 @@ interface PrintButtonProps {
  * of GET /api/print/jobs/{id} as a fallback -- whichever source reports
  * "done"/"failed" first wins. A REAL timer (not query data) enforces the
  * 30s cap -- see its effect below for why. */
-export function PrintButton({ definition, disabled, options = DEFAULT_OPTIONS }: PrintButtonProps) {
+export function PrintButton({
+  definition,
+  disabled,
+  options = DEFAULT_OPTIONS,
+  serialization = null,
+  totalLabels = null,
+}: PrintButtonProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [jobId, setJobId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -41,6 +58,7 @@ export function PrintButton({ definition, disabled, options = DEFAULT_OPTIONS }:
       postPrint({
         labels: [def],
         options,
+        serialization: serialization ?? undefined,
       }),
     onSuccess: (data) => {
       setJobId(data.job_id);
@@ -145,7 +163,13 @@ export function PrintButton({ definition, disabled, options = DEFAULT_OPTIONS }:
     mutation.mutate(definition);
   }
 
-  let label = "Print";
+  // "Print 8 labels" not "Print" -- the design doc's own copy-voice
+  // example -- once serialization is on AND its total label count is
+  // confirmed (see JobTray's own doc on `totalLabels`); plain "Print"
+  // otherwise (off, or the serialization hasn't resolved yet -- `disabled`
+  // already covers that case, so this is never a live, clickable "Print"
+  // that quietly means something different from what it says).
+  let label = serialization && totalLabels != null ? `Print ${totalLabels} labels` : "Print";
   if (mutation.isPending) label = "Sending…";
   else if (phase === "printing") label = "Printing…";
   else if (phase === "done") label = "Printed";

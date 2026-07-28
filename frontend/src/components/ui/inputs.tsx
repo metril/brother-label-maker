@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useState } from "react";
 import type { ChangeEvent } from "react";
 import { numberInputClass, selectClass, textInputClass } from "./styles";
 
@@ -12,9 +12,19 @@ interface TextInputProps {
   className?: string;
 }
 
-export function TextInput({ id, value, onChange, placeholder, maxLength, ariaLabel, className }: TextInputProps) {
+/** forwardRef (task 2.11): components/schema/TokenInsertButtons.tsx needs
+ * the underlying <input>'s own selectionStart/selectionEnd/setSelectionRange
+ * to insert a `{seq}`/`{csv.<col>}` token at the cursor rather than always
+ * appending to the end -- every other prop/behavior here is unchanged, and
+ * every existing call site (this component takes no ref) still works
+ * exactly as before. */
+export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
+  { id, value, onChange, placeholder, maxLength, ariaLabel, className },
+  ref,
+) {
   return (
     <input
+      ref={ref}
       id={id}
       type="text"
       value={value}
@@ -23,6 +33,32 @@ export function TextInput({ id, value, onChange, placeholder, maxLength, ariaLab
       aria-label={ariaLabel}
       onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       className={className ?? textInputClass}
+    />
+  );
+});
+
+interface TextareaProps {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+  ariaLabel?: string;
+}
+
+/** The List-kind Sequence editor's one-value-per-line control
+ * (components/SequenceEditor.tsx) -- the only current caller, so styled
+ * plainly rather than added to ui/styles.ts's shared class fragments. */
+export function Textarea({ id, value, onChange, placeholder, rows = 5, ariaLabel }: TextareaProps) {
+  return (
+    <textarea
+      id={id}
+      value={value}
+      placeholder={placeholder}
+      rows={rows}
+      aria-label={ariaLabel}
+      onChange={(e: ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
+      className="w-full resize-y rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 text-[14px] text-deck-200 placeholder:text-deck-400"
     />
   );
 }

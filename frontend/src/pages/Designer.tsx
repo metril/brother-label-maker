@@ -3,6 +3,7 @@ import { HighlightContext } from "../components/schema/HighlightContext";
 import { SchemaForm } from "../components/schema/SchemaForm";
 import { FeedDeck } from "../components/FeedDeck";
 import { JobTray } from "../components/JobTray";
+import { SequenceEditor } from "../components/SequenceEditor";
 import { TapeSelector } from "../components/TapeSelector";
 import { Pending } from "../components/ui/Pending";
 import { panel, panelHeading, typeHeading } from "../components/ui/styles";
@@ -10,6 +11,7 @@ import { usePreview } from "../hooks/usePreview";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { useLabelTypes } from "../hooks/useLabelTypes";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
+import { useSequenceExpand } from "../hooks/useSequenceExpand";
 import { useTapes } from "../hooks/useTapes";
 import { hasNumberOutOfRange } from "../schema/numberValidity";
 import { hasRenderableContent } from "../schema/renderable";
@@ -32,10 +34,41 @@ export function Designer() {
   const setTapeWidthMm = useDesignerStore((s) => s.setTapeWidthMm);
   const setTapeFamily = useDesignerStore((s) => s.setTapeFamily);
   const setParams = useDesignerStore((s) => s.setParams);
+  const serializationEnabled = useDesignerStore((s) => s.serializationEnabled);
+  const sequence = useDesignerStore((s) => s.sequence);
 
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotion = usePrefersReducedMotion();
+
+  // task 2.11: the feed deck's own preview-index stepper -- which of the
+  // serialized run's expanded labels the deck currently renders. UI-only
+  // state (not designer-store: nothing outside this page reads it), reset
+  // to 0 whenever serialization is off, and re-clamped whenever the
+  // confirmed total label count shrinks below the current index (kind
+  // switch, a shorter list, copies_per_value turned down, ...).
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const sequenceExpand = useSequenceExpand();
+  // The sequence is only ever "active" (sent to preview/estimate/print)
+  // once POST /api/render/expand has confirmed it resolves -- see
+  // useSequenceExpand's own docstring. While serialization is on but not
+  // yet confirmed (mid-edit, or genuinely invalid -- e.g. over the
+  // 1000-label cap), every serialization-aware request below simply falls
+  // back to the plain template-only path, same "keep the last good state,
+  // never fire a request already known bad" convention canSubmit/
+  // usePreview already follow for the params form itself.
+  const activeSerialization = serializationEnabled && sequenceExpand.data ? sequence : null;
+  const sequenceTotal = sequenceExpand.data?.total_labels ?? null;
+
+  useEffect(() => {
+    if (!serializationEnabled) {
+      setPreviewIndex(0);
+      return;
+    }
+    if (sequenceTotal !== null && previewIndex > sequenceTotal - 1) {
+      setPreviewIndex(Math.max(0, sequenceTotal - 1));
+    }
+  }, [serializationEnabled, sequenceTotal, previewIndex]);
 
   useEffect(() => {
     return () => {
@@ -88,8 +121,16 @@ export function Designer() {
   const canSubmit = (def: LabelDefinition) =>
     typeInfo !== null && hasRenderableContent(schema, def.params) && !hasNumberOutOfRange(schema, def.params);
 
-  const preview = usePreview(definition, canSubmit);
+  const preview = usePreview(definition, canSubmit, activeSerialization, activeSerialization ? previewIndex : 0);
   const tapeInfo = tapes?.find((t) => t.family === tape.family && t.nominal_mm === tape.width_mm) ?? null;
+
+  // The template itself must still be renderable (canSubmit(definition)),
+  // AND -- only when serialization is on -- the sequence must have
+  // resolved (activeSerialization !== null). This is what disables Print
+  // for the over-cap case (total > 1000 -- the expand request 422s, so
+  // activeSerialization stays null) without duplicating that cross-field
+  // check client-side; see useSequenceExpand.ts's own docstring.
+  const jobTrayCanSubmit = canSubmit(definition) && (!serializationEnabled || activeSerialization !== null);
 
   const printerStatus = usePrinterStatus();
   const tapeWarning = tapeMismatchWarning(
@@ -152,6 +193,16 @@ export function Designer() {
           isFetching={preview.isFetching}
           error={preview.error}
           onFocusObject={handleFocusObject}
+          sequenceStepper={
+            activeSerialization && sequenceTotal
+              ? {
+                  index: previewIndex,
+                  total: sequenceTotal,
+                  sequenceValue: preview.sequenceValue,
+                  onIndexChange: setPreviewIndex,
+                }
+              : null
+          }
         />
       </section>
 
@@ -175,9 +226,22 @@ export function Designer() {
 
         <section className={`${panel} order-1 w-full lg:order-2 lg:sticky lg:top-6 lg:w-80 lg:shrink-0`}>
           <h2 className={panelHeading}>Job</h2>
-          <JobTray definition={definition} canSubmit={canSubmit(definition)} isRenderable={canSubmit} />
+          <JobTray
+            definition={definition}
+            canSubmit={jobTrayCanSubmit}
+            isRenderable={canSubmit}
+            serialization={activeSerialization}
+            totalLabels={sequenceTotal}
+          />
         </section>
       </div>
+
+      {/* task 2.11: a third, full-width panel BELOW the parameters-form/
+          job-tray row -- see components/SequenceEditor.tsx's own docstring
+          for why here rather than nested in either column above. */}
+      <section className={panel}>
+        <SequenceEditor />
+      </section>
     </div>
   );
 }

@@ -1,5 +1,8 @@
 import type {
   ApiErrorBody,
+  CsvUploadResponse,
+  ExpandRequest,
+  ExpandResponse,
   FontInfo,
   HealthResponse,
   ImageUploadResponse,
@@ -210,6 +213,40 @@ export function postPrintEstimate(body: PrintRequest): Promise<PrintEstimateResp
 
 export function getPrintJob(jobId: string): Promise<PrintJob> {
   return request<PrintJob>(`/print/jobs/${jobId}`);
+}
+
+/** POST /api/render/expand (task 2.11): the distinct values a Sequence
+ * produces (and, with `sample`, those values substituted for `{seq}`/
+ * `{csv.<col>}` in a template string) -- see hooks/useSequenceExpand.ts,
+ * which drives the Serialize panel's live value chips and total-labels
+ * readout from this. */
+export function postExpand(body: ExpandRequest): Promise<ExpandResponse> {
+  return request<ExpandResponse>("/render/expand", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/serialize/csv (multipart upload, task 2.11) -- same bypass-
+ * request()'s-JSON-Content-Type pattern as postImage above (the browser
+ * sets multipart/form-data's own boundary automatically). Stateless: the
+ * response's `rows` is posted straight back as a Sequence's own `rows`
+ * field, never persisted server-side. */
+export async function postSerializeCsv(file: File): Promise<CsvUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/serialize/csv`, { method: "POST", body: form });
+  if (!res.ok) {
+    const fallback = `CSV upload failed: ${res.status} ${res.statusText}`;
+    let detail = fallback;
+    try {
+      detail = extractErrorDetail(await res.json(), fallback);
+    } catch {
+      // non-JSON error body -- keep the fallback.
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as CsvUploadResponse;
 }
 
 export function getPrinterStatus(): Promise<PrinterStatusResponse> {

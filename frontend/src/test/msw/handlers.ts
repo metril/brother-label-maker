@@ -122,6 +122,130 @@ export const printJobDoneHandler = http.get("/api/print/jobs/:jobId", ({ params 
   }),
 );
 
+// -- task 2.11: POST /api/render/expand + POST /api/serialize/csv --
+// Reimplements just enough of backend/render/serialize.py's expansion
+// model (sequence_values/effective_count/total_labels/expand_tokens) in
+// JS to give SequenceEditor/Designer's serialization tests a REALISTIC
+// mock -- computed from whatever Sequence body a test actually posts,
+// rather than one fixed canned response every test would have to
+// override. Deliberately a light reimplementation (e.g. no ALPHA
+// under/overflow check, unknown {csv.<col>} passes through untouched)
+// -- tests that need those specific server-side failures override with
+// server.use(...) for that one case, same as everywhere else in this file.
+
+function mockOrdinal(letters: string): number {
+  let n = 0;
+  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 65 + 1);
+  return n - 1;
+}
+
+function mockToAlpha(ordinal: number): string {
+  let n = ordinal + 1;
+  let letters = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+interface MockSequence {
+  kind: "numeric" | "alpha" | "list" | "csv";
+  count?: number;
+  copies_per_value?: number;
+  start?: number;
+  step?: number;
+  pad_width?: number;
+  alpha_start?: string;
+  values?: string[];
+  rows?: Record<string, string>[];
+}
+
+function mockSequenceValues(seq: MockSequence): string[] {
+  if (seq.kind === "numeric") {
+    const count = seq.count ?? 1;
+    const start = seq.start ?? 1;
+    const step = seq.step ?? 1;
+    const pad = seq.pad_width ?? 0;
+    return Array.from({ length: count }, (_, i) => {
+      const n = start + i * step;
+      const sign = n < 0 ? "-" : "";
+      return sign + String(Math.abs(n)).padStart(pad, "0");
+    });
+  }
+  if (seq.kind === "alpha") {
+    const count = seq.count ?? 1;
+    const base = mockOrdinal(seq.alpha_start ?? "A");
+    const step = seq.step ?? 1;
+    return Array.from({ length: count }, (_, i) => mockToAlpha(base + i * step));
+  }
+  if (seq.kind === "list") return seq.values ?? [];
+  return (seq.rows ?? []).map((_, i) => String(i + 1));
+}
+
+function mockEffectiveCount(seq: MockSequence): number {
+  if (seq.kind === "numeric" || seq.kind === "alpha") return seq.count ?? 1;
+  if (seq.kind === "list") return (seq.values ?? []).length;
+  return (seq.rows ?? []).length;
+}
+
+function mockTotalLabels(seq: MockSequence): number {
+  return mockEffectiveCount(seq) * (seq.copies_per_value ?? 1);
+}
+
+function mockExpandTokens(text: string, value: string, row: Record<string, string> | null): string {
+  return text.replace(/\{seq\}|\{csv\.([^}]+)\}/g, (match, column: string | undefined) => {
+    if (match === "{seq}") return value;
+    if (row && column !== undefined && column in row) return row[column]!;
+    return match;
+  });
+}
+
+export const expandHandler = http.post("/api/render/expand", async ({ request }) => {
+  const body = (await request.json()) as { serialization: MockSequence; sample?: string | null };
+  const seq = body.serialization;
+  const total = mockTotalLabels(seq);
+  if (total > 1000) {
+    return HttpResponse.json(
+      {
+        detail: [
+          {
+            loc: ["body", "serialization"],
+            msg: `Value error, total labels ${total} (${mockEffectiveCount(seq)} values x ${seq.copies_per_value ?? 1} copies) exceeds the 1000 maximum`,
+            type: "value_error",
+          },
+        ],
+      },
+      { status: 422 },
+    );
+  }
+  const values = mockSequenceValues(seq);
+  const rows = seq.kind === "csv" ? (seq.rows ?? []) : values.map(() => null);
+  const samples =
+    body.sample != null ? values.slice(0, 24).map((v, i) => mockExpandTokens(body.sample as string, v, rows[i] ?? null)) : null;
+  return HttpResponse.json({ values, total_labels: total, samples });
+});
+
+// A fixed canned response, deliberately NOT reading the uploaded file's own
+// bytes -- same reason uploadImageHandler above doesn't either: msw's
+// `request.formData()` never resolves against a multipart body built from
+// a jsdom File under this test environment (confirmed directly: it hangs
+// indefinitely, not just "parses wrong"). Individual tests that care about
+// specific uploaded CONTENT override with server.use(...) for that one
+// case and assert on the request having been made / on the UI's reaction
+// to a canned response, not on round-tripping the real file bytes.
+export const serializeCsvHandler = http.post("/api/serialize/csv", () =>
+  HttpResponse.json({
+    columns: ["port", "label"],
+    rows: [
+      { port: "1", label: "Uplink" },
+      { port: "2", label: "Downlink" },
+    ],
+    row_count: 2,
+  }),
+);
+
 export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ params }) =>
   HttpResponse.json({
     id: params.jobId,
@@ -156,4 +280,6 @@ export const defaultHandlers = [
   printEstimateHandler,
   printHandler,
   printJobDoneHandler,
+  expandHandler,
+  serializeCsvHandler,
 ];

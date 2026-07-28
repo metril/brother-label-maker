@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, pngDataUrl, postPreview } from "../api/client";
-import type { LabelDefinition, RenderWarning } from "../api/types";
+import type { LabelDefinition, RenderWarning, Sequence } from "../api/types";
 
 const DEBOUNCE_MS = 300;
 /** Matches the backend's default PreviewRequest.scale (router_labels.py) --
@@ -18,8 +18,20 @@ export interface UsePreviewResult {
   lengthMm: number | null;
   minFeedMm: number | null;
   warnings: RenderWarning[];
+  /** Non-null only when a `serialization` was passed in and the request
+   * succeeded -- the expanded run's total label count / the sequence
+   * value that produced the rendered `index`, respectively (task 2.11;
+   * see api/types.ts's PreviewResponse doc). */
+  totalLabels: number | null;
+  sequenceValue: string | null;
   isFetching: boolean;
   error: string | null;
+}
+
+interface DebouncedPreviewInput {
+  definition: LabelDefinition;
+  serialization: Sequence | null;
+  index: number;
 }
 
 /** Debounces `definition` by 300ms before firing /api/render/preview, so a
@@ -44,24 +56,39 @@ export interface UsePreviewResult {
  * sending -- type-generic (task 2.10: every one of the 9 label types has
  * its own notion of "has enough content to preview", see
  * schema/renderable.ts's hasRenderableContent), unlike the text-only
- * hasRenderableContent this hook used to import directly. */
+ * hasRenderableContent this hook used to import directly.
+ *
+ * `serialization`/`index` (task 2.11, both optional, default null/0): when
+ * `serialization` is non-null, `definition` is treated as a TEMPLATE and
+ * `index` selects which of its expanded labels to render (mirrors POST
+ * /api/print's own template+serialization split -- see api/types.ts's
+ * PreviewRequest doc). Bundled into the SAME debounce as `definition`
+ * (folded into one debounced object) rather than a separate un-debounced
+ * fast path, so rapid index-stepper clicks collapse into one request just
+ * like rapid param edits do. Callers are expected to only pass a
+ * `serialization` that's already confirmed printable (see
+ * hooks/useSequenceExpand.ts) -- this hook doesn't re-validate it, it just
+ * forwards it. */
 export function usePreview(
   definition: LabelDefinition,
   isRenderable: (definition: LabelDefinition) => boolean,
+  serialization: Sequence | null = null,
+  index = 0,
 ): UsePreviewResult {
   // Starts undefined (not seeded with `definition`) so the FIRST value is
   // debounced exactly like every subsequent one -- otherwise the initial
   // render would fire an immediate, un-debounced request before the 300ms
   // window ever applied.
-  const [debounced, setDebounced] = useState<LabelDefinition | undefined>(undefined);
+  const [debounced, setDebounced] = useState<DebouncedPreviewInput | undefined>(undefined);
 
   useEffect(() => {
-    const handle = setTimeout(() => setDebounced(definition), DEBOUNCE_MS);
+    const handle = setTimeout(() => setDebounced({ definition, serialization, index }), DEBOUNCE_MS);
     return () => clearTimeout(handle);
-    // definition is a fresh object per render by design (designer store
-    // selectors); comparing its serialized form is what actually matters.
+    // definition/serialization are fresh objects per render by design
+    // (designer store selectors); comparing their serialized form is what
+    // actually matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(definition)]);
+  }, [JSON.stringify(definition), JSON.stringify(serialization), index]);
 
   // Drop `debounced` the INSTANT the label TYPE itself changes, rather than
   // waiting out the 300ms window above. Designer.tsx's heading reads
@@ -102,12 +129,18 @@ export function usePreview(
   // has caught up (it's still whatever settled 300ms ago, possibly the
   // still-blank initial state) -- firing a request against that stale,
   // non-renderable `debounced` and 422-ing for one query cycle.
-  const isDebouncedRenderable = debounced !== undefined && isRenderable(debounced);
-  const debouncedType = debounced?.type ?? null;
+  const isDebouncedRenderable = debounced !== undefined && isRenderable(debounced.definition);
+  const debouncedType = debounced?.definition.type ?? null;
 
   const query = useQuery({
     queryKey: ["preview", debouncedType, debounced ? JSON.stringify(debounced) : null, PREVIEW_SCALE],
-    queryFn: () => postPreview({ definition: debounced as LabelDefinition, scale: PREVIEW_SCALE }),
+    queryFn: () =>
+      postPreview({
+        definition: debounced!.definition,
+        scale: PREVIEW_SCALE,
+        serialization: debounced!.serialization,
+        index: debounced!.index,
+      }),
     enabled: isDebouncedRenderable,
     placeholderData: (previousData, previousQuery) =>
       debouncedType !== null && previousQuery?.queryKey?.[1] === debouncedType ? previousData : undefined,
@@ -126,6 +159,8 @@ export function usePreview(
     lengthMm: query.data?.length_mm ?? null,
     minFeedMm: query.data?.min_feed_mm ?? null,
     warnings: query.data?.warnings ?? [],
+    totalLabels: query.data?.total_labels ?? null,
+    sequenceValue: query.data?.sequence_value ?? null,
     isFetching: query.isFetching,
     error,
   };
