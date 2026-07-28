@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Presets } from "./Presets";
 import { useDesignerStore } from "../stores/designer";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { mockWebSocketInstances } from "../test/setup";
 
 const INITIAL_DESIGNER_STATE = useDesignerStore.getState();
 
@@ -78,6 +79,52 @@ describe("Presets page", () => {
       expect(useDesignerStore.getState().paramsByType.text?.lines).toEqual(["FROM PRESET"]);
       expect(useDesignerStore.getState().tape).toEqual({ width_mm: 24, family: "tze" });
     });
+  });
+
+  // Review fix-up: handleLoad used to run `setParams`/`navigate("/")`
+  // UNCONDITIONALLY even when the preset's own label_type wasn't found in
+  // the catalog (still loading, or genuinely removed) -- silently landing
+  // on the Designer with params written under a type that was never
+  // actually selected. The whole action -- and the button itself -- is
+  // now guarded on the SAME lookup.
+  it("Load into designer is disabled and never touches the store when the preset's label type isn't in the catalog", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/label-types", () => HttpResponse.json([])),
+      http.get("/api/presets", () => HttpResponse.json([preset()])),
+    );
+    renderWithProviders(<Presets />, { route: "/presets" });
+
+    const loadButton = await screen.findByRole("button", { name: "Load" });
+    await waitFor(() => expect(loadButton).toBeDisabled());
+
+    await user.click(loadButton);
+    expect(useDesignerStore.getState().selectedType).not.toBe("text");
+    expect(useDesignerStore.getState().paramsByType.text).toBeUndefined();
+  });
+
+  // Review fix-up: a failed preset-print job's WS event carries its own
+  // `error` (job.failed's payload) -- this inline chip used to show a bare
+  // "FAILED" with no reason at all (History's rows already surfaced
+  // theirs).
+  it("a failed print shows the WS event's own failure reason, not a bare FAILED chip", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/presets", () => HttpResponse.json([preset()])),
+      http.post("/api/presets/preset-1/print", () => HttpResponse.json({ job_id: "job-99" }, { status: 202 })),
+    );
+    renderWithProviders(<Presets />);
+
+    await user.click(await screen.findByRole("button", { name: "Print" }));
+
+    await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
+    const socket = mockWebSocketInstances.at(-1)!;
+    act(() => socket.emit({ event: "job.failed", job_id: "job-99", error: "printer out of tape" }));
+
+    // "Failed" is the chip's actual text content -- CSS `uppercase` only
+    // affects rendering, not textContent/accessible name under jsdom.
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("printer out of tape");
   });
 
   it("favorite toggle PUTs the flipped value", async () => {

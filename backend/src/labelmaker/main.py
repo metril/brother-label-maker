@@ -10,9 +10,9 @@ import contextlib
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from labelmaker.api import (
     router_history,
@@ -94,13 +94,55 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(router_history.router, prefix="/api")
     app.include_router(ws.router, prefix="/api")
 
-    # Mounted last (after every /api/* route is registered) so it only ever
-    # catches paths none of the API routers matched -- see StaticFiles(
-    # html=True)'s own docs for what "SPA fallback" does and doesn't cover;
-    # full deep-link fallback beyond that lands with the frontend task.
+    # Registered last (after every /api/* route above) so it only ever
+    # catches paths none of the API routers matched -- Starlette tries
+    # routes in registration order and stops at the first match, so a real
+    # API endpoint always wins first.
+    #
+    # task 2.13 review fix-up: this used to be `app.mount("/",
+    # StaticFiles(..., html=True))`, which -- confirmed live against a real
+    # `frontend/dist` -- only special-cases the exact root path ("/") and a
+    # directory-with-index.html; it does NOT fall back to index.html for an
+    # arbitrary deep link with no file on disk (e.g. `/presets`, `/history`
+    # -- react-router's BrowserRouter routes these client-side, but only
+    # once the SPA has actually booted). Those 404'd instead, meaning a
+    # hard refresh (or a bookmarked/shared link, or the Dockerfile's
+    # shipped container shape -- STATIC_DIR=/app/static, docker/Dockerfile)
+    # landing anywhere but "/" was broken. A `Mount("/")` also can't be
+    # "layered" with a route registered after it -- once a path matches a
+    # mount's prefix (and "/" is a prefix of everything), Starlette
+    # delegates the ENTIRE response to that sub-app and never tries any
+    # later route even if the sub-app 404s -- so the fix has to be this one
+    # catch-all route instead of a second mount/route pair.
+    #
+    # `full_path` covers three cases: (1) `/api/...` that didn't match any
+    # real router above -- explicitly re-raised as a 404 HTTPException
+    # (FastAPI's normal JSON `{"detail": ...}` shape) so an unknown API
+    # path never silently returns the SPA's index.html; (2) a real static
+    # file that exists on disk (the JS/CSS bundle under `/assets`, the four
+    # TTFs under `/fonts`, `/favicon.svg`, ...) -- served as itself; (3)
+    # everything else (a client-side route, or the root path itself, where
+    # `full_path` is "") -- served `index.html` so the SPA boots and its
+    # OWN router (react-router) takes over from there.
+    #
+    # The resolved-path containment check (`static_dir.resolve() in
+    # candidate.parents`) is a directory-traversal guard: `full_path` is
+    # attacker-controlled request text, and `(static_dir / full_path)`
+    # alone would follow a `..` segment right out of `static_dir` onto the
+    # rest of the filesystem.
     static_dir = _resolve_static_dir()
     if static_dir is not None:
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
+        static_root = static_dir.resolve()
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str) -> FileResponse:
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="not found")
+
+            candidate = (static_dir / full_path).resolve()
+            if candidate.is_file() and static_root in candidate.parents:
+                return FileResponse(candidate)
+            return FileResponse(static_dir / "index.html")
 
     return app
 

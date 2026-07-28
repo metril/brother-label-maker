@@ -50,9 +50,29 @@ export function History() {
   const { data, isPending, isError } = useHistoryList({ page, pageSize, status: status || undefined, q: q || undefined });
 
   const [reprintJobIds, setReprintJobIds] = useState<Record<string, string>>({});
+  // Review fix-up: reprint has two real backend failure modes (404 -- the
+  // job was deleted out-of-band since the row was loaded; 409 -- the
+  // stored definition no longer validates, router_history.py's own
+  // reprint_job docstring) that were previously swallowed entirely (the
+  // mutation had only onSuccess) -- a failed reprint looked identical to a
+  // reprint that simply hadn't been clicked yet, with zero role="alert"
+  // and no chip. Keyed by the ORIGINAL row's id (not the never-created new
+  // job id) so HistoryRow can show it inline next to that row's own
+  // Reprint button, the same place delete/preset-print errors already
+  // surface theirs.
+  const [reprintErrors, setReprintErrors] = useState<Record<string, string>>({});
   const reprintMutation = useMutation({
     mutationFn: (id: string) => postHistoryReprint(id),
-    onSuccess: (result, id) => setReprintJobIds((prev) => ({ ...prev, [id]: result.job_id })),
+    onSuccess: (result, id) => {
+      setReprintErrors((prev) => {
+        if (!(id in prev)) return prev;
+        return Object.fromEntries(Object.entries(prev).filter(([key]) => key !== id));
+      });
+      setReprintJobIds((prev) => ({ ...prev, [id]: result.job_id }));
+    },
+    onError: (err, id) => {
+      setReprintErrors((prev) => ({ ...prev, [id]: err instanceof ApiError ? err.message : "reprint failed" }));
+    },
   });
 
   const [deleteTarget, setDeleteTarget] = useState<HistoryItem | null>(null);
@@ -99,6 +119,21 @@ export function History() {
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const isFiltered = q !== "" || status !== "";
+
+  // Review fix-up: `page` can end up past the real last page (a filter
+  // change narrowed `total`, or a delete emptied the last row on this
+  // page) -- clamp it back INTO range the moment a fresh `data.total`
+  // says so, rather than stranding the user on a page that can never show
+  // any rows again (Prev/Next both effectively dead, per the render logic
+  // below's own "page is empty but total > 0" branch). Deliberately keyed
+  // off `data` (not `total`/`totalPages` alone): those default to 0/1
+  // while `data` is still undefined, which would otherwise fire this on
+  // every initial mount before the first real answer ever arrives.
+  useEffect(() => {
+    if (data && page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [data, page, totalPages]);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -148,63 +183,81 @@ export function History() {
           <p role="alert" className={errorText}>
             Could not load print history.
           </p>
-        ) : data.items.length === 0 ? (
+        ) : total === 0 ? (
+          // Review fix-up: gated on `total` (the REAL count across every
+          // page), not `data.items.length` -- the old version showed this
+          // exact copy ("Nothing printed yet.") whenever the CURRENT
+          // page's items happened to be empty, even with a non-zero total
+          // (a stale/out-of-range `page` -- see the clamp effect above,
+          // which self-corrects that a moment later, but the render logic
+          // itself must not lie in the meantime either).
           <p className="text-[13px] text-deck-400">{isFiltered ? "No jobs match these filters." : "Nothing printed yet."}</p>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse text-left">
-                <thead>
-                  <tr className={`${eyebrow} border-b border-deck-800`}>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Preview
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Printed
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Status
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Labels
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Chain
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Tape
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Used
-                    </th>
-                    <th scope="col" className="py-2 pr-3 font-normal">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((item) => (
-                    <HistoryRow
-                      key={item.id}
-                      item={item}
-                      liveEvent={events[item.id]}
-                      reprintJobId={reprintJobIds[item.id] ?? null}
-                      reprintEvent={reprintJobIds[item.id] ? events[reprintJobIds[item.id]!] : undefined}
-                      reprintPending={reprintMutation.isPending && reprintMutation.variables === item.id}
-                      onReprint={() => reprintMutation.mutate(item.id)}
-                      onDetails={() => {
-                        setDetailsId(item.id);
-                        detailsDialog.open();
-                      }}
-                      onDelete={() => {
-                        setDeleteTarget(item);
-                        deleteDialog.open();
-                      }}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {data.items.length === 0 ? (
+              // Transient: `total > 0` but this page has nothing (the
+              // clamp effect above is about to fix `page` itself) -- never
+              // "Nothing printed yet.", and the pager below stays visible
+              // and usable (Previous) rather than disappearing along with
+              // the table, which used to strand the user on a dead page.
+              <p className="text-[13px] text-deck-400">No jobs on this page.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] border-collapse text-left">
+                  <thead>
+                    <tr className={`${eyebrow} border-b border-deck-800`}>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Preview
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Printed
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Status
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Labels
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Chain
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Tape
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Used
+                      </th>
+                      <th scope="col" className="py-2 pr-3 font-normal">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.items.map((item, index) => (
+                      <HistoryRow
+                        key={item.id}
+                        item={item}
+                        index={index}
+                        liveEvent={events[item.id]}
+                        reprintJobId={reprintJobIds[item.id] ?? null}
+                        reprintEvent={reprintJobIds[item.id] ? events[reprintJobIds[item.id]!] : undefined}
+                        reprintPending={reprintMutation.isPending && reprintMutation.variables === item.id}
+                        reprintError={reprintErrors[item.id] ?? null}
+                        onReprint={() => reprintMutation.mutate(item.id)}
+                        onDetails={() => {
+                          setDetailsId(item.id);
+                          detailsDialog.open();
+                        }}
+                        onDelete={() => {
+                          setDeleteTarget(item);
+                          deleteDialog.open();
+                        }}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <p className="font-mono text-[12px] text-deck-400">

@@ -137,13 +137,59 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Reprint" }));
+    await user.click(within(table).getByRole("button", { name: "Reprint job 1" }));
     await waitFor(() => expect(within(table).getByText("Queued")).toBeInTheDocument());
 
     await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
     const socket = mockWebSocketInstances.at(-1)!;
     act(() => socket.emit({ event: "job.started", job_id: "job-2" }));
     await waitFor(() => expect(within(table).getByText("Printing")).toBeInTheDocument());
+  });
+
+  // Review fix-up: reprint had two real backend failure modes (404 -- the
+  // job was deleted out-of-band; 409 -- a stored definition that no longer
+  // validates, router_history.py's reprint_job docstring) that used to be
+  // completely silent -- no role="alert", no chip, nothing visibly wrong.
+  it("Reprint failure surfaces a readable role=alert message inline, not silently", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.post("/api/history/job-1/reprint", () => HttpResponse.json({ detail: "job not found" }, { status: 404 })),
+    );
+    renderWithProviders(<History />);
+    const table = await findTable();
+
+    await user.click(within(table).getByRole("button", { name: "Reprint job 1" }));
+    expect(await within(table).findByRole("alert")).toHaveTextContent("job not found");
+    // No status chip is added for a reprint that never actually got a job id.
+    expect(within(table).queryByText("Queued")).not.toBeInTheDocument();
+  });
+
+  // Review fix-up: History row actions used to share the exact same
+  // accessible name ("Reprint"/"Details"/"Delete") across every row --
+  // indistinguishable to a screen-reader user tabbing through the table.
+  // Mirrors the "Move item N up" convention components/TrayItemRow.tsx
+  // already established for a repeated-row list.
+  it("gives each row's actions a distinct, row-identifying accessible name", async () => {
+    server.use(
+      http.get("/api/history", () =>
+        HttpResponse.json({
+          items: [item({ id: "job-1" }), item({ id: "job-2", created_at: "2026-07-27T10:00:00.000000Z" })],
+          page: 1,
+          page_size: 20,
+          total: 2,
+        }),
+      ),
+    );
+    renderWithProviders(<History />);
+    const table = await findTable();
+
+    expect(within(table).getByRole("button", { name: "Reprint job 1" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Reprint job 2" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "View details for job 1" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "View details for job 2" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Delete job 1" })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "Delete job 2" })).toBeInTheDocument();
   });
 
   it("Details shows the job's full definition and offers Load into designer for a single label", async () => {
@@ -170,7 +216,7 @@ describe("History page", () => {
     renderWithProviders(<History />, { route: "/history" });
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Details" }));
+    await user.click(within(table).getByRole("button", { name: "View details for job 1" }));
     const dialog = await screen.findByRole("dialog", { name: "Job details" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByText(/FROM HISTORY/)).toBeInTheDocument();
@@ -195,13 +241,49 @@ describe("History page", () => {
     renderWithProviders(<History />);
     const table = await findTable();
 
-    await user.click(within(table).getByRole("button", { name: "Delete" }));
+    await user.click(within(table).getByRole("button", { name: "Delete job 1" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(deleteSpy).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
+  });
+
+  // Review fix-up: `page` could end up stuck past the real last page (a
+  // filter change, or a delete, narrowed `total` while the user was on a
+  // later page) -- the table/pager used to vanish entirely (gated on
+  // `data.items.length`) and show the misleading "Nothing printed yet.",
+  // stranding the user with no way back. The page now self-corrects.
+  it("auto-clamps page back into range instead of stranding the user when the current page empties out", async () => {
+    const user = userEvent.setup();
+    let call = 0;
+    server.use(
+      http.get("/api/history", ({ request }) => {
+        call += 1;
+        const page = new URL(request.url).searchParams.get("page");
+        if (call === 1) {
+          // Initial load: page 1 of 2 (25 total @ page_size 20).
+          return HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 25 });
+        }
+        if (page === "2") {
+          // Landed on page 2, but everything shrank to 5 total (1 page)
+          // between the first and second fetch -- page 2 no longer exists.
+          return HttpResponse.json({ items: [], page: 2, page_size: 20, total: 5 });
+        }
+        // The clamp effect refetches page 1 -- real rows are there.
+        return HttpResponse.json({ items: [item({ id: "job-2" })], page: 1, page_size: 20, total: 5 });
+      }),
+    );
+    renderWithProviders(<History />);
+    await findTable();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+
+    await waitFor(() => expect(screen.getByText("Page 1 of 1 · 5 jobs")).toBeInTheDocument());
+    expect(screen.queryByText("Nothing printed yet.")).not.toBeInTheDocument();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("Done")).toBeInTheDocument();
   });
 
   it("a WS terminal event on a listed job updates its row status in place, then invalidates the list", async () => {

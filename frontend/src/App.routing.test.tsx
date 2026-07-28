@@ -24,10 +24,10 @@ describe("App routing (task 2.13)", () => {
     const nav = screen.getByRole("navigation", { name: "Sections" });
     expect(await within(nav).findByRole("link", { name: "Design" })).toHaveAttribute("aria-current", "page");
 
-    // The Home placeholder is a disabled, non-interactive stand-in for a
-    // future landing page (Phase 3) -- never a link at all.
-    expect(within(nav).queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
-    expect(within(nav).getByText("Home")).toHaveAttribute("aria-disabled", "true");
+    // The HomeBox placeholder is a disabled, non-interactive stand-in for
+    // the Phase-3 HomeBox inventory integration -- never a link at all.
+    expect(within(nav).queryByRole("link", { name: "HomeBox" })).not.toBeInTheDocument();
+    expect(within(nav).getByText("HomeBox")).toHaveAttribute("aria-disabled", "true");
 
     await user.click(within(nav).getByRole("link", { name: "Presets" }));
     expect(await screen.findByRole("heading", { name: "Presets" })).toBeInTheDocument();

@@ -88,16 +88,25 @@ export function PresetCard({ preset, typeTitle }: PresetCardProps) {
     onSuccess: (data) => setPrintJobId(data.job_id),
   });
 
+  // Review fix-up: looked up once, at component top level, instead of
+  // re-deriving it (and only PARTIALLY guarding on it) inside handleLoad
+  // itself -- the old version skipped `selectType` when `typeInfo` was
+  // still unresolved (useLabelTypes hasn't loaded yet) or the type no
+  // longer exists, but still ran `setParams`/`navigate("/")` regardless,
+  // landing on the Designer with the preset's params written under a type
+  // that was never actually selected (or a stale previously-selected one)
+  // -- silently broken, no error, nothing visibly wrong until the user
+  // noticed the form didn't match what they just loaded.
+  const typeInfoForLoad = labelTypes?.find((t) => t.type === preset.label_type);
+
   function handleLoad() {
-    const typeInfo = labelTypes?.find((t) => t.type === preset.label_type);
-    if (typeInfo) {
-      // Seeds defaults only the FIRST time this type is visited this
-      // session (stores/designer.ts's own selectType) -- the setParams
-      // call right after always overwrites with the preset's own saved
-      // definition either way, so this is safe regardless of whether the
-      // type was already visited.
-      selectType(preset.label_type, typeInfo.params_schema);
-    }
+    if (!typeInfoForLoad) return;
+    // Seeds defaults only the FIRST time this type is visited this session
+    // (stores/designer.ts's own selectType) -- the setParams call right
+    // after always overwrites with the preset's own saved definition
+    // either way, so this is safe regardless of whether the type was
+    // already visited.
+    selectType(preset.label_type, typeInfoForLoad.params_schema);
     setParams(preset.label_type, preset.definition);
     // "any tape" presets (tape_width_mm null) carry no tape opinion --
     // leave the designer's current tape selection alone rather than
@@ -143,7 +152,13 @@ export function PresetCard({ preset, typeTitle }: PresetCardProps) {
       </p>
 
       <div className="mt-1 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={handleLoad} className="text-[12px] font-medium text-amber-300 hover:underline">
+        <button
+          type="button"
+          onClick={handleLoad}
+          disabled={!typeInfoForLoad}
+          title={typeInfoForLoad ? undefined : "This preset's label type isn't available"}
+          className="text-[12px] font-medium text-amber-300 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+        >
           Load
         </button>
         <button
@@ -175,6 +190,17 @@ export function PresetCard({ preset, typeTitle }: PresetCardProps) {
         </p>
       )}
       {printStatus && <StatusChip status={printStatus} className="self-start" />}
+      {/* Review fix-up: a FAILED print job's WS event carries its own
+          `error` (job.failed's payload) -- History's rows already surface
+          this per-row; this inline chip used to show a bare "FAILED" with
+          no reason at all, right next to the (very different) case above
+          where the REQUEST itself never even reached a job (printMutation
+          failing outright, e.g. a validation 422). */}
+      {printStatus === "failed" && printEvent?.error && (
+        <p role="alert" className={errorText}>
+          {printEvent.error}
+        </p>
+      )}
 
       <Dialog open={renameDialog.isOpen} onClose={renameDialog.close} label={`Rename ${preset.name}`}>
         <div className="flex items-center justify-between gap-2">

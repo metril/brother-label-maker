@@ -26,10 +26,11 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  *
  * Task 2.13: the app's own primary section nav lives here too --
  * Design/Presets/History, real routes for the first time (App.tsx now
- * wraps this in a BrowserRouter). `Home` stays a disabled, non-interactive
- * placeholder (a future landing page, Phase 3 per the task brief) --
- * deliberately not a link at all, so it's never a tab stop that goes
- * nowhere. */
+ * wraps this in a BrowserRouter). `HomeBox` stays a disabled, non-
+ * interactive placeholder -- not a general "landing page" but the Phase-3
+ * HomeBox inventory integration (docs/research/homebox.md: syncing/
+ * printing labels for HomeBox items/locations) -- deliberately not a link
+ * at all, so it's never a tab stop that goes nowhere. */
 export function AppShell({ children }: AppShellProps) {
   const { connectionState } = useJobEventsContext();
 
@@ -46,10 +47,10 @@ export function AppShell({ children }: AppShellProps) {
         <nav aria-label="Sections" className="flex items-center gap-1">
           <span
             aria-disabled="true"
-            title="Coming in a future phase"
+            title="HomeBox inventory integration — coming in a future phase"
             className="cursor-not-allowed select-none rounded-md px-3 py-1.5 font-condensed text-[13px] font-medium uppercase tracking-wide text-deck-600"
           >
-            Home
+            HomeBox
           </span>
           <NavLink to="/" end className={navLinkClass}>
             Design

@@ -128,7 +128,9 @@ WORKDIR /app/backend
 # stage) since there's no cache-reuse benefit to splitting it here.
 COPY --from=backend-build --chown=app:app /app/backend /app/backend
 
-# Built SPA from stage 1, served by main.py's StaticFiles mount at STATIC_DIR.
+# Built SPA from stage 1, served by main.py's catch-all SPA-fallback route
+# (deep links, e.g. /presets or /history, get index.html too -- not just
+# STATIC_DIR's root) at STATIC_DIR.
 COPY --from=frontend-build --chown=app:app /fe/dist /app/static
 
 USER app
