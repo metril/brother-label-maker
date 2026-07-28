@@ -306,7 +306,14 @@ function LiveChips({
 }) {
   const chips = sampleHasToken && data?.samples ? data.samples : (data?.values ?? []);
   const shown = chips.slice(0, 24);
-  const more = chips.length - shown.length;
+  // NOT chips.length - shown.length: `data.samples` is ALREADY capped at 24
+  // server-side (router_labels.py's own _MAX_SAMPLES), so in the (common,
+  // tokenized) samples branch that difference is always 0 -- structurally
+  // dead. `data.values` is the UNCAPPED distinct-value count in either
+  // branch (samples are one-to-one with the first 24 of those same
+  // values), so it's the correct total to diff against regardless of
+  // which branch produced `chips`.
+  const more = (data?.values.length ?? 0) - shown.length;
 
   return (
     <div className="rounded-lg border border-deck-700 bg-deck-800/40 p-3">

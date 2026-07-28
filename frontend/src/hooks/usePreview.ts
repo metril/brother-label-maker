@@ -138,8 +138,15 @@ export function usePreview(
       postPreview({
         definition: debounced!.definition,
         scale: PREVIEW_SCALE,
-        serialization: debounced!.serialization,
-        index: debounced!.index,
+        // Omit both keys entirely on the plain (non-serialized) path --
+        // `null`/`0` are valid wire values too (JSON.stringify keeps an
+        // explicit `null`, only `undefined` drops the key), but the
+        // plain-path request should look exactly like it did before task
+        // 2.11 ever existed, matching postPrint's/postPrintEstimate's own
+        // `serialization ?? undefined` convention (PrintButton.tsx /
+        // usePrintEstimate.ts).
+        serialization: debounced!.serialization ?? undefined,
+        index: debounced!.serialization ? debounced!.index : undefined,
       }),
     enabled: isDebouncedRenderable,
     placeholderData: (previousData, previousQuery) =>

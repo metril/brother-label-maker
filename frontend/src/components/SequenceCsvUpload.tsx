@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ApiError, postSerializeCsv } from "../api/client";
 import { csvColumns } from "../lib/sequence";
 import { Pending } from "./ui/Pending";
-import { errorText, fieldLabelText, helpText } from "./ui/styles";
+import { errorText, eyebrow, fieldLabelText, helpText } from "./ui/styles";
 import type { Sequence } from "../api/types";
 
 const PREVIEW_ROW_COUNT = 5;
@@ -63,15 +63,21 @@ export function SequenceCsvUpload({ sequence, onPatch }: SequenceCsvUploadProps)
           <p className="font-mono text-[13px] text-deck-200">
             {rows.length} row{rows.length === 1 ? "" : "s"}
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {columns.map((column) => (
-              <span
-                key={column}
-                className="rounded-full border border-deck-600 bg-deck-800 px-2 py-0.5 font-mono text-[11px] text-deck-400"
-              >
-                {`{csv.${column}}`}
-              </span>
-            ))}
+          <div>
+            <span className={`${eyebrow} mb-1 block`}>Columns</span>
+            {/* Reference only -- NOT the insert affordance (that's the
+                per-field {"{seq}"}/{"{csv.<col>}"} buttons next to each
+                text input, schema/TokenInsertButtons.tsx). Deliberately
+                styled UNLIKE those buttons -- flat, borderless, no hover
+                state -- so these read as inline-code labels ("here are
+                your column names") rather than clickable controls. */}
+            <div className="flex flex-wrap gap-1.5">
+              {columns.map((column) => (
+                <span key={column} className="rounded-sm bg-deck-800/70 px-1.5 py-0.5 font-mono text-[11px] text-deck-400">
+                  {`{csv.${column}}`}
+                </span>
+              ))}
+            </div>
           </div>
           <div className="overflow-x-auto rounded-md border border-deck-700">
             <table className="min-w-full font-mono text-[12px]">

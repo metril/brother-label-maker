@@ -168,8 +168,10 @@ export function PrintButton({
   // confirmed (see JobTray's own doc on `totalLabels`); plain "Print"
   // otherwise (off, or the serialization hasn't resolved yet -- `disabled`
   // already covers that case, so this is never a live, clickable "Print"
-  // that quietly means something different from what it says).
-  let label = serialization && totalLabels != null ? `Print ${totalLabels} labels` : "Print";
+  // that quietly means something different from what it says). Singular
+  // "1 label" for the (legal, if unusual -- a one-value run) N=1 case.
+  let label =
+    serialization && totalLabels != null ? `Print ${totalLabels} label${totalLabels === 1 ? "" : "s"}` : "Print";
   if (mutation.isPending) label = "Sending…";
   else if (phase === "printing") label = "Printing…";
   else if (phase === "done") label = "Printed";

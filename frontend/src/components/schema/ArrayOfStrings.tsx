@@ -169,9 +169,7 @@ function StringRow({
           </button>
         </div>
       </div>
-      <div className="pl-8">
-        <TokenInsertButtons inputRef={inputRef} value={value} onChange={onChange} fieldLabel={rowLabel} />
-      </div>
+      <TokenInsertButtons inputRef={inputRef} value={value} onChange={onChange} fieldLabel={rowLabel} className="pl-8" />
     </div>
   );
 }

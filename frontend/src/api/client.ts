@@ -50,6 +50,23 @@ const PYDANTIC_ERROR_HEADER_RE = /^\d+ validation errors? for \S+/;
 // contains brackets, e.g. "font_size_px must be in [6, 128], got 500".
 const PYDANTIC_ERROR_BLOCK_RE = /([^\n]+)\n\s+(.+?)\s*\[type=[^\]]*\]/g;
 
+/** Strips pydantic v2's own "Value error, " prefix -- added automatically
+ * whenever a `@field_validator`/`@model_validator` raises a plain
+ * `ValueError` (e.g. Sequence's total-labels-cap check, backend/render/
+ * serialize.py) -- from a single message. Shared by
+ * parsePydanticValidationError's block regex below (the STRING-dump shape
+ * a route's own error_message() produces) AND extractErrorDetail's array
+ * branch (FastAPI's own AUTOMATIC request-validation shape, `detail: [
+ * {loc, msg, type}]` -- what a body-level model_validator failure that
+ * NO route ever catches, like the one above, actually arrives as) -- a
+ * `ValueError` message reads the same, readable way regardless of which
+ * of the two shapes it happens to surface in. Review fix-up: the array
+ * branch used to skip this entirely, leaking "Value error, " verbatim
+ * into the over-cap message shown in the Serialize panel. */
+function stripValueErrorPrefix(message: string): string {
+  return message.replace(/^Value error,\s*/, "");
+}
+
 /** Turns pydantic v2's own multi-line `str(ValidationError)` dump --
  * what `error_message()` (backend/api/deps.py) returns VERBATIM for a
  * ValidationError that slips past this app's own client-side checks (see
@@ -75,7 +92,7 @@ export function parsePydanticValidationError(detail: string): string | null {
   const messages: string[] = [];
   for (const match of body.matchAll(PYDANTIC_ERROR_BLOCK_RE)) {
     const field = match[1]!.trim();
-    const message = match[2]!.trim().replace(/^Value error,\s*/, "");
+    const message = stripValueErrorPrefix(match[2]!.trim());
     messages.push(`${field}: ${message}`);
   }
   return messages.length > 0 ? messages.join("; ") : null;
@@ -102,7 +119,8 @@ export function extractErrorDetail(body: unknown, fallback: string): string {
     return detail
       .map((issue) => {
         const loc = issue.loc.filter((part) => part !== "body").join(".");
-        return loc ? `${loc}: ${issue.msg}` : issue.msg;
+        const msg = stripValueErrorPrefix(issue.msg);
+        return loc ? `${loc}: ${msg}` : msg;
       })
       .join("; ");
   }

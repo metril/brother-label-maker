@@ -13,6 +13,7 @@ import { useLabelTypes } from "../hooks/useLabelTypes";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
 import { useSequenceExpand } from "../hooks/useSequenceExpand";
 import { useTapes } from "../hooks/useTapes";
+import { hasSequenceFieldError, sequenceTotalLabels } from "../lib/sequence";
 import { hasNumberOutOfRange } from "../schema/numberValidity";
 import { hasRenderableContent } from "../schema/renderable";
 import { buildDefinition, tapeMismatchWarning, useDesignerStore } from "../stores/designer";
@@ -49,16 +50,47 @@ export function Designer() {
   // switch, a shorter list, copies_per_value turned down, ...).
   const [previewIndex, setPreviewIndex] = useState(0);
   const sequenceExpand = useSequenceExpand();
-  // The sequence is only ever "active" (sent to preview/estimate/print)
-  // once POST /api/render/expand has confirmed it resolves -- see
-  // useSequenceExpand's own docstring. While serialization is on but not
-  // yet confirmed (mid-edit, or genuinely invalid -- e.g. over the
-  // 1000-label cap), every serialization-aware request below simply falls
-  // back to the plain template-only path, same "keep the last good state,
-  // never fire a request already known bad" convention canSubmit/
-  // usePreview already follow for the params form itself.
-  const activeSerialization = serializationEnabled && sequenceExpand.data ? sequence : null;
+  // Review fix-up (I2, same class as useSequenceExpand.ts's own fix): the
+  // GATE and the VALUE sent must come from the SAME snapshot of `sequence`.
+  // The original version gated on `sequenceExpand.data` (the last
+  // CONFIRMED, debounced result -- can lag the live `sequence` by up to
+  // useSequenceExpand's own 300ms) while sending the LIVE `sequence` --
+  // editing a confirmed-valid run into an invalid one (e.g. clearing
+  // `count`, or pushing it out of bounds) kept `activeSerialization` == the
+  // now-invalid live sequence for one cycle, because the STALE confirmed
+  // data hadn't cleared yet. Confirmed live (chrome-devtools): real 422s on
+  // /api/print/estimate AND /api/render/preview, with the deck flashing a
+  // raw validation-error dump before self-correcting.
+  //
+  // Fixed the same way canSubmit already gates the params form: a
+  // SYNCHRONOUS, always-fresh check of the CURRENT `sequence`
+  // (validateSequence's own per-field bounds, lib/sequence.ts) -- no
+  // dependency on any debounced/stale signal at all, so gate and value can
+  // never disagree. usePreview/usePrintEstimate's OWN internal debounce
+  // then naturally "smooths over" every edit exactly as it already does
+  // for the template: any request they actually fire carries either the
+  // LAST known-good `activeSerialization` or the freshly-nulled one, never
+  // a live invalid one caught mid-edit.
+  //
+  // This does NOT replicate the cross-field total-labels cap (by design --
+  // see useSequenceExpand.ts) -- a SETTLED over-cap sequence still reaches
+  // usePreview/usePrintEstimate once, and still 422s there, same as any
+  // other server-only cross-field rule in this app (e.g. breaker_box's
+  // numbering-scheme parity check) -- but that's now a single, STABLE,
+  // correctly-worded error, not a stale one-cycle flash.
+  const activeSerialization = serializationEnabled && !hasSequenceFieldError(sequence) ? sequence : null;
   const sequenceTotal = sequenceExpand.data?.total_labels ?? null;
+  // Print must stay disabled through that same over-cap window (the
+  // brief's own "over-cap blocks print" requirement) -- gating Print on
+  // `activeSerialization` ALONE wouldn't cover it (per-field checks don't
+  // see the total cap). Requiring the CONFIRMED result to also match the
+  // live sequence's own (uncapped) arithmetic total closes the remaining
+  // staleness gap for Print specifically: a stale confirmed total left
+  // over from BEFORE an edit that changed count/copies (the over-cap
+  // scenario's own shape) never coincidentally matches the new live total,
+  // so Print stays disabled until a FRESH confirmation actually agrees
+  // with what's on screen right now.
+  const confirmedMatchesLive = sequenceExpand.data !== null && sequenceExpand.data.total_labels === sequenceTotalLabels(sequence);
 
   useEffect(() => {
     if (!serializationEnabled) {
@@ -125,12 +157,15 @@ export function Designer() {
   const tapeInfo = tapes?.find((t) => t.family === tape.family && t.nominal_mm === tape.width_mm) ?? null;
 
   // The template itself must still be renderable (canSubmit(definition)),
-  // AND -- only when serialization is on -- the sequence must have
-  // resolved (activeSerialization !== null). This is what disables Print
-  // for the over-cap case (total > 1000 -- the expand request 422s, so
-  // activeSerialization stays null) without duplicating that cross-field
-  // check client-side; see useSequenceExpand.ts's own docstring.
-  const jobTrayCanSubmit = canSubmit(definition) && (!serializationEnabled || activeSerialization !== null);
+  // AND -- only when serialization is on -- the live sequence must be
+  // field-valid AND its total must match a FRESH server confirmation
+  // (confirmedMatchesLive, see above). This is what disables Print for the
+  // over-cap case (total > 1000 -- the expand request 422s, so
+  // sequenceExpand.data stays null) without duplicating that cross-field
+  // check client-side, and without the stale-confirmation gap
+  // `activeSerialization` alone would leave open right after an edit; see
+  // useSequenceExpand.ts's own docstring.
+  const jobTrayCanSubmit = canSubmit(definition) && (!serializationEnabled || (activeSerialization !== null && confirmedMatchesLive));
 
   const printerStatus = usePrinterStatus();
   const tapeWarning = tapeMismatchWarning(

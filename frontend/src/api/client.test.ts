@@ -30,6 +30,30 @@ describe("extractErrorDetail", () => {
     expect(extractErrorDetail({}, "fallback")).toBe("fallback");
   });
 
+  // Review fix-up: a body-level `@model_validator` ValueError that NO
+  // route ever catches (e.g. Sequence's own total-labels cap check,
+  // backend/render/serialize.py -- raised while FastAPI is still parsing
+  // POST /api/render/expand's request body, so it arrives as shape 2
+  // above, never routed through error_message()) used to leak pydantic's
+  // own "Value error, " prefix verbatim, since only the STRING-dump path
+  // (parsePydanticValidationError) stripped it.
+  it("strips pydantic's 'Value error, ' prefix from shape 2 (array) issues too, not just the string-dump shape", () => {
+    expect(
+      extractErrorDetail(
+        {
+          detail: [
+            {
+              loc: ["body", "serialization"],
+              msg: "Value error, total labels 1500 (500 values x 3 copies) exceeds the 1000 maximum",
+              type: "value_error",
+            },
+          ],
+        },
+        "fallback",
+      ),
+    ).toBe("serialization: total labels 1500 (500 values x 3 copies) exceeds the 1000 maximum");
+  });
+
   it("turns a raw pydantic ValidationError dump (error_message()'s str(exc) for a ValidationError that slipped past client-side checks) into a readable message instead of the bracket/URL-laden original", () => {
     // Captured verbatim from a live 422 (POST /api/render/preview,
     // breaker_box with pitch_mm=5 against a minimum of 10).

@@ -11,6 +11,11 @@ interface TokenInsertButtonsProps {
   /** Already-qualified field label (e.g. "Lines 2") -- purely for each
    * button's own aria-label, not shown. */
   fieldLabel: string;
+  /** Extra classes for the returned wrapper (e.g. ArrayOfStrings.tsx's
+   * `pl-8` row-offset) -- kept as a prop rather than a wrapping `<div>` at
+   * each call site so that, while serialization is off and this component
+   * renders null, NO empty wrapper element is left behind either. */
+  className?: string;
 }
 
 /** task 2.11 brief: "a small 'Insert {seq}' affordance next to text inputs
@@ -23,7 +28,7 @@ interface TokenInsertButtonsProps {
  * restructure the form controls" from the brief. Renders nothing while
  * serialization is off: the form looks and behaves exactly as it did
  * before this task for the common (non-serialized) case. */
-export function TokenInsertButtons({ inputRef, value, onChange, fieldLabel }: TokenInsertButtonsProps) {
+export function TokenInsertButtons({ inputRef, value, onChange, fieldLabel, className }: TokenInsertButtonsProps) {
   const enabled = useDesignerStore((s) => s.serializationEnabled);
   const sequence = useDesignerStore((s) => s.sequence);
 
@@ -52,7 +57,7 @@ export function TokenInsertButtons({ inputRef, value, onChange, fieldLabel }: To
   }
 
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
+    <div className={`mt-1 flex flex-wrap gap-1 ${className ?? ""}`}>
       {tokens.map((token) => (
         <button
           key={token}
