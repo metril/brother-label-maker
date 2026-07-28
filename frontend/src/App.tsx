@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { Designer } from "./pages/Designer";
+import { Gallery } from "./pages/Gallery";
 import { History } from "./pages/History";
 import { Presets } from "./pages/Presets";
 import { JobEventsProvider } from "./hooks/useJobEvents";
@@ -31,6 +32,7 @@ function App() {
               <Route path="/" element={<Designer />} />
               <Route path="/presets" element={<Presets />} />
               <Route path="/history" element={<History />} />
+              <Route path="/gallery" element={<Gallery />} />
             </Routes>
           </AppShell>
         </BrowserRouter>

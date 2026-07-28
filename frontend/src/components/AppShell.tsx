@@ -61,6 +61,9 @@ export function AppShell({ children }: AppShellProps) {
           <NavLink to="/history" className={navLinkClass}>
             History
           </NavLink>
+          <NavLink to="/gallery" className={navLinkClass}>
+            Gallery
+          </NavLink>
         </nav>
 
         <div className="ml-auto flex items-center gap-4">

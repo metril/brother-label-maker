@@ -478,3 +478,25 @@ export interface ValidationIssue {
 export interface ApiErrorBody {
   detail?: string | ValidationIssue[];
 }
+
+/** Mirrors backend/render/gallery.py's GalleryItem -- one curated example
+ * card from GET /api/gallery (task 2.14). `type`+`params`+`tape` are what
+ * "Open in designer" loads into the designer store; `min_feed_mm` mirrors
+ * PreviewResponse's field of the same name (DeckStrip needs it);
+ * `total_labels`/`sequence_value` are non-null only for a serialized
+ * {seq}-template entry (which instance of the run is pictured -- always
+ * the first). */
+export interface GalleryItem {
+  id: string;
+  title: string;
+  blurb: string;
+  type: string;
+  tape: Tape;
+  params: Record<string, unknown>;
+  length_mm: number;
+  png_b64: string;
+  min_feed_mm: number;
+  warnings: RenderWarning[];
+  total_labels: number | null;
+  sequence_value: string | null;
+}

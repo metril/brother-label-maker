@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from labelmaker.api import (
+    router_gallery,
     router_history,
     router_images,
     router_labels,
@@ -87,6 +88,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return {"status": "ok", "printer_mode": cfg.printer_mode}
 
     app.include_router(router_labels.router, prefix="/api")
+    app.include_router(router_gallery.router, prefix="/api")
     app.include_router(router_images.router, prefix="/api")
     app.include_router(router_print.router, prefix="/api")
     app.include_router(router_printer.router, prefix="/api")

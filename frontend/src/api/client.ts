@@ -4,6 +4,7 @@ import type {
   ExpandRequest,
   ExpandResponse,
   FontInfo,
+  GalleryItem,
   HealthResponse,
   HistoryJob,
   HistoryListParams,
@@ -369,4 +370,13 @@ export function postHistoryReprint(id: string): Promise<ReprintResponse> {
 
 export function deleteHistoryJob(id: string): Promise<void> {
   return request<void>(`/history/${id}`, { method: "DELETE" });
+}
+
+// --- Gallery (task 2.14) ------------------------------------------------
+
+/** GET /api/gallery -- the curated all-types example catalogue, rendered
+ * server-side through the exact /api/render/preview pipeline and cached
+ * in-process there (cheap after the first call). */
+export function getGallery(): Promise<GalleryItem[]> {
+  return request<GalleryItem[]>("/gallery");
 }

@@ -173,7 +173,10 @@ interface DeckStripProps {
   isFetching: boolean;
 }
 
-function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }: DeckStripProps) {
+/** Exported for the Gallery page (task 2.14), which renders the same strip
+ * per card -- one geometry implementation (computeFeedDeckGeometry), two
+ * call sites, zero duplication. */
+export function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }: DeckStripProps) {
   const geo = computeFeedDeckGeometry(lengthMm, nominalMm, printMm, minFeedMm);
 
   return (
@@ -257,7 +260,9 @@ function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }:
   );
 }
 
-function WarningChipRow({
+/** Exported for the Gallery page alongside DeckStrip -- same chips, same
+ * severity split, no per-page restyling. */
+export function WarningChipRow({
   warnings,
   tone,
   onFocusObject,
