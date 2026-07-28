@@ -40,8 +40,10 @@ export function TrayItemRow({ item, index, isFirst, isLast, onMoveUp, onMoveDown
         </div>
         {/* title: the 320px sidebar still truncates a longer caption (e.g.
             "Patch Panel — PP-RACK-3" -> "Patch Panel — PP…") -- a native
-            tooltip on hover/focus is the cheap fix for the full text
-            without re-fighting the row's already-tight layout budget. */}
+            tooltip is the cheap fix for the full text on HOVER (a plain
+            `title` attribute is mouse-only, not a keyboard/focus
+            affordance -- corrected wording, review fix-up) without
+            re-fighting the row's already-tight layout budget. */}
         <p className="min-w-0 flex-1 truncate text-[13px] text-deck-200" title={item.label}>
           {item.label}
         </p>

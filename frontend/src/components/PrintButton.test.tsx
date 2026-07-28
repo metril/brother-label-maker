@@ -18,6 +18,7 @@ function fakeJob(overrides: Partial<UsePrintJobResult> = {}): UsePrintJobResult 
     progress: null,
     errorText: null,
     submittedCount: null,
+    printedBodyStale: false,
     canCancel: false,
     isCanceling: false,
     cancelError: null,

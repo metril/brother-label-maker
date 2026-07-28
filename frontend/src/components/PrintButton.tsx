@@ -88,14 +88,23 @@ export function PrintButton({
     job.submit({ labels, options, serialization: serialization ?? undefined }, liveCount);
   }
 
+  // Review fix-up (2nd round): `job.printedBodyStale` -- true once done AND
+  // the live body no longer matches what was submitted (the tray was
+  // edited, even while still printing) -- suppresses JUST the "Print
+  // again" label/styling, falling through to the same live, count-bearing
+  // `idleLabel` the idle/queued/printing states already use. The done-state
+  // SUCCESS LINE below is untouched by this: it stays visible with its own
+  // frozen count regardless of staleness (see hooks/usePrintJob.ts's own
+  // docstring for why reverting `phase` itself used to swallow that
+  // confirmation entirely for a body edited mid-print).
   let label = idleLabel(labels, serialization, totalLabels, isTray);
   if (job.isSubmitting) label = "Sending…";
   else if (job.phase === "queued") label = "Queued…";
   else if (job.phase === "printing") label = "Printing…";
-  else if (job.phase === "done") label = "Print again";
+  else if (job.phase === "done" && !job.printedBodyStale) label = "Print again";
 
   const buttonClass =
-    job.phase === "done"
+    job.phase === "done" && !job.printedBodyStale
       ? "border-sage-400 bg-sage-400/15 text-sage-400"
       : job.phase === "failed"
         ? "border-rust-500 bg-rust-500/15 text-rust-500"

@@ -36,6 +36,23 @@ export interface UsePrintJobResult {
    * labels." after duplicating the tray post-print, confirmed live -- the
    * job that actually printed always had 2). Null before the first submit. */
   submittedCount: number | null;
+  /** True once `phase === "done"` if the live print body (the caller's
+   * `bodyKey`, passed to this hook every render) no longer matches what
+   * was ACTUALLY submitted -- e.g. the tray was edited after the print
+   * finished, or even WHILE it was still printing. Review fix-up (2nd
+   * round): this used to revert `phase` itself back to "idle" the instant
+   * the body diverged -- which, for a body edited WHILE still printing,
+   * meant the "done" transition and the "idle" revert landed in the SAME
+   * commit the moment `job.done` arrived: the success line mounted and
+   * unmounted within one render, so the user never saw a completion
+   * notice at all (this WILL happen with a real printer, where a print
+   * genuinely takes seconds -- plenty of time to edit the tray first).
+   * `phase` now stays truthfully "done" regardless -- the job DID
+   * complete -- and this flag exists purely so the CALLER can suppress
+   * just the "Print again" button label (which would otherwise imply
+   * re-submitting the SAME body) without ever hiding the frozen
+   * `submittedCount` success line itself. */
+  printedBodyStale: boolean;
   /** True only while the job's LAST KNOWN status is "queued" -- the CAS
    * contract's own window (router_print.py's cancel_print_job): once the
    * worker has dequeued it (phase -> "printing"), cancel always 409s, so
@@ -47,9 +64,13 @@ export interface UsePrintJobResult {
    * job had already started) -- shown inline, distinct from `errorText`
    * (the JOB's own terminal failure) since a failed CANCEL doesn't mean the
    * print itself failed. Review fix-up: used to persist indefinitely until
-   * the NEXT submit -- now also cleared the moment `phase` itself changes
-   * (the job's own situation has moved on from whatever was true when the
-   * cancel attempt landed) or the print body changes (see `bodyKey`). */
+   * the NEXT submit -- now also cleared on `submit()` and once the job
+   * reaches a TERMINAL state (done/failed). Deliberately NOT cleared on
+   * every phase change (a 2nd-round regression the first fix introduced):
+   * the realistic way this message exists at all is a 409 landing while
+   * `phase` is still locally "queued", followed shortly by `job.started`
+   * moving it to "printing" -- clearing on that transition wiped the
+   * message before it could reasonably be read, sometimes within ~1s. */
   cancelError: string | null;
   isSubmitting: boolean;
   /** `printedCount`: the human-facing label count to freeze into
@@ -82,15 +103,11 @@ export interface UsePrintJobResult {
  * `bodyKey` (review fix-up): a caller-computed signature of the CURRENT
  * print body (JobTray.tsx's own `JSON.stringify({bodyLabels, options,
  * bodySerialization})`), passed on every render -- NOT used to fire
- * anything, only compared against the signature that was active at the
- * moment of the last `submit()` call. Once a job reaches "done", if that
- * comparison ever finds a MISMATCH, the done state (including the frozen
- * `submittedCount`) is cleared back to "idle" -- "Print again" gives way to
- * the live, count-bearing label the moment the tray/current-design/
- * serialization it described no longer matches what's on screen. `failed`/
- * `canceled` were never affected by the bug this fixes (PrintButton's own
- * label logic already falls back to the live count outside the `done`
- * branch) -- this only needed to cover `done`. */
+ * anything itself, only compared (during render, no effect involved) against
+ * the signature that was active at the moment of the last `submit()` call
+ * to derive `printedBodyStale`. `failed`/`canceled` were never affected by
+ * the bug this fixes (PrintButton's own label logic already falls back to
+ * the live count outside the `done` branch) -- only `done` needed this. */
 export function usePrintJob(bodyKey: string): UsePrintJobResult {
   const [phase, setPhase] = useState<PrintJobPhase>("idle");
   const [jobId, setJobId] = useState<string | null>(null);
@@ -214,36 +231,34 @@ export function usePrintJob(bodyKey: string): UsePrintJobResult {
     return () => clearTimeout(timer);
   }, [active]);
 
-  // Review fix-up: once "done", if the LIVE body signature ever diverges
-  // from the one that was actually submitted, the done state (and its
-  // frozen `submittedCount`) describes something that's no longer on
-  // screen -- revert to "idle" so the caller's own live, count-bearing
-  // label ("Print N labels (tray)") takes back over from "Print again".
-  // Scoped strictly to `phase === "done"`: a `failed`/`canceled` job was
-  // never affected by the bug this fixes (see this hook's own docstring),
-  // and reverting an ACTIVE (queued/printing) job mid-flight just because
-  // the tray changed would be wrong -- that job is still real and still
-  // printing whatever it was given at submit time.
-  useEffect(() => {
-    if (phase !== "done") return;
-    if (submittedBodyKeyRef.current === null || submittedBodyKeyRef.current === bodyKey) return;
-    setPhase("idle");
-    setJobId(null);
-    setProgress(null);
-    setSubmittedCount(null);
-    setCancelError(null);
-    submittedBodyKeyRef.current = null;
-  }, [phase, bodyKey]);
+  // Review fix-up (2nd round): `printedBodyStale` is a PURE DERIVED value,
+  // computed fresh on every render -- deliberately NOT a separate
+  // useEffect+setState pair (see UsePrintJobResult's own docstring for the
+  // "success line mounts and unmounts in the same commit" bug that
+  // approach caused: an effect reacting to `phase` becoming "done" AND
+  // `bodyKey` having already diverged -- e.g. the tray was edited WHILE
+  // still printing -- fired in the same pass that `phase` itself was set
+  // to "done", reverting it to "idle" before a single paint ever showed
+  // the completion). Reading `submittedBodyKeyRef.current` here is safe:
+  // it's write-only from `submit()` (an event handler), never written
+  // during render, so it can only ever describe an EARLIER submit relative
+  // to the render currently computing this value.
+  const printedBodyStale =
+    phase === "done" && submittedBodyKeyRef.current !== null && submittedBodyKeyRef.current !== bodyKey;
 
-  // Review fix-up: a cancel attempt's own 409/404 message must not outlive
-  // the situation it described -- clear it the instant `phase` itself
-  // changes to anything (including the body-change revert above, which
-  // also clears it directly for the SAME render). Deliberately keyed on
-  // `phase` alone (not `cancelError`), so setting a NEW cancelError while
-  // `phase` stays put (the normal case -- a 409 rarely changes this hook's
-  // own local phase) is never immediately undone by this same effect.
+  // Review fix-up (2nd round): a cancel attempt's 409/404 message must
+  // outlive the ROUTINE phase transition it's often diagnosing (queued ->
+  // printing, the realistic way a 409 happens at all -- see this hook's
+  // own docstring) -- clearing on EVERY phase change (the 1st round's fix)
+  // over-corrected, wiping the message within ~1s of it landing, sometimes
+  // before it could be read. Clear only on `submit()` (handled directly
+  // below) and once the job reaches a TERMINAL state, where a stale "your
+  // cancel didn't land" note next to a fresh done/failed outcome would
+  // just be confusing.
   useEffect(() => {
-    setCancelError(null);
+    if (phase === "done" || phase === "failed") {
+      setCancelError(null);
+    }
   }, [phase]);
 
   function submit(body: PrintRequest, printedCount: number) {
@@ -269,6 +284,7 @@ export function usePrintJob(bodyKey: string): UsePrintJobResult {
     progress,
     errorText,
     submittedCount,
+    printedBodyStale,
     canCancel: phase === "queued",
     isCanceling: cancelMutation.isPending,
     cancelError,

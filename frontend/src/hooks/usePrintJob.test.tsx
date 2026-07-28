@@ -203,6 +203,43 @@ describe("usePrintJob", () => {
     expect(result.current.phase).toBe("queued");
   });
 
+  // Review fix-up (2nd round): the 1st round's "clear cancelError whenever
+  // phase changes" over-corrected -- the REALISTIC way a 409 exists at all
+  // (see the test above) is exactly followed, within about a second, by
+  // job.started moving `phase` from "queued" to "printing" once the WS
+  // frame the server was already about to send catches up. Clearing on
+  // THAT transition wiped the message before a user could reasonably read
+  // it. It must survive queued -> printing, and only clear once the job
+  // reaches an actual terminal outcome.
+  it("cancel()'s 409 message survives the job.started transition that immediately follows it", async () => {
+    server.use(
+      http.post("/api/print", () => HttpResponse.json({ job_id: "job-10" }, { status: 202 })),
+      http.post("/api/print/jobs/:jobId/cancel", () =>
+        HttpResponse.json({ detail: "cannot cancel job in status 'printing'" }, { status: 409 }),
+      ),
+      stillQueuedHandler("job-10"),
+    );
+
+    const { result } = renderHook(() => usePrintJob("body-a"), { wrapper: createWrapper() });
+    act(() => result.current.submit(BODY, 1));
+    await waitFor(() => expect(result.current.canCancel).toBe(true));
+
+    act(() => result.current.cancel());
+    await waitFor(() => expect(result.current.cancelError).toBe("cannot cancel job in status 'printing'"));
+
+    const socket = await latestSocket();
+    act(() => socket.emit({ event: "job.started", job_id: "job-10" }));
+    await waitFor(() => expect(result.current.phase).toBe("printing"));
+
+    // The message the user just read must still be there.
+    expect(result.current.cancelError).toBe("cannot cancel job in status 'printing'");
+
+    // It DOES clear once the job reaches an actual terminal outcome.
+    act(() => socket.emit({ event: "job.done", job_id: "job-10" }));
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(result.current.cancelError).toBeNull();
+  });
+
   // Review fix-up #1: `submittedCount` is captured from submit()'s own
   // `printedCount` argument, not re-derived from anything else -- this is
   // what components/PrintButton.tsx now reads for the done-state success
@@ -231,13 +268,22 @@ describe("usePrintJob", () => {
     expect(result.current.submittedCount).toBe(2);
   });
 
-  // Review fix-up #2: `phase` used to stay "done" forever (until the next
-  // submit), so the brief's own count-bearing Print label ("Print 3 labels
-  // (tray)") was permanently replaced by "Print again" after the FIRST
-  // print of a session. Once the live body diverges from what was actually
-  // submitted, "done" must give way back to "idle" so the caller's own
-  // live-count label takes back over.
-  it("phase reverts from done to idle (clearing submittedCount) once bodyKey diverges from what was submitted", async () => {
+  // Review fix-up #2 (1st round): `phase` used to stay "done" forever
+  // (until the next submit), so the brief's own count-bearing Print label
+  // ("Print 3 labels (tray)") was permanently replaced by "Print again"
+  // after the FIRST print of a session.
+  //
+  // Review fix-up (2nd round): the 1st round's fix reverted `phase` itself
+  // back to "idle" the instant `bodyKey` diverged -- which, for a body
+  // edited WHILE still printing, meant "done" and the "idle" revert landed
+  // in the SAME commit the moment job.done arrived, so the success line
+  // never had a chance to render at all. `phase` now stays truthfully
+  // "done" regardless of `bodyKey`; `printedBodyStale` (a pure derived
+  // value, not a separate state transition) is what the CALLER
+  // (PrintButton) uses to suppress just the "Print again" label -- see
+  // this hook's own docstring, and the mid-print-edit test further below
+  // for the specific regression this reworking fixes.
+  it("printedBodyStale goes true once bodyKey diverges from what was submitted, WITHOUT reverting phase/submittedCount/jobId away from the real done state", async () => {
     server.use(http.post("/api/print", () => HttpResponse.json({ job_id: "job-8" }, { status: 202 })));
 
     const { result, rerender } = renderHook(({ bodyKey }) => usePrintJob(bodyKey), {
@@ -251,16 +297,55 @@ describe("usePrintJob", () => {
     const socket = await latestSocket();
     act(() => socket.emit({ event: "job.done", job_id: "job-8" }));
     await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(result.current.printedBodyStale).toBe(false);
 
-    // Same bodyKey re-rendered (nothing actually changed) -- must NOT reset.
+    // Same bodyKey re-rendered (nothing actually changed) -- must NOT flag stale.
     rerender({ bodyKey: "2-items" });
-    expect(result.current.phase).toBe("done");
+    expect(result.current.printedBodyStale).toBe(false);
 
-    // Now the tray genuinely changed.
+    // Now the tray genuinely changed -- `printedBodyStale` flips, but the
+    // job's own outcome (phase/submittedCount/jobId) is left completely
+    // alone: it DID complete, and the caller still needs the frozen count
+    // for its own success line.
     rerender({ bodyKey: "64-items" });
-    await waitFor(() => expect(result.current.phase).toBe("idle"));
-    expect(result.current.submittedCount).toBeNull();
-    expect(result.current.jobId).toBeNull();
+    expect(result.current.printedBodyStale).toBe(true);
+    expect(result.current.phase).toBe("done");
+    expect(result.current.submittedCount).toBe(2);
+    expect(result.current.jobId).toBe("job-8");
+  });
+
+  // The exact regression the 2nd round fixed: a body edit WHILE the job is
+  // still ACTIVELY printing (not yet done) must never swallow the
+  // completion notice once job.done finally arrives.
+  it("a body edit while printing (before done) does not prevent the done state from landing once job.done arrives", async () => {
+    server.use(
+      http.post("/api/print", () => HttpResponse.json({ job_id: "job-mid" }, { status: 202 })),
+      stillQueuedHandler("job-mid"),
+    );
+
+    const { result, rerender } = renderHook(({ bodyKey }) => usePrintJob(bodyKey), {
+      initialProps: { bodyKey: "2-items" },
+      wrapper: createWrapper(),
+    });
+
+    act(() => result.current.submit(BODY, 2));
+    await waitFor(() => expect(result.current.jobId).toBe("job-mid"));
+
+    const socket = await latestSocket();
+    act(() => socket.emit({ event: "job.started", job_id: "job-mid" }));
+    await waitFor(() => expect(result.current.phase).toBe("printing"));
+
+    // The tray is edited WHILE the job is still printing -- bodyKey now
+    // diverges from what was actually submitted, well before "done".
+    rerender({ bodyKey: "64-items" });
+    expect(result.current.phase).toBe("printing");
+
+    act(() => socket.emit({ event: "job.done", job_id: "job-mid" }));
+
+    // The done state must land and STAY -- not flash and revert.
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(result.current.submittedCount).toBe(2);
+    expect(result.current.printedBodyStale).toBe(true);
   });
 
   it("a failed (not done) job's phase is untouched by a later bodyKey change", async () => {

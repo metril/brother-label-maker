@@ -307,14 +307,21 @@ describe("JobTray -- mobile compact bar", () => {
 // actually printed, AND `phase` stayed "done" (and the button "Print
 // again") forever once reached, regardless of later tray edits. Both bugs
 // share one root cause (hooks/usePrintJob.ts had no notion of "the body
-// that was actually submitted" at all) and are fixed together there; this
-// integration test drives the real store + real JobTray to pin both
-// symptoms at once, the way they were actually caught live: print a
-// 2-item tray, mutate it AFTER the job finishes, and confirm the success
-// line never lies about the mutated tray while the button itself recovers
-// its live, count-bearing label.
+// that was actually submitted" at all) and are fixed together there.
+//
+// 2nd round: the 1st round's fix for the SECOND bug (reverting `phase`
+// itself to "idle" the instant the body diverged) turned out to swallow
+// the completion notice entirely for a body edited WHILE STILL PRINTING
+// (the "done" transition and the "idle" revert landed in the same commit).
+// The fix now keeps `phase` truthfully "done" -- and its frozen success
+// line VISIBLE -- regardless of when the tray changed; only the BUTTON's
+// own "Print again" label is suppressed once the body is stale. This
+// integration test drives the real store + real JobTray to pin the
+// (now-corrected) shape of that behavior: print a 2-item tray, mutate it
+// AFTER the job finishes, and confirm the success line keeps its ORIGINAL
+// (frozen) count while the button recovers its live, count-bearing label.
 describe("JobTray -- done-state freeze and reset (review fix-up)", () => {
-  it("freezes the printed count in the success line and returns Print to a live count-bearing label once the tray changes post-print", async () => {
+  it("keeps the success line at its frozen count and returns Print to a live count-bearing label once the tray changes post-print", async () => {
     const user = userEvent.setup();
     seedTrayItems(2);
     server.use(
@@ -335,15 +342,70 @@ describe("JobTray -- done-state freeze and reset (review fix-up)", () => {
     await user.click(screen.getByRole("button", { name: "Duplicate item 1" }));
 
     // The success line must never be silently rewritten to describe the
-    // NEW (3-item) tray -- it either still reads "2" or has been cleared
-    // away entirely by the phase reset below, but "3" must never appear.
+    // NEW (3-item) tray -- "3" must never appear there -- but it also must
+    // NOT disappear: the job genuinely printed 2 labels, and that
+    // confirmation stays exactly as it was.
     expect(screen.queryByText(/Printed 3 labels/)).not.toBeInTheDocument();
+    expect(screen.getByText("Printed 2 labels.")).toBeInTheDocument();
 
-    // The button must give the live, count-bearing label back -- not
-    // "Print again" persisting forever regardless of what the tray now is.
+    // The BUTTON, meanwhile, gives the live, count-bearing label back --
+    // not "Print again" persisting forever regardless of what the tray now
+    // is (clicking it now would print the NEW, 3-item tray, not "again").
     expect(await screen.findByRole("button", { name: "Print 3 labels (tray)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Print again" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Printed 2 labels.")).not.toBeInTheDocument();
+  });
+
+  // The exact regression the 2nd fix-up round closed: editing the tray
+  // WHILE a job is still printing (not yet done) must not prevent the
+  // success line from ever appearing once it finishes.
+  it("a tray edit made WHILE still printing does not swallow the completion notice once job.done arrives", async () => {
+    const user = userEvent.setup();
+    seedTrayItems(2);
+    server.use(
+      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
+      http.post("/api/print", () => HttpResponse.json({ job_id: "job-mid-edit" }, { status: 202 })),
+      // Keep the poll fallback reporting "printing" (not "done") so the WS
+      // frame below is what actually resolves this -- and so there's a
+      // real window, while genuinely "printing", to edit the tray in.
+      http.get("/api/print/jobs/:jobId", () =>
+        HttpResponse.json({
+          id: "job-mid-edit",
+          created_at: "2026-07-27T00:00:00.000000Z",
+          status: "printing",
+          error: null,
+          definition: {},
+          label_count: 2,
+          chain_mode: "cut_each",
+          strategy: null,
+          tape_width_mm: 24,
+          media_raw_byte: null,
+          tape_used_mm: null,
+          thumbnail_png_b64: null,
+        }),
+      ),
+    );
+
+    renderWithProviders(<JobTray current={currentDesign()} onAddToTray={vi.fn()} />);
+    const printButton = await screen.findByRole("button", { name: "Print 2 labels (tray)" });
+    await user.click(printButton);
+
+    await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
+    const socket = mockWebSocketInstances.at(-1)!;
+    act(() => socket.emit({ event: "job.started", job_id: "job-mid-edit" }));
+    await screen.findByRole("button", { name: "Printing…" });
+
+    // Edit the tray WHILE the job is still actively printing.
+    await user.click(screen.getByRole("button", { name: "Duplicate item 1" }));
+    expect(screen.getByRole("button", { name: "Printing…" })).toBeInTheDocument();
+
+    act(() => socket.emit({ event: "job.done", job_id: "job-mid-edit" }));
+
+    // The completion notice must land -- with the count that ACTUALLY
+    // printed (2), not the now-3-item tray -- and the button must recover
+    // its live label rather than claiming "Print again".
+    expect(await screen.findByText("Printed 2 labels.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Print 3 labels (tray)" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Print again" })).not.toBeInTheDocument();
   });
 
   it("a failed print is unaffected: the tray stays intact and the error/retry state doesn't reset just because the tray is edited", async () => {
