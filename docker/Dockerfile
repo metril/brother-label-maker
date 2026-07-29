@@ -31,6 +31,16 @@ WORKDIR /fe
 COPY frontend/package*.json ./
 RUN npm ci
 
+# frontend/public/fonts/ is gitignored -- the UI TTFs are generated at build
+# time by scripts/copy-fonts.mjs (wired into `prebuild`), which reads them
+# from backend/assets/fonts/ resolved as ../../backend/assets/fonts relative
+# to the script. With WORKDIR=/fe that lands at /backend/assets/fonts, so
+# the fonts have to exist there in this stage or `npm run build` dies in
+# prebuild. Copied before the source so font changes (rare) don't invalidate
+# the source layer and vice versa. Only this stage ever sees /backend --
+# the runtime image gets its own copy under /app/backend from stage 2.
+COPY backend/assets/fonts/ /backend/assets/fonts/
+
 COPY frontend/ ./
 RUN npm run build
 # Vite's default outDir is "dist" relative to the project root -> /fe/dist.
