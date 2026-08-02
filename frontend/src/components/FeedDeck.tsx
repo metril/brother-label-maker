@@ -56,6 +56,13 @@ interface FeedDeckProps {
    * index itself is UI-only state that drives usePreview's own `index`
    * argument), not this component -- FeedDeck stays presentational. */
   sequenceStepper?: SequenceStepperProps | null;
+  /** track C3: on-screen px-per-physical-mm, overriding
+   * feedDeckGeometry.ts's DEFAULT_PX_PER_MM -- the Designer page's own
+   * zoom control (2x/4x/8x) owns this state and passes it down; omitted
+   * (undefined) renders at the same default size as before this track.
+   * FeedDeck stays presentational: it neither owns nor renders the zoom
+   * control itself, only threads the resulting value into the geometry. */
+  pxPerMm?: number;
 }
 
 /** The feed deck: the design system's signature element (see the design
@@ -79,6 +86,7 @@ export function FeedDeck({
   error,
   onFocusObject,
   sequenceStepper,
+  pxPerMm,
 }: FeedDeckProps) {
   const warningList = warnings.filter((w) => w.severity === "warning");
   const infoList = warnings.filter((w) => w.severity === "info");
@@ -134,7 +142,7 @@ export function FeedDeck({
             role="status"
             aria-label="Loading preview"
             className="flex min-w-[120px] items-center justify-center"
-            style={{ height: tape.width_mm * PX_PER_MM }}
+            style={{ height: tape.width_mm * (pxPerMm ?? PX_PER_MM) }}
           >
             <Pending />
           </div>
@@ -146,6 +154,7 @@ export function FeedDeck({
             printMm={tapeInfo.print_mm}
             minFeedMm={minFeedMm}
             isFetching={isFetching}
+            pxPerMm={pxPerMm}
           />
         )}
       </div>
@@ -171,13 +180,18 @@ interface DeckStripProps {
   printMm: number;
   minFeedMm: number;
   isFetching: boolean;
+  /** track C3: overrides feedDeckGeometry.ts's DEFAULT_PX_PER_MM. Omitted
+   * by the Gallery page (task 2.14's call site), which must keep rendering
+   * at the same default size it always has -- only Designer's FeedDeck
+   * usage ever passes a non-default value. */
+  pxPerMm?: number;
 }
 
 /** Exported for the Gallery page (task 2.14), which renders the same strip
  * per card -- one geometry implementation (computeFeedDeckGeometry), two
  * call sites, zero duplication. */
-export function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching }: DeckStripProps) {
-  const geo = computeFeedDeckGeometry(lengthMm, nominalMm, printMm, minFeedMm);
+export function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetching, pxPerMm }: DeckStripProps) {
+  const geo = computeFeedDeckGeometry(lengthMm, nominalMm, printMm, minFeedMm, pxPerMm);
 
   return (
     <div className="inline-flex flex-col items-start gap-2">

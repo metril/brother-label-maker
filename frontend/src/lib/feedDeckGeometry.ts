@@ -1,10 +1,19 @@
-/** On-screen px per physical mm -- applied to physical mm values ONLY
- * (length_mm, a tape's nominal_mm/print_mm from /api/tapes), NEVER to
+/** Default on-screen px per physical mm -- applied to physical mm values
+ * ONLY (length_mm, a tape's nominal_mm/print_mm from /api/tapes), NEVER to
  * png_width_px/png_height_px (those are SCALED device-dot dimensions --
  * see api/types.ts's PreviewResponse doc, the "unit trap" this whole
  * module is built around avoiding). This is the one arithmetic constant
- * the entire feed-deck signature element is built on. */
-export const PX_PER_MM = 4;
+ * the entire feed-deck signature element is built on -- callers that want
+ * a different zoom level (track C3: the Designer's preview-zoom control)
+ * pass their own `pxPerMm` into computeFeedDeckGeometry instead of
+ * changing this default. */
+export const DEFAULT_PX_PER_MM = 4;
+
+/** @deprecated alias for DEFAULT_PX_PER_MM, kept only so existing
+ * non-zoomable call sites (Gallery's DeckStrip usage, FeedDeck's own
+ * loading-placeholder height) keep compiling unchanged. Prefer
+ * DEFAULT_PX_PER_MM in new code. */
+export const PX_PER_MM = DEFAULT_PX_PER_MM;
 
 export interface FeedDeckGeometry {
   /** The tape strip's own width -- the physical length actually consumed
@@ -35,20 +44,24 @@ export interface FeedDeckGeometry {
 
 /** Deriving the feed deck's entire geometry from three physical-mm inputs
  * (never from the preview PNG's own pixel dimensions) is the load-bearing
- * design decision here -- see PX_PER_MM's own docstring and the design
- * doc's "signature element" section. */
+ * design decision here -- see DEFAULT_PX_PER_MM's own docstring and the
+ * design doc's "signature element" section. `pxPerMm` defaults to
+ * DEFAULT_PX_PER_MM (4) so every existing caller keeps rendering at
+ * exactly the same on-screen size; Designer.tsx's zoom control is the only
+ * caller that passes a different value. */
 export function computeFeedDeckGeometry(
   lengthMm: number,
   nominalMm: number,
   printMm: number,
   minFeedMm: number,
+  pxPerMm: number = DEFAULT_PX_PER_MM,
 ): FeedDeckGeometry {
-  const stripWidthPx = lengthMm * PX_PER_MM;
-  const stripHeightPx = nominalMm * PX_PER_MM;
-  const printableHeightPx = printMm * PX_PER_MM;
+  const stripWidthPx = lengthMm * pxPerMm;
+  const stripHeightPx = nominalMm * pxPerMm;
+  const printableHeightPx = printMm * pxPerMm;
   const marginHeightPx = Math.max(0, (stripHeightPx - printableHeightPx) / 2);
   const feedWasteMm = Math.max(0, minFeedMm - lengthMm);
-  const feedWasteWidthPx = feedWasteMm * PX_PER_MM;
+  const feedWasteWidthPx = feedWasteMm * pxPerMm;
 
   return {
     stripWidthPx,

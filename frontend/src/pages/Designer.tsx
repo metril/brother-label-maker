@@ -7,6 +7,7 @@ import { SavePresetDialog } from "../components/SavePresetDialog";
 import { SequenceEditor } from "../components/SequenceEditor";
 import { TapeSelector } from "../components/TapeSelector";
 import { Pending } from "../components/ui/Pending";
+import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { panel, panelHeading, typeHeading } from "../components/ui/styles";
 import { usePreview } from "../hooks/usePreview";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
@@ -23,6 +24,20 @@ import { useTrayStore } from "../stores/tray";
 import type { LabelDefinition } from "../api/types";
 
 const HIGHLIGHT_MS = 2000;
+
+/** track C3: the feed deck's own preview-zoom control -- on-screen
+ * px-per-mm, threaded into FeedDeck's `pxPerMm` prop (feedDeckGeometry.ts's
+ * computeFeedDeckGeometry). SegmentedControl's generic requires string
+ * values, so the option's own string IS the px-per-mm figure (`Number(z)`
+ * below) rather than a separate label->number map. "4" is the default --
+ * matches feedDeckGeometry.ts's DEFAULT_PX_PER_MM, i.e. the strip renders
+ * at exactly its pre-C3 size until the user zooms. */
+type ZoomLevel = "2" | "4" | "8";
+const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
+  { value: "2", label: "2×" },
+  { value: "4", label: "4×" },
+  { value: "8", label: "8×" },
+];
 
 /** The designer page: per the design doc's layout, a full-width feed deck
  * (the hero) on top, then a parametric form (left, scrolls) beside a
@@ -45,6 +60,12 @@ export function Designer() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reducedMotion = usePrefersReducedMotion();
+
+  // track C3: local UI-only state, same reasoning as previewIndex below --
+  // nothing outside this page reads it, and it deliberately does NOT
+  // persist across visits (the brief's own "persisting zoom is not
+  // required").
+  const [zoom, setZoom] = useState<ZoomLevel>("4");
 
   // task 2.11: the feed deck's own preview-index stepper -- which of the
   // serialized run's expanded labels the deck currently renders. UI-only
@@ -248,6 +269,16 @@ export function Designer() {
             {tapeWarning}
           </div>
         )}
+        {/* track C3: the deck's own preview-zoom control -- quiet (mono
+            caption-sized label, same tone as the deck's own printable-mm
+            caption), right-aligned directly above the strip it scales so
+            it reads as a knob on the deck rather than a second bold
+            element (the design doc's "this is the one bold element; do
+            not add a second" -- see FeedDeck.tsx's own docstring). */}
+        <div className="mb-2 flex items-center justify-end gap-2">
+          <span className="font-mono text-[11px] text-deck-400">Zoom</span>
+          <SegmentedControl ariaLabel="Preview zoom" options={ZOOM_OPTIONS} value={zoom} onChange={setZoom} />
+        </div>
         <FeedDeck
           tape={tape}
           tapeInfo={tapeInfo}
@@ -259,6 +290,7 @@ export function Designer() {
           isFetching={preview.isFetching}
           error={preview.error}
           onFocusObject={handleFocusObject}
+          pxPerMm={Number(zoom)}
           sequenceStepper={
             activeSerialization && sequenceTotal
               ? {

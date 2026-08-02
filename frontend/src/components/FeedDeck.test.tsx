@@ -70,6 +70,14 @@ describe("FeedDeck", () => {
     expect(cutLine.style.borderLeft).toContain("dashed");
   });
 
+  it("track C3: threads an explicit pxPerMm into the strip's geometry, and falls back to the default (4) when omitted", () => {
+    const { rerender } = render(<FeedDeck {...baseProps()} lengthMm={40} minFeedMm={24.5} pxPerMm={8} />);
+    expect(screen.getByTestId("printable-band")).toHaveStyle({ width: "320px" }); // 40mm * 8
+
+    rerender(<FeedDeck {...baseProps()} lengthMm={40} minFeedMm={24.5} />);
+    expect(screen.getByTestId("printable-band")).toHaveStyle({ width: "160px" }); // 40mm * default(4)
+  });
+
   it("shows the minimum-feed hatch region past the cut line only when under the floor, sized to reach exactly the floor", () => {
     const { rerender } = render(<FeedDeck {...baseProps()} lengthMm={40} minFeedMm={24.5} />);
     expect(screen.queryByTestId("feed-waste")).not.toBeInTheDocument();

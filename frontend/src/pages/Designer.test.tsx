@@ -209,3 +209,27 @@ describe("Designer warning-chip -> form-row focus wiring", () => {
     expect(document.activeElement).toBe(row);
   });
 });
+
+// track C3: the feed deck's own preview-zoom control. The default preview
+// mock (test/msw/handlers.ts's previewHandler) returns length_mm: 25.4, so
+// the printable band's on-screen width is a direct, exact function of
+// whichever zoom level is selected (25.4 * pxPerMm) -- no rounding at any
+// of 2x/4x/8x (25.4*2 = 50.8, *4 = 101.6, *8 = 203.2).
+describe("Designer -- preview zoom (track C3)", () => {
+  it("defaults to 4x and rescales the printable band's on-screen width when a different zoom level is selected", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Designer />);
+
+    const lines1 = await screen.findByLabelText("Lines 1");
+    await user.type(lines1, "UPLINK-A");
+
+    const band = await screen.findByTestId("printable-band");
+    await waitFor(() => expect(band).toHaveStyle({ width: "101.6px" })); // 25.4mm * 4x (default)
+
+    await user.click(screen.getByRole("radio", { name: "8×" }));
+    await waitFor(() => expect(screen.getByTestId("printable-band")).toHaveStyle({ width: "203.2px" })); // 25.4mm * 8x
+
+    await user.click(screen.getByRole("radio", { name: "2×" }));
+    await waitFor(() => expect(screen.getByTestId("printable-band")).toHaveStyle({ width: "50.8px" })); // 25.4mm * 2x
+  });
+});
