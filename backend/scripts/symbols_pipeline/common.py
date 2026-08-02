@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +61,23 @@ _PATH_D_RE = re.compile(r'<path\b[^>]*\bd="([^"]*)"', re.S)
 _SVG_INNER_RE = re.compile(r"<svg\b[^>]*>(.*)</svg>\s*\Z", re.S)
 _CATEGORY_HEADER_RE = re.compile(r"^#\s*category:\s*(\w+)\s*$", re.I)
 _ID_CHARSET_RE = re.compile(r"[a-z0-9_]+")
+
+# extract_fill_path()'s parsing primitives (see its own docstring): a
+# self-closing-or-not <path ...> element, and a generic attr="value" pair
+# scraper applied to just that one element's text (not the whole document --
+# every fetch_*.py source this is used against ships flat <path> siblings
+# directly under <svg>, never nested groups, see that function's docstring).
+_PATH_ELEMENT_RE = re.compile(r"<path\b[^>]*/?>", re.S)
+_ATTR_RE = re.compile(r'([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*"([^"]*)"')
+# Any element extract_fill_path can't safely fold into a plain <path> merge:
+# other drawable primitives (a source using <circle>/<rect>/... instead of a
+# <path> for a simple shape -- seen once, Bootstrap Icons' circle-fill.svg),
+# or grouping/indirection constructs (<g> transforms, <clipPath>/<mask>/<use>
+# indirection) that a naive "concatenate every <path> d string" merge cannot
+# account for.
+_OTHER_ELEMENT_RE = re.compile(
+    r"<(circle|rect|ellipse|line|polyline|polygon|g|clipPath|mask|use|defs)\b", re.S
+)
 
 # Existing-60 entries were curated (task 2.7) from Material Symbols at this
 # exact commit -- see assets/symbols/LICENSES.md's "Material Symbols" section.
@@ -175,7 +193,7 @@ def extract_single_path_d(svg_text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def build_svg_document(d: str, transform: str) -> str:
+def build_svg_document(d: str, transform: str = "", *, fill_rule: str | None = None) -> str:
     """Wraps a raw (verbatim, un-rewritten) path `d` string in the single
     viewBox="0 0 24 24" <svg> document shape render/symbols.py requires,
     applying `transform` to reconcile the source's native coordinate system
@@ -183,11 +201,195 @@ def build_svg_document(d: str, transform: str) -> str:
     assets/symbols/LICENSES.md's "Normalization" section), just parameterized
     per source since Material (0,-960,960,960) and Phosphor (0,0,256,256)
     each need a different transform string.
+
+    `transform` defaults to "" (attribute omitted entirely, not emitted as
+    an empty `transform=""`) for the Track D2 sources whose native viewBox
+    already IS "0 0 24 24" (Tabler/Remix/Fluent -- Bootstrap's 16-unit
+    square still needs `scale(1.5)`). `fill_rule`, if given (e.g.
+    "evenodd"), is emitted as an explicit `fill-rule="..."` attribute on the
+    <path> -- required for a merged multi-path candidate (see
+    extract_fill_path) or a single source path whose own hole geometry
+    depends on evenodd rather than nonzero winding; omitted (SVG's implicit
+    nonzero default applies) when None, matching every call site that
+    predates Track D2.
     """
+    attrs = [f'd="{d}"']
+    if transform:
+        attrs.append(f'transform="{transform}"')
+    if fill_rule:
+        attrs.append(f'fill-rule="{fill_rule}"')
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
-        f'<path d="{d}" transform="{transform}"/></svg>'
+        f'<path {" ".join(attrs)}/></svg>'
     )
+
+
+def _path_attrs(path_element: str) -> dict[str, str]:
+    return dict(_ATTR_RE.findall(path_element))
+
+
+def extract_fill_path(svg_text: str) -> tuple[str, str] | None:
+    """Source-agnostic single-OR-multi-<path> extraction for an
+    already-filled source icon (Tabler/Remix/Bootstrap/Fluent's filled
+    variants -- unlike Lucide's stroke-based markup, see fetch_lucide.py):
+    returns `(merged_d, fill_rule)`, or None if `svg_text` can't be reduced
+    to one same-fill shape this way (caller skips+logs; every fetch_*.py
+    that calls this already prints WHY -- see e.g. fetch_tabler.py's
+    docstring for the enumerated reject reasons below in prose).
+
+    Unlike `extract_single_path_d` (which only ever accepts a lone <path>
+    and throws away whatever `fill-rule` it may have declared), this:
+
+    1. Drops every <path fill="none" .../> outright -- an explicitly
+       fill="none" path paints NOTHING, so removing it never changes the
+       rendered result; it's how several of these sources ship an invisible
+       full-canvas hitbox/bounding-box path alongside the real glyph
+       (Tabler's `<path stroke="none" d="M0 0h24v24H0z" fill="none" />` on
+       literally every filled icon is the motivating case -- without this
+       drop step EVERY Tabler candidate would look "multi-path" for no
+       visual reason).
+    2. Rejects (returns None) if:
+       - zero <path> elements survive step 1 (nothing left to draw), or
+       - any of `<circle>`/`<rect>`/`<ellipse>`/`<line>`/`<polyline>`/
+         `<polygon>`/`<g>`/`<clipPath>`/`<mask>`/`<use>`/`<defs>` appears
+         anywhere in the document (a shape or indirection this naive
+         d-string concatenation can't safely fold in -- seen once in
+         practice, Bootstrap Icons' circle-fill.svg uses a bare <circle>),
+       - the surviving paths declare more than one distinct explicit `fill`
+         value (a genuinely multi-color icon -- e.g. Fluent's
+         flag_pride_*_24_filled.svg, each stripe its own hex color --
+         can't be flattened into one single-fill path without silently
+         discarding color information), or
+       - any surviving path carries its own `stroke` (other than an
+         explicit "none") or `transform` attribute (a per-path transform
+         would need to be actually applied to that path's own `d`
+         coordinates before concatenation could be correct -- raw string
+         concatenation across differently-transformed local coordinate
+         spaces would silently mangle the shape, so this rejects rather
+         than pretending the transforms are identity).
+    3. Otherwise concatenates the survivors' `d` strings (space-joined --
+       each is already a complete, self-contained subpath list starting
+       with its own M/m command, so simple concatenation is a correct
+       multi-subpath `d` for the merged <path>) and returns
+       `(merged_d, fill_rule)`, where `fill_rule` is "evenodd" if ANY
+       surviving path explicitly declares `fill-rule="evenodd"` (the whole
+       merged shape must honor it for that path's hole geometry to survive
+       the merge -- see README.md's "hole-shaped icon" spot-check note),
+       else "nonzero" -- returned explicitly (never left implicit) so
+       callers always emit an explicit `fill-rule` attribute rather than
+       silently depending on SVG's default, the same reasoning
+       fetch_lucide.py's own `_build_svg_document` already documents.
+
+       This also *subsumes* the single-survivor case (the common one, most
+       of these sources' icons stay single-path even after step 1): unlike
+       extract_single_path_d, a lone survivor's own `fill-rule="evenodd"`
+       (if it declares one) is preserved into the return value instead of
+       silently discarded -- verified in practice against Bootstrap's own
+       fill icons, ~70 of which declare fill-rule="evenodd" on a SINGLE
+       <path> for ring/hole shapes (e.g. heart-fill.svg's cardioid cusp).
+    """
+    if _OTHER_ELEMENT_RE.search(svg_text):
+        return None
+    kept = []
+    for element in _PATH_ELEMENT_RE.findall(svg_text):
+        attrs = _path_attrs(element)
+        if attrs.get("fill") == "none":
+            continue
+        if "d" not in attrs:
+            continue
+        kept.append(attrs)
+    if not kept:
+        return None
+    fills = {a["fill"] for a in kept if "fill" in a}
+    if len(fills) > 1:
+        return None
+    if any(a.get("stroke", "none") != "none" for a in kept):
+        return None
+    if any("transform" in a for a in kept):
+        return None
+    fill_rule = "evenodd" if any(a.get("fill-rule") == "evenodd" for a in kept) else "nonzero"
+    merged_d = " ".join(a["d"] for a in kept)
+    return merged_d, fill_rule
+
+
+# classify_by_keyword()'s bucket -> token-set table, applied in this fixed
+# priority order (first bucket with a matching token wins -- e.g.
+# "battery-warning" lands electrical via "battery" before safety's "warning"
+# is ever checked, the same priority-order approach lucide_ids.txt's header
+# documents its own from-scratch keyword-map having used). "general" and
+# "misc" are deliberately not table-driven: "general" is reserved for
+# hand-curated sources (the legacy 60 / Material's selection, see
+# common.VALID_CATEGORIES and the pipeline README), and "misc" is the
+# fallback for a token set that matches nothing below, not a bucket this
+# table can itself decide *into*.
+_KEYWORD_CATEGORY_TABLE: tuple[tuple[str, frozenset[str]], ...] = (
+    ("electrical", frozenset({
+        "battery", "batteries", "bolt", "plug", "plugged", "outlet", "socket",
+        "volt", "voltage", "watt", "amp", "ampere", "amperage", "circuit",
+        "resistor", "capacitor", "solar", "charging", "charge", "charger",
+        "fuse", "breaker", "electric", "electrical", "electricity",
+        "lightning", "cable", "wire", "wiring", "plugin",
+    })),
+    ("network", frozenset({
+        "wifi", "bluetooth", "router", "signal", "cloud", "server", "dns",
+        "lan", "wan", "vpn", "ethernet", "network", "hotspot", "satellite",
+        "antenna", "rss", "nfc", "modem", "gateway", "node", "sim",
+        "cellular", "airplay", "cast", "rfid",
+    })),
+    ("av", frozenset({
+        "camera", "video", "film", "movie", "music", "headphone",
+        "headphones", "headset", "speaker", "volume", "mic", "microphone",
+        "play", "pause", "record", "tv", "television", "monitor", "screen",
+        "projector", "radio", "podcast", "photo", "photos", "image",
+        "gallery", "disc", "album", "audio", "sound", "media", "subtitle",
+        "subtitles", "clapperboard", "equalizer", "broadcast",
+    })),
+    ("arrow", frozenset({"arrow", "arrows", "chevron", "chevrons", "caret"})),
+    ("safety", frozenset({
+        "alert", "warning", "danger", "hazard", "shield", "alarm", "fire",
+        "smoke", "extinguisher", "emergency", "biohazard", "radiation",
+        "radioactive", "caution", "siren", "helmet", "protect",
+        "protection", "security", "secure", "lock", "unlock", "padlock",
+        "key", "exclamation", "hazmat", "evacuation", "panic", "forbidden",
+        "prohibited",
+    })),
+)
+
+
+def classify_by_keyword(
+    tokens: Iterable[str], *, overrides: Mapping[str, str] | None = None, base_id: str = ""
+) -> str:
+    """Deterministic, priority-ordered keyword-map from a bag of lowercase
+    tokens (an id's own hyphen/underscore-split words, optionally unioned
+    with richer metadata like a source's own free-text tags -- see
+    fetch_tabler.py, which folds in icons.json's `tags` array) to one of
+    common.VALID_CATEGORIES' five domain buckets, or "misc" if nothing
+    matches. Shared by fetch_bootstrap.py and fetch_fluent.py (neither
+    source ships category metadata) and fetch_tabler.py (as the fallback
+    for an icon icons.json has no usable category for); fetch_remix.py
+    doesn't need this at all, since Remix ships its own folder-per-category
+    layout (a strictly better signal than guessing from tokens -- see
+    fetch_remix.py's module docstring).
+
+    `overrides`, if given, is checked FIRST against `base_id` (the
+    underscore-joined manifest id, e.g. "cable_car") and short-circuits the
+    whole token walk when it matches -- for the small, hand-picked set of
+    ids where a bare token would land the wrong bucket (the same escape
+    hatch lucide_ids.txt's own header documents needing, e.g. "cable-car"
+    is a vehicle, not electrical wiring, even though "cable" alone is in
+    the electrical token set above).
+
+    Absent an override, walks `_KEYWORD_CATEGORY_TABLE` in its fixed
+    (electrical, network, av, arrow, safety) priority order and returns the
+    first bucket whose token set intersects `tokens`; "misc" if none do.
+    """
+    if overrides and base_id in overrides:
+        return overrides[base_id]
+    token_set = {t.lower() for t in tokens}
+    for category, keywords in _KEYWORD_CATEGORY_TABLE:
+        if token_set & keywords:
+            return category
+    return "misc"
 
 
 def validate_shape(symbol_id: str, filename: str, svg_text: str) -> None:

@@ -29,9 +29,11 @@ from labelmaker.render.symbols import (
 # The id "groups" the manifest can currently contain: the original 60
 # (bare ids, no prefix) plus one prefix per pipeline source. Every test
 # below that talks about "every source" means these groups. A new source
-# must add its prefix here (the pipeline README's "Adding a source" step 7
+# must add its prefix here (the pipeline README's "Adding a source" step 8
 # points at this tuple).
-_SOURCE_PREFIXES = ("material_", "phosphor_", "lucide_")
+_SOURCE_PREFIXES = (
+    "material_", "phosphor_", "lucide_", "tabler_", "remix_", "bootstrap_", "fluent_",
+)
 
 
 def _source_group(symbol_id: str) -> str:
@@ -69,7 +71,15 @@ def test_list_symbols_meets_floor_and_every_source_contributes():
     # (>= 700) reflects material_ids.txt post-dedup (see the pipeline README's
     # dedup note: 38 ids were dropped because a legacy bare id already covers
     # the same concept) -- currently 743. phosphor_'s floor (>= 50) reflects
-    # phosphor_ids.txt's currently-curated 55.
+    # phosphor_ids.txt's currently-curated 55. The four Track D2 full-set
+    # sources' floors sit a little below their currently-committed counts
+    # (same margin-for-later-edits reasoning): tabler_ (>= 1000, currently
+    # 1054), remix_ (>= 1500, currently 1539), bootstrap_ (>= 650, currently
+    # 669 curated / 669 accepted -- circle-fill.svg's bare <circle> is the
+    # one curated id that never becomes a file, see bootstrap_ids.txt's
+    # header), fluent_ (>= 2400, currently 2490 curated / 2486 accepted --
+    # the flag_pride_* family's 4 genuinely multi-color icons are the
+    # skips, see fluent_ids.txt's header).
     infos = list_symbols()
     assert all(isinstance(i, SymbolInfo) for i in infos)
 
@@ -80,7 +90,10 @@ def test_list_symbols_meets_floor_and_every_source_contributes():
     legacy_count = len(by_group.get("legacy", []))
     assert legacy_count == 60, f"legacy group must stay exactly 60, found {legacy_count}"
 
-    floors = {"material_": 700, "phosphor_": 50}
+    floors = {
+        "material_": 700, "phosphor_": 50,
+        "tabler_": 1000, "remix_": 1500, "bootstrap_": 650, "fluent_": 2400,
+    }
     for group, floor in floors.items():
         count = len(by_group.get(group, []))
         assert count >= floor, f"source group {group!r} has {count} symbols, expected >= {floor}"
