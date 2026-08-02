@@ -131,6 +131,34 @@ export const printEstimateHandler = http.post("/api/print/estimate", () =>
   }),
 );
 
+/** Track C2: POST /api/print/preview -- a small, deterministic 2-segment
+ * composite (a 1x1 TINY_PNG_B64 stand-in for the real composited strip),
+ * enough for ChainedPreviewDialog's own tests to assert PNG + segment
+ * count + stats without depending on a real per-label render. Echoes the
+ * posted `options.chain_mode` back (defaulting to "cut_each" the same way
+ * router_print.py's own PrintOptions does) so switching the dialog's mode
+ * tabs is observable in the response; individual tests override with
+ * server.use(...) for other segment-count/warnings scenarios, same
+ * convention as printEstimateHandler above. */
+export const printPreviewHandler = http.post("/api/print/preview", async ({ request }) => {
+  const body = (await request.json()) as { options?: { chain_mode?: string } };
+  const chainMode = body.options?.chain_mode ?? "cut_each";
+  return HttpResponse.json({
+    png_b64: TINY_PNG_B64,
+    chain_mode: chainMode,
+    total_mm: 60,
+    content_mm: 50,
+    feed_overhead_mm: 10,
+    per_label_mm: 30,
+    notes: [],
+    segments: [
+      { index: 0, start_mm: 0, end_mm: 25, length_mm: 25 },
+      { index: 1, start_mm: 25, end_mm: 50, length_mm: 25 },
+    ],
+    warnings: [],
+  });
+});
+
 export const printHandler = http.post("/api/print", () =>
   HttpResponse.json({ job_id: "job-1" }, { status: 202 }),
 );
@@ -512,6 +540,7 @@ export const defaultHandlers = [
   printerStatusConnectedHandler,
   previewHandler,
   printEstimateHandler,
+  printPreviewHandler,
   printHandler,
   printJobDoneHandler,
   cancelPrintJobHandler,

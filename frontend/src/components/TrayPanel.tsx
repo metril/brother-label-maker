@@ -1,27 +1,17 @@
+import { useDialogController } from "../hooks/useDialogController";
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { usePrintJob } from "../hooks/usePrintJob";
 import { useTrayPreviews } from "../hooks/useTrayPreviews";
 import { useTrayStore } from "../stores/tray";
+import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
+import { ChainedPreviewDialog } from "./ChainedPreviewDialog";
 import { PrintButton } from "./PrintButton";
 import { TrayItemRow } from "./TrayItemRow";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { Switch } from "./ui/Switch";
 import { dashedAddButtonClass, eyebrow, helpText } from "./ui/styles";
-import type { ChainMode, LabelDefinition, PrintOptions, Sequence } from "../api/types";
-
-// Plain-language descriptions per the design doc's copy voice ("what the
-// user gets, not protocol jargon"). chain_ff/strip_marks' underlying tape
-// math is UNVERIFIED until the physical checkpoint (see backend/render/
-// estimate.py's own module docstring) -- that caveat stays in code
-// comments only, never in this user-facing copy.
-const CHAIN_MODE_OPTIONS: { value: ChainMode; label: string; description: string }[] = [
-  { value: "cut_each", label: "Cut each", description: "Every label cut separately. Most tape used." },
-  // UNVERIFIED until checkpoint 2.
-  { value: "chain_ff", label: "Chain", description: "Printed end to end, one cut at the end. Saves tape." },
-  // UNVERIFIED until checkpoint 2.
-  { value: "strip_marks", label: "One strip", description: "Single strip with printed guides. Cut them yourself." },
-];
+import type { LabelDefinition, PrintOptions, Sequence } from "../api/types";
 
 /** The "current, unsaved design" half of what the tray can print -- built by
  * pages/Designer.tsx (which owns the schema/params/preview this is derived
@@ -103,6 +93,12 @@ export function TrayPanel({ current, onAddToTray }: TrayPanelProps) {
   const moveUp = useTrayStore((s) => s.moveUp);
   const moveDown = useTrayStore((s) => s.moveDown);
   const clearTray = useTrayStore((s) => s.clear);
+
+  // Track C2: the "Preview chain" dialog's own open/close/focus contract
+  // -- see ChainedPreviewDialog's own docstring for why its mode tabs are
+  // scoped locally to that dialog rather than reading `chainMode`/
+  // `setChainMode` above directly.
+  const previewDialog = useDialogController();
 
   // Items added with no captured preview (png: null, e.g. pages/Homebox.tsx's
   // "Add to tray") get one fetched here, keyed by item id -- see
@@ -293,6 +289,32 @@ export function TrayPanel({ current, onAddToTray }: TrayPanelProps) {
           </>
         )}
       </div>
+
+      {/* Track C2: opens a wide dialog composing the WHOLE body as one
+          strip under any of the three chain modes, independent of the
+          tray's own chainMode above -- disabled under the exact same
+          "nothing (renderable) to act on" gate the estimate panel and
+          Print button both already use. */}
+      <button
+        type="button"
+        onClick={previewDialog.open}
+        disabled={!canEstimate}
+        aria-haspopup="dialog"
+        className="self-start rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 text-[13px] font-medium text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Preview chain
+      </button>
+
+      <ChainedPreviewDialog
+        open={previewDialog.isOpen}
+        onClose={previewDialog.close}
+        closeButtonRef={previewDialog.closeButtonRef}
+        labels={bodyLabels}
+        options={options}
+        serialization={bodySerialization}
+        isRenderable={isRenderableBody}
+        initialChainMode={chainMode}
+      />
 
       {/* The block message renders exactly ONCE, inside PrintButton itself
           (its own role="alert") -- a second, standalone copy here would be

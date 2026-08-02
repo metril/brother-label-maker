@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   AuthMe,
+  ChainedPreviewResponse,
   CsvUploadResponse,
   ExpandRequest,
   ExpandResponse,
@@ -29,6 +30,7 @@ import type {
   PrintEstimateResponse,
   PrintJob,
   PrintJobResponse,
+  PrintPreviewRequest,
   PrintRequest,
   PrinterStatusResponse,
   ReprintResponse,
@@ -268,6 +270,21 @@ export function postPrint(body: PrintRequest): Promise<PrintJobResponse> {
  * JobTray calls before committing to an actual print. */
 export function postPrintEstimate(body: PrintRequest): Promise<PrintEstimateResponse> {
   return request<PrintEstimateResponse>("/print/estimate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/print/preview (Track C2): the SAME body postPrintEstimate
+ * accepts, plus `scale` -- returns a single composited PNG of the whole
+ * chained job's physical layout (butted/gapped/cut-marked per chain_mode)
+ * alongside the same TapeEstimate fields and a `segments` breakdown of
+ * where each label starts/ends along the strip. No job is created (same
+ * as postPrintEstimate -- no history entry, nothing enqueued). See
+ * api/types.ts's ChainedPreviewResponse for the png_b64/segments UNIT TRAP
+ * (always mm, never pixels). */
+export function postPrintPreview(body: PrintPreviewRequest): Promise<ChainedPreviewResponse> {
+  return request<ChainedPreviewResponse>("/print/preview", {
     method: "POST",
     body: JSON.stringify(body),
   });

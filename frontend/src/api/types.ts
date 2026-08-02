@@ -326,6 +326,75 @@ export interface PrintEstimateResponse extends TapeEstimate {
   label_count: number;
 }
 
+// --- Chained preview (Track C2) -----------------------------------------
+// Mirrors backend/api/router_print.py's PrintPreviewRequest/
+// ChainedPreviewResponse -- POST /api/print/preview, the render-work
+// exception to every other /print route (see that router's own module
+// docstring): a single composited PNG of the whole chained job's physical
+// layout, computed synchronously rather than queued as a job.
+
+/** POST /api/print/preview's request body: the SAME `labels`/`options`/
+ * `serialization` PrintRequest carries, plus `scale` -- the same
+ * nearest-neighbor PNG upscale factor POST /api/render/preview already
+ * exposes for a single label (PreviewRequest's own `scale`), applied here
+ * to the whole composited chain strip. Server-side default 2 (bounds 1-8)
+ * when omitted -- mirrors hooks/usePreview.ts's own fixed PREVIEW_SCALE
+ * convention: this app never lets the user pick a scale, so callers
+ * should likewise leave it unset rather than threading a UI zoom level
+ * into it (zoom is a pure client-side px-per-mm concern -- see
+ * lib/feedDeckGeometry.ts's own docstring). */
+export interface PrintPreviewRequest extends PrintRequest {
+  scale?: number;
+}
+
+/** One label's position along POST /api/print/preview's composited strip.
+ *
+ * UNIT TRAP: start_mm/end_mm/length_mm are tape-length millimetres
+ * (backend/driver/geometry.dots_to_mm of the composite's own pixel
+ * x-offsets), never pixels -- see ChainedPreviewResponse's own UNIT TRAP
+ * note for the pixel side of this same contract. The LAST segment's
+ * `end_mm` is also the composited PNG's own true content width in mm --
+ * NOT the same figure as `total_mm` below, which additionally counts feed
+ * overhead (margins, the trailing cut/feed allowance) that is never
+ * actually painted into the image. */
+export interface ChainedPreviewSegment {
+  index: number;
+  start_mm: number;
+  end_mm: number;
+  length_mm: number;
+}
+
+/** POST /api/print/preview's response: a single composited PNG showing the
+ * whole chained job as it will physically lay out on tape (butted for
+ * chain_ff, blank gaps for cut_each, cut-mark dashes for strip_marks --
+ * see backend/jobs/chained_preview.py), plus the SAME TapeEstimate fields
+ * POST /api/print/estimate returns (never re-derived client-side).
+ *
+ * UNIT TRAP: `png_b64` decodes to an image scaled by the request's `scale`
+ * (nearest-neighbor) -- never derive a millimetre figure from its pixel
+ * dimensions; use total_mm / segments' start_mm/end_mm/length_mm instead,
+ * always UNSCALED tape-length millimetres regardless of `scale`. Size the
+ * on-screen strip from those mm figures times a px-per-mm constant (reuse
+ * lib/feedDeckGeometry.ts's DEFAULT_PX_PER_MM, the same "never from png
+ * pixel dimensions" rule FeedDeck's own DeckStrip is built on), stretching
+ * the `<img>` to fill via explicit CSS width/height rather than relying on
+ * its native pixel size. */
+export interface ChainedPreviewResponse {
+  png_b64: string;
+  chain_mode: ChainMode;
+  total_mm: number;
+  content_mm: number;
+  feed_overhead_mm: number;
+  per_label_mm: number;
+  notes: string[];
+  segments: ChainedPreviewSegment[];
+  /** Per-label RenderWarning.message strings, each prefixed "label {i}: "
+   * (0-based, same index space as `segments`) -- the same convention
+   * _validate_serialized_print's own 422 messages use, applied here to
+   * non-fatal warnings instead of a raised error. */
+  warnings: string[];
+}
+
 export type JobStatus = "queued" | "printing" | "done" | "failed" | "canceled";
 
 export interface PrintJob {
