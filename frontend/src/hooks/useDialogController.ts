@@ -9,7 +9,7 @@ export interface DialogController {
    * instant it opens (this app's convention: a "×" close button, or a
    * non-destructive Cancel for a confirm dialog -- never the destructive
    * action itself). */
-  closeButtonRef: RefObject<HTMLButtonElement>;
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
 }
 
 /** Shared open/close + focus-management contract for this app's page-level

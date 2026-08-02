@@ -22,22 +22,11 @@ interface RenderOptions {
   route?: string;
 }
 
-// Task 4.3: opt into the same React Router v7 future flags App.tsx's
-// BrowserRouter now sets (v7_startTransition, v7_relativeSplatPath) --
-// otherwise every test render logs the "React Router will begin wrapping
-// state updates..." / "relative route resolution" console warnings the
-// real app no longer does, and a MemoryRouter with different defaults than
-// production's BrowserRouter would be testing subtly different navigation
-// behavior than what ships.
-const ROUTER_FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
-
 export function renderWithQueryClient(ui: ReactElement, options: RenderOptions = {}) {
   const queryClient = createTestQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[options.route ?? "/"]} future={ROUTER_FUTURE}>
-        {ui}
-      </MemoryRouter>
+      <MemoryRouter initialEntries={[options.route ?? "/"]}>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -49,9 +38,7 @@ export function renderWithProviders(ui: ReactElement, options: RenderOptions = {
   return render(
     <QueryClientProvider client={queryClient}>
       <JobEventsProvider>
-        <MemoryRouter initialEntries={[options.route ?? "/"]} future={ROUTER_FUTURE}>
-          {ui}
-        </MemoryRouter>
+        <MemoryRouter initialEntries={[options.route ?? "/"]}>{ui}</MemoryRouter>
       </JobEventsProvider>
     </QueryClientProvider>,
   );

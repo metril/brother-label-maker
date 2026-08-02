@@ -13,7 +13,7 @@ interface HistoryDetailsDialogProps {
   jobId: string | null;
   open: boolean;
   onClose: () => void;
-  closeButtonRef: RefObject<HTMLButtonElement>;
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
 }
 
 /** History row "Details" (task 2.13's brief): GET /api/history/{id} (the

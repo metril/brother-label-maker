@@ -57,14 +57,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <JobEventsProvider>
-        {/* Task 4.3: opt into the two v7 future flags react-router-dom v6
-            warns about on every load (state updates wrapped in
-            React.startTransition; relative "." splat-route resolution) --
-            this app never relies on the pre-v7 behavior either flag
-            changes, so there's no reason to keep shipping the warning.
-            test/utils.tsx's MemoryRouter sets the same pair for parity
-            between what tests render and what production ships. */}
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <BrowserRouter>
           <AppShell>
             <Routes>
               <Route path="/" element={<Designer />} />
