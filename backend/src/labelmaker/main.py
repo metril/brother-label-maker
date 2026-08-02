@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -177,10 +178,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     #
     # Registration order matters: Starlette's `add_middleware` is LIFO (the
     # LAST-added ends up OUTERMOST -- see Starlette.build_middleware_stack),
-    # so registering AuthGateMiddleware, then SessionMiddleware, THEN
-    # CORSMiddleware last produces this actual per-request order:
+    # so registering AuthGateMiddleware, then SessionMiddleware, then
+    # GZipMiddleware, THEN CORSMiddleware last produces this actual
+    # per-request order:
     #
-    #     CORS -> Session -> AuthGate -> routing -> the endpoint
+    #     CORS -> GZip -> Session -> AuthGate -> routing -> the endpoint
     #
     # CORS outermost means a 401 the gate manufactures still gets
     # Access-Control-* headers on the way back out (otherwise a
@@ -200,6 +202,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             max_age=cfg.session_max_age_s,
             https_only=cfg.session_cookie_secure,
         )
+
+    # H5 (docs/code-review-2026-08.md): GET /api/symbols' ~1.5MB catalog (and
+    # anything else this size or larger) went out uncompressed with no
+    # reverse proxy in front to compensate (docker/docker-compose.yml sets
+    # none). Registered here -- BEFORE the CORSMiddleware call below -- so
+    # CORS stays outermost per the LIFO ordering explained above;
+    # `minimum_size=1024` skips the gzip pass entirely for small responses
+    # (most of this API) where compression overhead would outweigh the
+    # savings.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     app.add_middleware(
         CORSMiddleware,

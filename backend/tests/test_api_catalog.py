@@ -3,11 +3,29 @@ GET /api/symbols/{id} -- the static catalog endpoints B2/2.7 add so the
 frontend can stop hardcoding font families (stores/designer.ts's old
 FONT_FAMILIES), TZe widths (TZE_WIDTHS_MM), and (2.7) the symbol icon
 library that had to be hand-kept in lockstep with the backend's own
-tables."""
+tables.
+
+The "H4/H5" tests below (docs/code-review-2026-08.md) cover the two
+symbol routes' serving-cost fixes: GET /api/symbols returning
+render/symbols.py's pre-encoded, mtime-cached response bytes instead of
+paying a deep-copy + re-encode of every model per request (H4), and both
+routes' ETag/Cache-Control/conditional-GET/gzip behavior (H5). The
+mtime-invalidation test replicates -- rather than imports or edits --
+test_symbols.py's own tmp-dir monkeypatch pattern
+(test_list_symbols_and_get_symbol_info_invalidate_on_index_mtime_change),
+since that file is a different agent's scope; this file is a route-level
+test hitting the same mechanism through the ASGI client instead of calling
+render/symbols.py's functions directly.
+"""
 
 from __future__ import annotations
 
+import json
+import os
+
+from labelmaker.api import router_labels as router_labels_module
 from labelmaker.driver.geometry import dots_to_mm
+from labelmaker.render import symbols as symbols_module
 from labelmaker.render.symbols import list_symbols
 
 
@@ -100,3 +118,114 @@ async def test_symbol_svg_returns_the_raw_svg_for_a_known_id(client):
 async def test_symbol_svg_unknown_id_returns_404(client):
     resp = await client.get("/api/symbols/not-a-real-icon")
     assert resp.status_code == 404
+
+
+# --- H4/H5: serving-cost fixes (docs/code-review-2026-08.md) ----------------
+
+
+def _write_symbols_index(tmp_path, entries: list[dict]) -> None:
+    (tmp_path / "index.json").write_text(json.dumps(entries))
+
+
+async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_change(
+    client, monkeypatch, tmp_path
+):
+    """H4: GET /api/symbols must go through list_symbols_json()'s
+    pre-encoded-bytes cache, keyed on index.json's (path, mtime_ns) --
+    same identity as render/symbols.py's `_cache_key()`. This replicates
+    test_symbols.py's mtime-invalidation pattern at the route level: a
+    request must reflect a rewritten index.json (with its mtime bumped)
+    on the very next call, with no explicit invalidation, and the route's
+    ETag must move in lockstep with the cached bytes.
+    """
+    entry_a = {
+        "id": "a", "name": "A", "tags": [], "path": "a.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }
+    _write_symbols_index(tmp_path, [entry_a])
+    (tmp_path / "a.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+    monkeypatch.setattr(router_labels_module, "SYMBOLS_DIR", tmp_path)
+
+    resp = await client.get("/api/symbols")
+    assert resp.status_code == 200
+    assert [entry["id"] for entry in resp.json()] == ["a"]
+    first_etag = resp.headers["etag"]
+
+    # Rewrite index.json with a second entry and force a distinct mtime_ns
+    # (os.utime rather than trusting two back-to-back writes to land in
+    # different nanosecond buckets on every filesystem) -- the exact
+    # scenario the cache key is meant to detect: same path, changed content.
+    entry_b = {
+        "id": "b", "name": "B", "tags": [], "path": "b.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }
+    _write_symbols_index(tmp_path, [entry_a, entry_b])
+    (tmp_path / "b.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
+    index_path = tmp_path / "index.json"
+    newer_ns = index_path.stat().st_mtime_ns + 1_000_000_000  # +1s, unambiguously newer
+    os.utime(index_path, ns=(newer_ns, newer_ns))
+
+    resp2 = await client.get("/api/symbols")
+    assert resp2.status_code == 200
+    assert {entry["id"] for entry in resp2.json()} == {"a", "b"}, (
+        "GET /api/symbols served stale cached bytes across an index.json mtime change"
+    )
+    assert resp2.headers["etag"] != first_etag, "ETag did not change with the cached bytes"
+
+
+async def test_symbols_route_sets_etag_and_cache_control(client):
+    resp = await client.get("/api/symbols")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "public, max-age=86400"
+    assert resp.headers["etag"].startswith('W/"')
+
+
+async def test_symbols_route_returns_304_when_if_none_match_matches(client):
+    resp = await client.get("/api/symbols")
+    etag = resp.headers["etag"]
+
+    resp2 = await client.get("/api/symbols", headers={"If-None-Match": etag})
+    assert resp2.status_code == 304
+    assert resp2.headers["etag"] == etag
+    assert resp2.content == b""
+
+
+async def test_symbols_route_is_gzip_compressed_when_accepted(client):
+    resp = await client.get("/api/symbols", headers={"Accept-Encoding": "gzip"})
+    assert resp.status_code == 200
+    assert resp.headers.get("content-encoding") == "gzip"
+    # `content-length` reflects the bytes actually sent over the wire
+    # (compressed); httpx transparently decodes the body it hands back via
+    # `.content`/`.json()`, so comparing the two is a real compression-ratio
+    # check, not a tautology. 1.5MB of this catalog's JSON gzips ~10x
+    # (H5's own measurement); assert a conservative fraction of that.
+    decoded_len = len(resp.content)
+    wire_len = int(resp.headers["content-length"])
+    assert wire_len < decoded_len / 3, (
+        f"expected gzip to shrink the response by more than 3x, got {decoded_len} -> {wire_len}"
+    )
+
+
+async def test_symbols_route_not_compressed_when_gzip_not_accepted(client):
+    resp = await client.get("/api/symbols", headers={"Accept-Encoding": "identity"})
+    assert resp.status_code == 200
+    assert "content-encoding" not in resp.headers
+
+
+async def test_symbol_svg_route_sets_etag_last_modified_and_cache_control(client):
+    resp = await client.get("/api/symbols/bolt")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "public, max-age=86400"
+    assert resp.headers["etag"].startswith('W/"')
+    assert "last-modified" in resp.headers
+
+
+async def test_symbol_svg_route_returns_304_when_if_none_match_matches(client):
+    resp = await client.get("/api/symbols/bolt")
+    etag = resp.headers["etag"]
+
+    resp2 = await client.get("/api/symbols/bolt", headers={"If-None-Match": etag})
+    assert resp2.status_code == 304
+    assert resp2.headers["etag"] == etag
+    assert resp2.content == b""

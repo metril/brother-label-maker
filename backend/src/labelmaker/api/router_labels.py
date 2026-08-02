@@ -14,11 +14,21 @@ endpoints in support of BarTender-model serialization -- neither one
 renders anything; see labelmaker.render.serialize's module docstring for
 the expansion model itself.
 
-GET /api/symbols / GET /api/symbols/{id} (task 2.7, expanded to 1000+ icons
-across Material Symbols and Phosphor by commit 7's symbols pipeline) expose
-render/symbols.py's curated icon library -- the catalog and one icon's raw
-SVG, respectively -- for a UI icon picker and for symbol_object() ids to be
-discoverable independent of this project's own source tree.
+GET /api/symbols / GET /api/symbols/{id} (task 2.7, expanded to 8000+ icons
+across Material Symbols, Phosphor and five more sources by commit 7's
+symbols pipeline) expose render/symbols.py's curated icon library -- the
+catalog and one icon's raw SVG, respectively -- for a UI icon picker and for
+symbol_object() ids to be discoverable independent of this project's own
+source tree. Both routes are conditional-GET-aware (weak ETag, plus
+Last-Modified on the per-icon route) and cache-control'd: GET /api/symbols
+returns render/symbols.py's pre-encoded, mtime-cached response bytes rather
+than paying a deep-copy + re-encode of 8362 models per request (H4,
+docs/code-review-2026-08.md), and both carry `Cache-Control` so a browser
+that already has a fresh copy can skip the transfer entirely, or at worst
+revalidate with a 304 (H5, same doc). Neither Cache-Control uses
+`immutable`/a year-long max-age: catalog and per-icon content can both
+change out from under a stable id when the symbols pipeline regenerates, so
+revalidation must stay meaningful, not just present.
 """
 
 from __future__ import annotations
@@ -26,10 +36,11 @@ from __future__ import annotations
 import base64
 import csv
 import io
+from email.utils import formatdate
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -55,7 +66,20 @@ from labelmaker.render.serialize import (
     sequence_values,
     total_labels,
 )
-from labelmaker.render.symbols import SYMBOLS_DIR, SymbolInfo, get_symbol_info, list_symbols
+from labelmaker.render.symbols import (
+    SYMBOLS_DIR,
+    get_symbol_info,
+    list_symbols_json,
+    symbols_etag,
+)
+
+# Shared cache-control policy for both symbol routes (H5): long enough to
+# skip most repeat transfers, short of `immutable`/a year -- the symbols
+# pipeline can regenerate a given id's content (see H3's fix, running
+# alongside this one) or the whole catalog, so a client must keep checking
+# back rather than trusting the response forever. Both routes also set a
+# weak ETag so that "checking back" is a cheap 304, not a re-download.
+_SYMBOLS_CACHE_CONTROL = "public, max-age=86400"
 
 router = APIRouter(tags=["labels"])
 
@@ -102,13 +126,39 @@ async def get_tapes() -> list[TapeInfo]:
     ]
 
 
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    """True if `etag` satisfies an `If-None-Match` request header -- either
+    the `*` wildcard or a literal match among its comma-separated values
+    (RFC 7232 3.2). Every ETag this API issues is weak (`W/"..."`), so a
+    plain string-membership check is a correct weak comparison (RFC 7232
+    2.1's weak-comparison rule: equal after stripping the `W/` prefix,
+    which two weak tags produced from the same `f'W/"{mtime_ns}"'` format
+    already are without stripping anything).
+    """
+    if if_none_match is None:
+        return False
+    if if_none_match.strip() == "*":
+        return True
+    candidates = {part.strip() for part in if_none_match.split(",")}
+    return etag in candidates
+
+
 @router.get("/symbols")
-async def get_symbols() -> list[SymbolInfo]:
-    return list_symbols()
+async def get_symbols(request: Request) -> Response:
+    # H4: list_symbols_json() is the pre-encoded-bytes cache (see its
+    # docstring) -- no per-request deep copy, no per-request
+    # jsonable_encoder/response-model pass. H5: ETag + Cache-Control, with
+    # a matching If-None-Match short-circuiting to 304 before touching the
+    # (possibly still-uncached) bytes at all.
+    etag = symbols_etag()
+    headers = {"ETag": etag, "Cache-Control": _SYMBOLS_CACHE_CONTROL}
+    if _etag_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers=headers)
+    return Response(content=list_symbols_json(), media_type="application/json", headers=headers)
 
 
 @router.get("/symbols/{symbol_id}")
-async def get_symbol_svg(symbol_id: str) -> Response:
+async def get_symbol_svg(symbol_id: str, request: Request) -> Response:
     try:
         info = get_symbol_info(symbol_id)
     except ValueError as exc:
@@ -116,7 +166,21 @@ async def get_symbol_svg(symbol_id: str) -> Response:
     path = SYMBOLS_DIR / info.path
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"symbol file missing: {info.path}")
-    return Response(content=path.read_bytes(), media_type="image/svg+xml")
+    # H5: ETag + Last-Modified from the FILE (not index.json -- a symbol's
+    # svg can be regenerated by the pipeline without index.json itself
+    # changing), same weak-etag format and cache-control policy as
+    # GET /api/symbols above (see _SYMBOLS_CACHE_CONTROL's comment for why
+    # neither route uses `immutable`).
+    stat = path.stat()
+    etag = f'W/"{stat.st_mtime_ns}"'
+    headers = {
+        "ETag": etag,
+        "Last-Modified": formatdate(stat.st_mtime, usegmt=True),
+        "Cache-Control": _SYMBOLS_CACHE_CONTROL,
+    }
+    if _etag_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers=headers)
+    return Response(content=path.read_bytes(), media_type="image/svg+xml", headers=headers)
 
 
 class PreviewRequest(BaseModel):

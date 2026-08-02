@@ -44,7 +44,7 @@ rasterize gate) at generation time, before a file is ever committed.
 
 -- Caching --
 
-index.json now holds 1000+ entries, so list_symbols()/get_symbol_info() no
+index.json now holds 8000+ entries, so list_symbols()/get_symbol_info() no
 longer re-read+re-validate it on every call: both cache on
 `(str(index_path), index_path.stat().st_mtime_ns)` -- a cache hit is free, a
 miss (first call, or index.json's mtime changed -- including a test that
@@ -52,6 +52,20 @@ monkeypatches SYMBOLS_DIR to a tmp_path, which naturally has its own
 distinct path in the cache key) transparently re-parses. Nothing needs to
 call an explicit "invalidate" function; touching/rewriting index.json is
 enough.
+
+At this catalog size, "a cache hit is free" turned out not to be true for
+list_symbols() ITSELF: its per-call `model_copy(deep=True)` over 8362
+entries (see its docstring -- that copy is load-bearing for callers that
+mutate a returned entry) plus FastAPI's own response-model re-encoding was
+measured costing 690-866ms of event-loop time per GET /api/symbols request
+(review doc H4). `list_symbols_json()` below is the fix for that ONE
+caller: it caches the fully-encoded response *bytes* on the same cache key,
+paid once per index.json change rather than once per request, and
+`symbols_etag()` gives GET /api/symbols a matching weak ETag (also
+mtime_ns-derived) so a client's conditional GET can skip both the transfer
+and the encode via a 304. `list_symbols()`'s own per-call deep-copy
+contract is unchanged -- `get_symbol_info()` and any other caller that
+needs safely-mutable instances should keep using it.
 """
 
 from __future__ import annotations
@@ -60,7 +74,7 @@ import json
 import re
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from labelmaker.render.document import _fmt_num
 
@@ -120,11 +134,16 @@ def _cache_key(index_path: Path) -> tuple[str, int]:
     return (str(index_path), index_path.stat().st_mtime_ns)
 
 
+def _parse_index(index_path: Path) -> list[SymbolInfo]:
+    raw = json.loads(index_path.read_text())
+    return [SymbolInfo.model_validate(entry) for entry in raw]
+
+
 _list_cache: tuple[tuple[str, int], list[SymbolInfo]] | None = None
 
 
 def list_symbols() -> list[SymbolInfo]:
-    """The full catalog (1000+ entries as of commit 7's symbols pipeline),
+    """The full catalog (8000+ entries as of commit 7's symbols pipeline),
     cached by `_cache_key()` -- see the module docstring's "Caching" section.
     Returns a fresh list of deep-copied `SymbolInfo` instances each call, so
     a caller mutating either the returned list OR a field on one of its
@@ -132,15 +151,66 @@ def list_symbols() -> list[SymbolInfo]:
     cached instances -- a plain `list(...)` shallow copy would still share
     the same `SymbolInfo` objects (and their mutable `tags` lists) with the
     cache, which is not enough.
+
+    This deep copy is real per-call work at 8362 entries -- callers that
+    only need to serialize the catalog verbatim (GET /api/symbols) should
+    use `list_symbols_json()` instead, which skips it entirely (see that
+    function's docstring and H4 in docs/code-review-2026-08.md).
     """
     global _list_cache
     index_path = _current_index_path()
     key = _cache_key(index_path)
     if _list_cache is None or _list_cache[0] != key:
-        raw = json.loads(index_path.read_text())
-        infos = [SymbolInfo.model_validate(entry) for entry in raw]
-        _list_cache = (key, infos)
+        _list_cache = (key, _parse_index(index_path))
     return [info.model_copy(deep=True) for info in _list_cache[1]]
+
+
+_SYMBOL_LIST_ADAPTER: TypeAdapter = TypeAdapter(list[SymbolInfo])
+_list_json_cache: tuple[tuple[str, int], bytes] | None = None
+
+
+def list_symbols_json() -> bytes:
+    """The full catalog pre-encoded to JSON bytes, cached on the same
+    `_cache_key()` as `list_symbols()` (and sharing its `_list_cache` parse,
+    so a cache miss here never re-reads/re-validates index.json a second
+    time). GET /api/symbols (router_labels.py) hands this straight to
+    `Response(content=..., media_type="application/json")`, which is what
+    makes it a real fix for H4 (docs/code-review-2026-08.md) rather than a
+    relocation of the cost: neither `list_symbols()`'s per-call deep copy
+    (irrelevant here -- `bytes` is immutable, there's nothing to protect the
+    cache from) nor FastAPI's `jsonable_encoder`/response-model re-encoding
+    (measured at 1317ms/8362 entries) run per request any more -- both are
+    paid once, on the same index.json-mtime miss that already invalidates
+    `_list_cache`.
+
+    `TypeAdapter(list[SymbolInfo]).dump_json(...)` was checked byte-for-byte
+    identical to what FastAPI's `list[SymbolInfo]` response model produced
+    for this same catalog before this function existed (same compact
+    separators, same field order, same non-ASCII handling) -- so this is a
+    caching change, not a response-shape change.
+    """
+    global _list_cache, _list_json_cache
+    index_path = _current_index_path()
+    key = _cache_key(index_path)
+    if _list_cache is None or _list_cache[0] != key:
+        _list_cache = (key, _parse_index(index_path))
+    if _list_json_cache is None or _list_json_cache[0] != key:
+        _list_json_cache = (key, _SYMBOL_LIST_ADAPTER.dump_json(_list_cache[1]))
+    return _list_json_cache[1]
+
+
+def symbols_etag() -> str:
+    """A weak ETag for the whole catalog (GET /api/symbols), derived from
+    index.json's mtime_ns -- the same identity `_cache_key()` uses, so this
+    changes exactly when `list_symbols_json()`'s cached bytes change and
+    stays stable otherwise. Weak (`W/`) because the guarantee is
+    freshness-equivalence (same index.json generation), not byte-for-byte
+    identity (RFC 7232 2.1) -- appropriate here since nothing promises the
+    encoded bytes are stable across code changes, only that a given
+    index.json mtime always encodes the same way.
+    """
+    _, mtime_ns = _cache_key(_current_index_path())
+    return f'W/"{mtime_ns}"'
 
 
 _info_cache: tuple[tuple[str, int], dict[str, SymbolInfo]] | None = None
