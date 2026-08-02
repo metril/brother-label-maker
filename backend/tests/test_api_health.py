@@ -17,6 +17,21 @@ async def test_health_reports_ok_and_printer_mode(client):
     assert isinstance(body["version"], str) and body["version"] != ""
 
 
+async def test_health_reports_a_db_override_printer_mode(client):
+    # Review fix: GET /api/health used to read `cfg.printer_mode` directly,
+    # so a printer_mode override set via PUT /api/settings (settings
+    # overlay, api/router_settings.py) never showed up here even though it
+    # WAS already honored by the actual print path -- the diagnostics page
+    # would show a stale mode. It now reads `app.state.settings.effective()`
+    # the same as GET /api/printer/status.
+    resp = await client.put("/api/settings", json={"printer_mode": "usb"})
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/health")
+    assert resp.status_code == 200
+    assert resp.json()["printer_mode"] == "usb"
+
+
 async def test_label_types_contains_text_with_schema(client):
     resp = await client.get("/api/label-types")
     assert resp.status_code == 200

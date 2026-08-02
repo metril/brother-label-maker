@@ -10,6 +10,17 @@ interface TextInputProps {
   maxLength?: number;
   ariaLabel?: string;
   className?: string;
+  /** Defaults to "text". Settings.tsx's HomeBox API key field passes
+   * "password" -- masks the value on-screen (a credential typed/pasted
+   * into a visible plaintext box is otherwise shoulder-surfable, and
+   * browsers/password managers treat "text" inputs as ordinary form
+   * fields, not secrets). */
+  type?: "text" | "password";
+  /** Passed straight through to the underlying <input autocomplete=...>.
+   * Settings.tsx's API key field sets "off" -- a credential this app never
+   * even echoes back from the server shouldn't be offered for browser
+   * autofill/autosave either. */
+  autoComplete?: string;
 }
 
 /** forwardRef (task 2.11): components/schema/TokenInsertButtons.tsx needs
@@ -19,18 +30,19 @@ interface TextInputProps {
  * every existing call site (this component takes no ref) still works
  * exactly as before. */
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
-  { id, value, onChange, placeholder, maxLength, ariaLabel, className },
+  { id, value, onChange, placeholder, maxLength, ariaLabel, className, type = "text", autoComplete },
   ref,
 ) {
   return (
     <input
       ref={ref}
       id={id}
-      type="text"
+      type={type}
       value={value}
       placeholder={placeholder}
       maxLength={maxLength}
       aria-label={ariaLabel}
+      autoComplete={autoComplete}
       onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
       className={className ?? textInputClass}
     />

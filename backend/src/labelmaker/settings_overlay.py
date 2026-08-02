@@ -35,12 +35,15 @@ never what a job already dispatched to a thread sees mid-print.
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from labelmaker.config import AppConfig
 from labelmaker.db.database import Database
+
+logger = logging.getLogger(__name__)
 
 # settings-table key prefix: an override for field `foo` lives under
 # `"cfg.foo"`, so this KV table could hold other, unrelated keys (e.g.
@@ -165,14 +168,40 @@ class SettingsOverlay:
         return overlay
 
     async def _reload(self) -> None:
+        """Loads stored overrides from `db`, re-validating each row against
+        `SettingsOverrides`' field definition for it before trusting it.
+
+        A row can go stale without ever going through `set_many` (and
+        therefore without ever being validated against the CURRENT rules):
+        hand-edited DB content, a downgrade to an older build after a
+        newer one relaxed/tightened a field's constraints, or a future
+        code change to `SettingsOverrides` itself (e.g. narrowing
+        `printer_mode`'s Literal). Without this check, one bad row would
+        make `effective()` raise `pydantic.ValidationError` on every
+        request from process startup onward -- a single corrupt override
+        bricking the whole app instead of just that one setting. A row
+        that fails validation is dropped (logged as a warning) and that
+        field silently falls back to its env/default value instead, same
+        as if the row had never been stored at all.
+        """
         rows = await self._db.all_settings()
         overrides: dict[str, object] = {}
         for key, value in rows.items():
             if not key.startswith(_DB_KEY_PREFIX):
                 continue  # some other feature's own settings-table row (e.g. homebox_qr_base_url)
             field = key[len(_DB_KEY_PREFIX) :]
-            if field in OVERRIDABLE_FIELDS:
-                overrides[field] = value
+            if field not in OVERRIDABLE_FIELDS:
+                continue
+            try:
+                validated = SettingsOverrides.model_validate({field: value})
+            except ValidationError:
+                logger.warning(
+                    "settings_overlay: dropping invalid stored override %r=%r for field "
+                    "%r (no longer a valid value) -- falling back to its env/default value",
+                    key, value, field,
+                )
+                continue
+            overrides[field] = getattr(validated, field)
         self._overrides = overrides
 
     def effective(self) -> EffectiveSettings:
@@ -191,11 +220,16 @@ class SettingsOverlay:
         key or an invalid value for ANY field raises pydantic
         ValidationError -- the caller, api/router_settings.py's PUT
         handler, maps that to a 422 -- before touching the DB or the
-        in-memory dict at all, so a partially-invalid batch never applies
-        partially). Then, for each field the caller actually SENT (per
-        `model_fields_set`, not `is not None`): `None` deletes the DB row
-        and the in-memory override (reverts to env/default); any other
-        value upserts both.
+        in-memory dict at all, so a batch that fails VALIDATION never
+        applies partially). That atomicity guarantee covers validation
+        only, though: once validation passes, each touched field below is
+        written with its own separate `set_setting`/`delete_setting` call,
+        not inside one DB transaction, so a multi-field batch is NOT
+        atomic against a crash or process death mid-loop -- some fields
+        could end up written and others not. Then, for each field the
+        caller actually SENT (per `model_fields_set`, not `is not None`):
+        `None` deletes the DB row and the in-memory override (reverts to
+        env/default); any other value upserts both.
         """
         validated = SettingsOverrides.model_validate(updates)
         for field in validated.model_fields_set:

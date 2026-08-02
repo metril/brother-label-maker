@@ -48,3 +48,35 @@ async def test_printer_status_usb_mode_no_device_reports_disconnected(tmp_path, 
     assert body["printer_mode"] == "usb"
     assert body["status"] is None
     assert "no USB printer found" in body["error"]
+
+
+async def test_printer_status_honors_a_db_override_over_the_config_printer_mode(
+    client, monkeypatch
+):
+    # The `client` fixture's app boots in mock mode (conftest.py). A DB
+    # override set via PUT /api/settings must be reflected here -- both the
+    # transport this endpoint actually probes AND the `printer_mode` it
+    # reports -- without a restart (review fix: this endpoint used to read
+    # `config.printer_mode` directly, ignoring any settings-overlay
+    # override entirely). No real USB hardware in CI/dev, so -- same as
+    # test_printer_status_usb_mode_no_device_reports_disconnected above --
+    # PyUsbTransport.open() is monkeypatched to deterministically raise
+    # PrinterNotFoundError, giving a connected=false/error response whose
+    # shape doesn't depend on what's actually plugged into this host.
+    def _raise_not_found(*args, **kwargs):
+        raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
+
+    monkeypatch.setattr(
+        "labelmaker.api.router_printer.PyUsbTransport.open", staticmethod(_raise_not_found)
+    )
+
+    resp = await client.put("/api/settings", json={"printer_mode": "usb"})
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/printer/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["connected"] is False
+    assert body["printer_mode"] == "usb"
+    assert body["status"] is None
+    assert "no USB printer found" in body["error"]

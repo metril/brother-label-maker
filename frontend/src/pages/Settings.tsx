@@ -278,6 +278,9 @@ function HomeboxApiKeyField({ rows }: { rows: SettingRow[] }) {
           value={raw}
           onChange={setRaw}
           placeholder={isSet ? "enter a new key to replace it" : "hb_..."}
+          type="password"
+          autoComplete="off"
+          maxLength={500}
         />
         <button
           type="button"

@@ -9,7 +9,7 @@ from collections.abc import Callable
 import anyio
 from fastapi import APIRouter
 
-from labelmaker.api.deps import AppConfigDep
+from labelmaker.api.deps import SettingsDep
 from labelmaker.driver.printer import get_status
 from labelmaker.driver.status import PrinterStatus, StatusTimeoutError
 from labelmaker.driver.transport import (
@@ -68,28 +68,35 @@ def _fetch_usb_status() -> PrinterStatus:
 
 
 @router.get("/status")
-async def printer_status(config: AppConfigDep) -> dict:
-    fetch = _fetch_mock_status if config.printer_mode == "mock" else _fetch_usb_status
+async def printer_status(settings: SettingsDep) -> dict:
+    # Reads the settings overlay's EFFECTIVE printer_mode (override if one
+    # is stored, else AppConfig/env), not `config.printer_mode` directly --
+    # a DB override set via PUT /api/settings must be reflected here (both
+    # which transport this endpoint actually probes, and the value it
+    # reports) without a restart, same as everywhere else the app reads an
+    # overridable setting.
+    printer_mode = settings.effective().printer_mode
+    fetch = _fetch_mock_status if printer_mode == "mock" else _fetch_usb_status
 
     try:
         status = await anyio.to_thread.run_sync(fetch)
     except _StatusLockTimeout:
         return {
             "connected": True,
-            "printer_mode": config.printer_mode,
+            "printer_mode": printer_mode,
             "status": None,
             "error": "printer busy (print job in progress)",
         }
     except (PrinterNotFoundError, StatusTimeoutError, TransportError) as exc:
         return {
             "connected": False,
-            "printer_mode": config.printer_mode,
+            "printer_mode": printer_mode,
             "status": None,
             "error": str(exc),
         }
     return {
         "connected": True,
-        "printer_mode": config.printer_mode,
+        "printer_mode": printer_mode,
         "status": status.to_dict(),
         "error": None,
     }

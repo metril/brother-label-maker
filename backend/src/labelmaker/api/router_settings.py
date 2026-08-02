@@ -9,22 +9,30 @@ false`) so an operator can still see what an env-only setting is set to.
 
 Still an ALLOWLIST, not a config dump: `_READONLY_FIELDS` below is a
 short, explicit, reviewed list -- never oidc_*, session_*, or the RAW
-`homebox_api_key`/`homebox_url` values (the api key NEVER appears as a
-`value` under any circumstance, editable row or not; see `homebox_api_key`'s
-special-cased `set: bool` row below). `test_api_settings.py` asserts the
-full response key set with `==` (not just "contains"), so adding a field
-here later is a conscious, reviewed decision, not an accidental leak.
+`homebox_api_key` value (the api key NEVER appears as a `value` under any
+circumstance, editable row or not; see `homebox_api_key`'s special-cased
+`set: bool` row below). `homebox_url` is a normal editable row like any
+other -- its actual value IS returned, since a URL by itself isn't a
+secret. `test_api_settings.py` asserts the full response key set with `==`
+(not just "contains"), so adding a field here later is a conscious,
+reviewed decision, not an accidental leak.
 
 PUT /api/settings accepts a partial `{field: value | null}` map, applies it
 via `SettingsOverlay.set_many` (422 on an unknown key or an invalid value --
-pydantic's own message passes through `error_message()`, same shaping every
-other route in this app already uses), and returns the SAME shape GET
-returns. When the update touches `homebox_url`/`homebox_api_key`,
+built from pydantic's own per-field `exc.errors()`, NOT the shared
+`error_message()` helper other routes use, because that helper's message
+embeds the rejected `input_value` -- a malformed `homebox_api_key` would
+otherwise echo the secret straight back into the 422 body), and returns the
+SAME shape GET returns. When the update touches `homebox_url`/`homebox_api_key`,
 `app.state.homebox` is rebuilt from the new effective values (mirrors
 main.py's own lifespan construction) so the change takes effect
 immediately, with no restart -- the OLD client (if any) is closed only
-AFTER the new one is in place, so a request already in flight against it
-still completes normally.
+AFTER the new one is in place, so `app.state.homebox` never observes a gap
+with no client at all. That ordering does NOT make the swap seamless for a
+request already in flight against the old client, though -- closing it
+tears down its connection pool, so a concurrent in-flight HomeBox request
+may fail once during the swap (see put_settings' own comment). Acceptable
+for this single-operator app.
 """
 
 from __future__ import annotations
@@ -34,7 +42,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
-from labelmaker.api.deps import AppConfigDep, SettingsDep, error_message
+from labelmaker.api.deps import AppConfigDep, SettingsDep
 from labelmaker.config import AppConfig
 from labelmaker.homebox import build_client
 from labelmaker.settings_overlay import SettingsOverlay, SettingsOverrides
@@ -101,13 +109,30 @@ async def put_settings(
     try:
         await settings.set_many(body)
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        # Built from `exc.errors()` (`e["msg"]` only) rather than the
+        # shared `error_message()` helper -- that helper's str(exc) form
+        # embeds pydantic's own `input_value=...` for each error, which for
+        # a malformed `homebox_api_key` submission means the secret itself
+        # would come straight back in this 422 body (and the frontend
+        # renders `detail` verbatim). `e["msg"]` carries no input value.
+        detail = "; ".join(
+            f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}" for e in exc.errors()
+        )
+        raise HTTPException(status_code=422, detail=detail) from exc
 
     if "homebox_url" in body or "homebox_api_key" in body:
-        # Build the new client BEFORE closing the old one -- a request
-        # already in flight against `old_client` keeps working, and
-        # `app.state.homebox` never observes a moment with no client at
-        # all when one side of the pair is genuinely still configured.
+        # Build the new client BEFORE closing the old one, so
+        # `app.state.homebox` never observes a moment with no client at all
+        # when one side of the pair is genuinely still configured. This
+        # does NOT make the swap seamless for a request already in flight
+        # against `old_client`, though: `old_client.close()` calls
+        # `httpx.AsyncClient.aclose()`, which tears down that client's own
+        # connection pool -- a concurrent in-flight HomeBox request racing
+        # this PUT may fail once (its connection torn out from under it)
+        # rather than complete against the old client. Acceptable for this
+        # single-operator app: settings changes are rare, deliberate
+        # actions, not a hot path some other request is likely to be
+        # racing.
         old_client = request.app.state.homebox
         effective = settings.effective()
         request.app.state.homebox = build_client(effective.homebox_url, effective.homebox_api_key)

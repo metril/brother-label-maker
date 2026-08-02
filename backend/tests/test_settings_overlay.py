@@ -6,6 +6,8 @@ test_api_settings.py's job.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -69,6 +71,30 @@ async def test_effective_db_only_fields_use_hardcoded_defaults_when_unset(db, cf
     effective = overlay.effective()
     assert effective.keep_printer_awake is False
     assert effective.keep_awake_interval_min == 5
+
+
+async def test_reload_drops_a_bogus_stored_row_and_falls_back(db, cfg, caplog):
+    # Hand-written straight into the DB (bypassing set_many's own
+    # validation entirely) -- simulates a row that went stale some other
+    # way (a hand-edit, a downgrade, a future SettingsOverrides change)
+    # rather than one this app itself ever wrote. Before this fix,
+    # `SettingsOverlay.create` would have blown up here: `effective()`
+    # builds an `EffectiveSettings` from every override including this
+    # invalid one, and pydantic's own frozen-model construction would
+    # raise -- bricking the entire app at startup over one bad row.
+    await db.set_setting("cfg.printer_mode", "banana")
+    caplog.set_level(logging.WARNING, logger="labelmaker.settings_overlay")
+
+    overlay = await SettingsOverlay.create(cfg, db)  # must not raise
+
+    # Falls back to env/default instead of surfacing "banana".
+    assert overlay.effective().printer_mode == cfg.printer_mode
+    assert overlay.provenance("printer_mode") == "env"
+
+    records = [r for r in caplog.records if r.name == "labelmaker.settings_overlay"]
+    assert any(
+        r.levelno == logging.WARNING and "printer_mode" in r.getMessage() for r in records
+    )
 
 
 # -- provenance() ------------------------------------------------------------

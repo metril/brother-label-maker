@@ -205,7 +205,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # `version` (task 4.2): additive field -- this app's own installed
         # version, so the diagnostics page can show it next to backend
         # reachability without a separate build-info endpoint.
-        return {"status": "ok", "printer_mode": cfg.printer_mode, "version": APP_VERSION}
+        #
+        # `printer_mode` reads the settings overlay's EFFECTIVE value (via
+        # `app.state.settings`, the same object router_settings.py's PUT
+        # handler mutates), not `cfg.printer_mode` directly -- a DB
+        # override set from the Settings page must be reflected here too,
+        # not just in GET /api/printer/status, without a restart.
+        printer_mode = app.state.settings.effective().printer_mode
+        return {"status": "ok", "printer_mode": printer_mode, "version": APP_VERSION}
 
     # Registered in every mode -- /api/auth/me must answer 200 even in
     # "none" mode (see router_auth.py's own docstring), and the auth gate
