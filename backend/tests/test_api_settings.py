@@ -79,8 +79,11 @@ async def test_get_settings_reflects_app_config_defaults(client):
     assert rows["data_dir"]["editable"] is False
     assert rows["cors_origins"]["editable"] is False
     assert rows["auth_mode"]["editable"] is False
-    assert rows["els_enabled"]["editable"] is False
-    for field in _EXPECTED_ROW_KEYS - {"auth_mode", "els_enabled", "data_dir", "cors_origins"}:
+    # els_enabled (task 4.5 Track A): a plain bool, not a secret -- flows
+    # through the normal editable-row path like every other overridable
+    # field, unlike the three genuinely read-only rows above.
+    assert rows["els_enabled"]["editable"] is True
+    for field in _EXPECTED_ROW_KEYS - {"auth_mode", "data_dir", "cors_origins"}:
         assert rows[field]["editable"] is True
 
 
@@ -149,6 +152,34 @@ async def test_put_printer_flip_pins_roundtrip_changes_provenance(client):
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
     assert row["source"] == "env"
+
+
+async def test_put_els_enabled_roundtrip_gates_the_els_route(client):
+    """els_enabled (task 4.5 Track A) flows through the same DB-override
+    path every other field does -- unlike the fields above, though, a wrong
+    answer here wouldn't just mis-report a settings row, it would mis-gate a
+    whole other route (GET /api/els/label, unauthenticated by design -- see
+    router_els.py's module docstring), so this asserts the actual gating
+    effect, not just the row's own value/provenance."""
+    els_params = {"TitleText": "Cordless Drill", "URL": "https://homebox.example.com/item/1"}
+
+    resp = await client.get("/api/els/label", params=els_params)
+    assert resp.status_code == 404
+
+    resp = await client.put("/api/settings", json={"els_enabled": True})
+    assert resp.status_code == 200
+    row = _rows_by_key(resp.json())["els_enabled"]
+    assert row["value"] is True
+    assert row["source"] == "db"
+
+    resp = await client.get("/api/els/label", params=els_params)
+    assert resp.status_code == 200
+
+    resp = await client.put("/api/settings", json={"els_enabled": False})
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/els/label", params=els_params)
+    assert resp.status_code == 404
 
 
 async def test_put_is_a_true_partial_update(client):

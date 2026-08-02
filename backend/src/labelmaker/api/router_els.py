@@ -240,16 +240,24 @@ async def get_els_label(
     # "dynamic length" toggle to honor either way.
     dynamic_length: bool = Query(False, alias="DynamicLength"),
 ) -> Response:
+    # task 4.5 Track A: els_enabled is DB-editable (Settings page) now, so
+    # main.py registers this route UNCONDITIONALLY -- this per-request check
+    # is the only thing left enforcing "disabled -> 404" (never 503; there's
+    # no other gate, auth or otherwise, behind this endpoint at all).
+    effective = settings.effective()
+    if not effective.els_enabled:
+        raise HTTPException(status_code=404, detail="not found")
+
     try:
         params = HomeboxLocationParams(
             name=title_text,
             path=_secondary_text(description_text, additional_information),
             qr_data=url,
         )
-        # task 4.5: els_tape_mm from the settings overlay's EFFECTIVE value
-        # (env, or a DB override set from the Settings page) -- not
-        # AppConfig directly.
-        els_tape_mm = settings.effective().els_tape_mm
+        # Same `effective` snapshot as the els_enabled check above, so the
+        # tape width used here can't disagree with the flag that just
+        # passed.
+        els_tape_mm = effective.els_tape_mm
         definition = LabelDefinition(
             type="homebox_location",
             tape=Tape(width_mm=els_tape_mm, family="tze"),

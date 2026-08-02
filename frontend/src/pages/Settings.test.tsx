@@ -417,13 +417,56 @@ describe("Settings page", () => {
   describe("ELS section", () => {
     it("shows the current tape width and whether ELS is enabled", async () => {
       server.use(
-        http.get("/api/settings", () => HttpResponse.json(settingsWith({ els_enabled: { value: true } }))),
+        http.get("/api/settings", () =>
+          HttpResponse.json(settingsWith({ els_enabled: { value: true, source: "db", editable: true } })),
+        ),
       );
       renderWithProviders(<Settings />, { route: "/settings" });
 
       const els = await findSection("ELS");
-      expect(await within(els).findByLabelText("ELS tape width (mm)")).toHaveValue(24);
+      expect(await within(els).findByRole("switch", { name: "ELS enabled" })).toHaveAttribute("aria-checked", "true");
+      expect(within(els).getByLabelText("ELS tape width (mm)")).toHaveValue(24);
       expect(within(els).getByText("enabled")).toBeInTheDocument();
+    });
+
+    it("toggling ELS enabled immediately PUTs the new value", async () => {
+      const user = userEvent.setup();
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const els = await findSection("ELS");
+      await user.click(await within(els).findByRole("switch", { name: "ELS enabled" }));
+
+      await waitFor(() => expect(capturedBody).toEqual({ els_enabled: true }));
+    });
+
+    it("clicking Reset to env on ELS enabled PUTs null for that field", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get("/api/settings", () =>
+          HttpResponse.json(settingsWith({ els_enabled: { value: true, source: "db", editable: true } })),
+        ),
+      );
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const els = await findSection("ELS");
+      await within(els).findByRole("switch", { name: "ELS enabled" });
+      await user.click(within(els).getByRole("button", { name: "Reset to env" }));
+
+      await waitFor(() => expect(capturedBody).toEqual({ els_enabled: null }));
     });
 
     it("disables Save and shows an inline error for an out-of-range tape width", async () => {
@@ -464,22 +507,21 @@ describe("Settings page", () => {
 
   it("renders the read-only Runtime rows from GET /api/settings", async () => {
     server.use(
-      http.get("/api/settings", () =>
-        HttpResponse.json(
-          settingsWith({
-            auth_mode: { value: "oidc" },
-            els_enabled: { value: true },
-          }),
-        ),
-      ),
+      http.get("/api/settings", () => HttpResponse.json(settingsWith({ auth_mode: { value: "oidc" } }))),
     );
 
     renderWithProviders(<Settings />, { route: "/settings" });
 
     const runtime = await findSection("Runtime");
     expect(await within(runtime).findByText("oidc")).toBeInTheDocument();
-    expect(within(runtime).getByText("yes")).toBeInTheDocument(); // els_enabled
     expect(within(runtime).getByText("http://localhost:5173")).toBeInTheDocument(); // cors_origins
     expect(within(runtime).getByText("./data")).toBeInTheDocument(); // data_dir
+  });
+
+  it("ELS enabled no longer appears in the read-only Runtime section (task 4.5 Track A: it moved to ELS)", async () => {
+    renderWithProviders(<Settings />, { route: "/settings" });
+
+    const runtime = await findSection("Runtime");
+    expect(within(runtime).queryByText("ELS enabled")).not.toBeInTheDocument();
   });
 });

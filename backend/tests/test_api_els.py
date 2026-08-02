@@ -1,13 +1,17 @@
 """Tests for GET /api/els/label (task 3.5): HomeBox's External Label Service.
 
-Pins the CONTRACT documented in router_els.py's own module docstring: the
-route doesn't exist at all unless `els_enabled` opts in (a disabled
-deployment 404s, never 503s -- there's no auth barrier to gate behind), a
-configured deployment renders a real decodable PNG at the `els_tape_mm`
-tape's native device-pixel height, the QR encodes the `URL` param verbatim,
-missing/malformed query params 422 the same readable way every other
-`render_definition` caller in this app does, and nothing about the route
-depends on -- or is blocked by -- HomeBox's own `User-Agent`.
+Pins the CONTRACT documented in router_els.py's own get_els_label: this
+route is registered UNCONDITIONALLY (main.py) -- `els_enabled` is
+DB-editable now (task 4.5 Track A, see settings_overlay.py), so it can no
+longer be decided once, at startup, by whether the route exists at all.
+Instead the route answers 404 -- never 503, there's no auth barrier to gate
+behind -- on every request unless the settings overlay's EFFECTIVE
+`els_enabled` is on. A configured deployment renders a real decodable PNG at
+the `els_tape_mm` tape's native device-pixel height, the QR encodes the
+`URL` param verbatim, missing/malformed query params 422 the same readable
+way every other `render_definition` caller in this app does, and nothing
+about the route depends on -- or is blocked by -- HomeBox's own
+`User-Agent`.
 
 Not a golden suite: nothing here byte-locks a render (homebox_location's own
 golden fixtures already do that -- see test_homebox_types.py). These tests
@@ -55,6 +59,26 @@ _ASSET_PARAMS = {
 
 
 async def test_disabled_by_default_returns_404(client):
+    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    assert resp.status_code == 404
+
+
+async def test_enabled_via_settings_put_gates_the_route_same_as_app_config(client):
+    """els_enabled (task 4.5 Track A) is DB-editable from the Settings page
+    -- unlike every other test in this file, which flips it via the
+    app_config-level `_ENABLED`/`_ENABLED_9MM` markers (the env tier), this
+    one flips it through PUT /api/settings (the db tier) instead, and must
+    gate/ungate this route identically either way."""
+    resp = await client.put("/api/settings", json={"els_enabled": True})
+    assert resp.status_code == 200
+
+    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+
+    resp = await client.put("/api/settings", json={"els_enabled": False})
+    assert resp.status_code == 200
+
     resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 404
 

@@ -519,7 +519,9 @@ function HomeboxSection({ rows }: { rows: SettingRow[] }) {
   );
 }
 
-// --- ELS section: els_tape_mm (buffered number + Save + Reset to env) ---
+// --- ELS section: els_enabled (Switch, task 4.5 Track A -- moved here from
+// the read-only Runtime section now that it's DB-editable) + els_tape_mm
+// (buffered number + Save + Reset to env) ---
 
 function ElsTapeMmField({ rows }: { rows: SettingRow[] }) {
   const row = findRow(rows, "els_tape_mm");
@@ -577,9 +579,16 @@ function ElsSection({ rows }: { rows: SettingRow[] }) {
     <section className={panel}>
       <h2 className={panelHeading}>ELS</h2>
       <p className={helpText}>
+        HomeBox&apos;s External Label Service: turning this on registers an{" "}
+        <strong className="text-deck-200">unauthenticated</strong> endpoint that renders label PNGs on request --
+        HomeBox&apos;s label-service caller sends no credentials at all, so this only belongs on a trusted network.
+      </p>
+      <div className="mt-3">
+        <SwitchSettingRow label="ELS enabled" fieldKey="els_enabled" rows={rows} />
+      </div>
+      <p className={helpText}>
         The tape width HomeBox&apos;s External Label Service renders labels at. Only takes effect while ELS is
-        enabled (env-only, see Runtime below) -- currently{" "}
-        <span className="font-mono text-deck-200">{elsEnabled ? "enabled" : "disabled"}</span>.
+        enabled -- currently <span className="font-mono text-deck-200">{elsEnabled ? "enabled" : "disabled"}</span>.
       </p>
       <div className="mt-3">
         <ElsTapeMmField rows={rows} />
@@ -617,7 +626,6 @@ function RuntimeSection({ rows }: { rows: SettingRow[] }) {
       <p className={helpText}>Every row below is set via the environment -- change it there and restart the app, not here.</p>
       <div className="mt-3">
         <ReadOnlyRow label="Auth mode" row={findRow(rows, "auth_mode")} />
-        <ReadOnlyRow label="ELS enabled" row={findRow(rows, "els_enabled")} />
         <ReadOnlyRow label="CORS origins" row={findRow(rows, "cors_origins")} />
         <ReadOnlyRow label="Data directory" row={findRow(rows, "data_dir")} />
       </div>

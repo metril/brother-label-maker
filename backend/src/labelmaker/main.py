@@ -238,11 +238,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(router_homebox.router, prefix="/api")
     app.include_router(router_settings.router, prefix="/api")
     # Unauthenticated by design (HomeBox's ELS caller sends no auth, see
-    # router_els.py's module docstring) -- registered only when an operator
-    # opts in, so a disabled deployment 404s (the route doesn't exist) not
-    # 503s (the route exists but refuses).
-    if cfg.els_enabled:
-        app.include_router(router_els.router, prefix="/api")
+    # router_els.py's module docstring) -- registered UNCONDITIONALLY (task
+    # 4.5 Track A: els_enabled is now DB-editable from the Settings page, so
+    # whether this route answers can no longer be decided once, here, at
+    # process startup). The route itself checks the settings overlay's
+    # EFFECTIVE els_enabled on every request instead (get_els_label's first
+    # line) and 404s when it's off -- same contract as before (disabled ->
+    # 404, the route "doesn't exist"; never 503, the route "exists but
+    # refuses"), just enforced per-request rather than by registration.
+    app.include_router(router_els.router, prefix="/api")
     app.include_router(ws.router, prefix="/api")
 
     # Registered last (after every /api/* route above) so it only ever

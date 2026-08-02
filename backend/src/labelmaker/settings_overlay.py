@@ -96,6 +96,12 @@ class SettingsOverrides(BaseModel):
     printer_init_strategy: Literal["classic", "e310bt"] | None = None
     printer_bit_order: Literal["msb_first", "lsb_first"] | None = None
     printer_flip_pins: bool | None = None
+    # task 4.5 Track A: was a startup-only AppConfig field (main.py used to
+    # decide whether to even register router_els's routes from it once, at
+    # process start) -- now DB-editable like everything else here, checked
+    # per-request instead (router_els.py's get_els_label), so flipping it
+    # from the Settings page takes effect without a restart.
+    els_enabled: bool | None = None
     els_tape_mm: float | None = Field(default=None, ge=3.5, le=36)
     # max_length mirrors router_homebox.py's own HomeBoxSettingsUpdate.qr_base_url bound.
     homebox_url: str | None = Field(default=None, max_length=255)
@@ -142,6 +148,7 @@ class EffectiveSettings(BaseModel):
     printer_init_strategy: Literal["classic", "e310bt"]
     printer_bit_order: Literal["msb_first", "lsb_first"]
     printer_flip_pins: bool
+    els_enabled: bool
     els_tape_mm: float
     homebox_url: str | None
     homebox_api_key: str | None

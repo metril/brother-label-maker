@@ -60,8 +60,11 @@ _FIELD_ORDER = tuple(SettingsOverrides.model_fields)
 # aren't (yet, or ever) safe/sensible to flip from this UI. `printer_mode`
 # is deliberately NOT here -- it's one of the editable overridable fields
 # above (see settings_overlay.SettingsOverrides). Nothing that could double
-# as a credential ever belongs in this tuple.
-_READONLY_FIELDS = ("auth_mode", "els_enabled", "data_dir", "cors_origins")
+# as a credential ever belongs in this tuple. `els_enabled` is ALSO
+# deliberately not here (task 4.5 Track A) -- it's a plain bool, not a
+# secret, and now flows through the normal editable-row path above like
+# `els_tape_mm` already did.
+_READONLY_FIELDS = ("auth_mode", "data_dir", "cors_origins")
 
 
 def _cfg_source(config: AppConfig, field: str) -> str:
