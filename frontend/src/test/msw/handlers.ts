@@ -28,7 +28,10 @@ export const fontsHandler = http.get("/api/fonts", () => HttpResponse.json(fonts
  * HSe -- B2: GET /api/tapes). TapeSelector filters this down by family. */
 export const tapesHandler = http.get("/api/tapes", () => HttpResponse.json(tapesFixture));
 
-/** The 60-icon curated Material Symbols catalog (task 2.7). */
+/** The full symbols catalog fixture (858 entries as of commit 7's manifest
+ * v2 expansion: task 2.7's original 60 bare-id icons plus `material_*`/
+ * `phosphor_*` entries) -- regenerate with `npm run fixtures` (backend must
+ * be running) whenever the pipeline's curated id lists change. */
 export const symbolsHandler = http.get("/api/symbols", () => HttpResponse.json(symbolsFixture));
 
 export const symbolSvgHandler = http.get("/api/symbols/:id", () =>

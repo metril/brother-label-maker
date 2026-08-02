@@ -108,15 +108,25 @@ export interface TapeInfo {
 }
 
 /** Mirrors backend/render/symbols.py's SymbolInfo -- one entry of
- * GET /api/symbols' curated Material Symbols catalog. `id` is what an
- * `Icon` of `kind: "symbol"` carries; `path` (an `<id>.svg` filename under
+ * GET /api/symbols' catalog (manifest v2, commit 7: ~858 icons -- the
+ * original 60 hand-curated bare-id icons plus `material_*`/`phosphor_*`
+ * entries from backend/scripts/symbols_pipeline/). `id` is what an `Icon`
+ * of `kind: "symbol"` carries; `path` (an `<id>.svg` filename under
  * backend/assets/symbols/) is informational only -- fetch the SVG itself
- * via GET /api/symbols/{id}, not by constructing this path client-side. */
+ * via GET /api/symbols/{id}, not by constructing this path client-side.
+ * `category` is one of general/electrical/network/av/arrow/safety/misc
+ * (`safety` is reserved for a future source and currently unpopulated --
+ * don't assume every category value is present in a given catalog).
+ * `source`/`license` are free-form provenance strings (e.g.
+ * "material-symbols@0.45.10"/"Apache-2.0") -- see backend's LICENSES.md. */
 export interface SymbolInfo {
   id: string;
   name: string;
   tags: string[];
   path: string;
+  category: string;
+  source: string;
+  license: string;
 }
 
 /** POST /api/images' response (task 2.7): `image_id` is what an `Icon` of

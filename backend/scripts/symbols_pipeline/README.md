@@ -8,11 +8,11 @@ imports it, and it isn't part of the installed package.
 ## Why this exists
 
 The original 60 icons (task 2.7) were hand-curated and hand-normalized
-one-off. Commit 7 expands the catalog to 1000+ icons across multiple
-sources, which needs actual tooling: a committed, reviewable list of *which*
-icons came from where (the `*_ids.txt` files), and a repeatable, idempotent
-way to re-fetch + re-normalize + re-validate them (the `fetch_*.py` scripts +
-`common.py`).
+one-off. Commit 7 expands the catalog to ~860 curated icons across
+Material + Phosphor, which needs actual tooling: a committed, reviewable
+list of *which* icons came from where (the `*_ids.txt` files), and a
+repeatable, idempotent way to re-fetch + re-normalize + re-validate them
+(the `fetch_*.py` scripts + `common.py`).
 
 ## Layout
 

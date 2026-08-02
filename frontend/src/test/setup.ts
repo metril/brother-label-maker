@@ -60,6 +60,60 @@ export class MockWebSocket {
   }
 }
 
+/** Every MockIntersectionObserver constructed during the current test, in
+ * creation order -- a test grabs the instance IconField.tsx's windowed
+ * SymbolPicker created for its sentinel div (usually
+ * `mockIntersectionObserverInstances.at(-1)!`) and calls `.trigger()` on it
+ * to simulate the sentinel scrolling into view. Cleared after every test. */
+export const mockIntersectionObserverInstances: MockIntersectionObserver[] = [];
+
+/** jsdom implements no IntersectionObserver at all -- stub it with
+ * something a test can drive synchronously. Real observers report once per
+ * observed target; this app only ever observes a single windowing sentinel
+ * per picker instance, so `.trigger()` fabricates one entry per currently-
+ * observed target rather than a general per-target queue/timing model. */
+export class MockIntersectionObserver implements IntersectionObserver {
+  readonly root: Element | Document | null = null;
+  readonly rootMargin: string = "";
+  readonly scrollMargin: string = "";
+  readonly thresholds: ReadonlyArray<number> = [];
+
+  #callback: IntersectionObserverCallback;
+  #targets = new Set<Element>();
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.#callback = callback;
+    mockIntersectionObserverInstances.push(this);
+  }
+
+  observe(target: Element) {
+    this.#targets.add(target);
+  }
+
+  unobserve(target: Element) {
+    this.#targets.delete(target);
+  }
+
+  disconnect() {
+    this.#targets.clear();
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+
+  /** Simulate every currently-observed target crossing the visibility
+   * threshold -- `isIntersecting: true` (the default) is the "sentinel
+   * scrolled into view, grow the window" case a windowing test drives;
+   * `false` simulates it leaving. No-op when nothing is observed yet. */
+  trigger(isIntersecting = true) {
+    const entries = Array.from(this.#targets).map(
+      (target) => ({ target, isIntersecting, intersectionRatio: isIntersecting ? 1 : 0 }) as IntersectionObserverEntry,
+    );
+    if (entries.length > 0) this.#callback(entries, this);
+  }
+}
+
 beforeAll(() => {
   // msw's own WebSocketInterceptor patches globalThis.WebSocket too (not
   // just fetch/XHR) the moment the server starts listening, and errors on
@@ -68,6 +122,7 @@ beforeAll(() => {
   // resolves to for the rest of the suite.
   server.listen({ onUnhandledRequest: "error" });
   vi.stubGlobal("WebSocket", MockWebSocket);
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 
   // jsdom doesn't implement matchMedia at all -- usePrefersReducedMotion
   // (FeedDeck/Designer) needs SOME implementation to avoid throwing.
@@ -93,6 +148,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   mockWebSocketInstances.length = 0;
+  mockIntersectionObserverInstances.length = 0;
   // stores/tray.ts persists to localStorage (zustand's persist middleware),
   // and hooks/useTheme.ts persists `lm-theme` -- clear it after every test
   // so one test's tray/theme state can never leak into the next via a
