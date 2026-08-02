@@ -16,6 +16,10 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # HOMEBOX_API_KEY deliberately absent: the key is a secret and lives in
+      # the DB settings overlay (Settings page, or
+      # `PUT /api/settings {"homebox_api_key": "..."}`) -- never in this file.
+      HOMEBOX_URL: https://homebox.azureolympos.com
       PRINTER_MODE: usb
       # Verified 2026-07-28 (first physical print, docs/protocol-notes.md
       # RESULTS): classic works; e310bt was never needed.
@@ -24,7 +28,7 @@ services:
       # order and flipped pins are correct for the PT-E720BT and are now the
       # AppConfig defaults -- only uncomment to EXPERIMENT away from them.
       # PRINTER_BIT_ORDER: lsb_first
-      # PRINTER_FLIP_PINS: "false"
+      PRINTER_FLIP_PINS: "true"
       # M3: CORS_ORIGINS is a JSON array, not a bare string -- see config.py's
       # AppConfig.cors_origins field comment for the exact env-var syntax.
       # Only needed if the frontend is served from a different origin than
