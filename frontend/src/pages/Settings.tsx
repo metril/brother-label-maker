@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, putHomeboxSettings } from "../api/client";
 import { Pending } from "../components/ui/Pending";
 import { TextInput } from "../components/ui/inputs";
+import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { errorText, fieldLabelText, helpText, panel, panelHeading, primaryButtonClass, typeHeading } from "../components/ui/styles";
 import { HOMEBOX_SETTINGS_QUERY_KEY, useHomeboxSettingsQuery } from "../hooks/useHomeboxSettings";
 import { useRuntimeSettings } from "../hooks/useRuntimeSettings";
@@ -71,6 +72,17 @@ export function Settings() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <h1 className={typeHeading}>Settings</h1>
+
+      <section className={panel}>
+        <h2 className={panelHeading}>Appearance</h2>
+        <div className="flex flex-col gap-2">
+          <ThemeToggle />
+          <p className={helpText}>
+            "System" follows this device's own light/dark setting. Stored on this device only -- it isn't a server setting,
+            so it doesn't apply to other browsers or devices.
+          </p>
+        </div>
+      </section>
 
       <section className={panel}>
         <h2 className={panelHeading}>QR base URL</h2>

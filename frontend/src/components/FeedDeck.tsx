@@ -182,24 +182,34 @@ export function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetc
   return (
     <div className="inline-flex flex-col items-start gap-2">
       <div className="relative" style={{ width: geo.totalWidthPx, height: geo.stripHeightPx }}>
-        {/* The tape strip -- the one place true light appears (--color-tape). */}
+        {/* The tape strip -- the one place true light appears (--color-tape).
+            The hairline border is mostly for the light theme: --color-tape
+            is a fixed off-white in BOTH themes, so on a white light-theme
+            panel it would otherwise have no visible edge at all -- harmless
+            (barely visible) in the dark theme, where the tape already reads
+            clearly against the darker panel behind it. */}
         <div
           data-testid="printable-band"
-          className="absolute inset-y-0 left-0 overflow-hidden rounded-[2px] shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
+          className="absolute inset-y-0 left-0 overflow-hidden rounded-[2px] border border-deck-600/50 shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
           style={{ width: geo.stripWidthPx, backgroundColor: "var(--color-tape)" }}
         >
-          {/* Unprintable margins, top and bottom -- deck-200 at low opacity
-              OVER the tape, per the design doc: subtly darker, not a
-              different color entirely, so it still reads as "tape". */}
+          {/* Unprintable margins, top and bottom -- a FIXED dark tint
+              (--color-tape-margin) at low opacity OVER the tape, per the
+              design doc: subtly darker, not a different color entirely, so
+              it still reads as "tape". Deliberately not a themed neutral
+              like --color-deck-200 (which flips light/dark between themes,
+              and would make this margin read completely differently
+              depending which theme happened to be active) -- see
+              index.css's own doc on --color-tape-margin. */}
           <div
             aria-hidden
             className="absolute inset-x-0 top-0"
-            style={{ height: geo.marginHeightPx, backgroundColor: "var(--color-deck-200)", opacity: 0.35 }}
+            style={{ height: geo.marginHeightPx, backgroundColor: "var(--color-tape-margin)", opacity: 0.35 }}
           />
           <div
             aria-hidden
             className="absolute inset-x-0 bottom-0"
-            style={{ height: geo.marginHeightPx, backgroundColor: "var(--color-deck-200)", opacity: 0.35 }}
+            style={{ height: geo.marginHeightPx, backgroundColor: "var(--color-tape-margin)", opacity: 0.35 }}
           />
           {/* The rendered content, sized from PHYSICAL mm on both axes
               (never png_width_px/png_height_px) and inset into exactly the
@@ -220,7 +230,7 @@ export function DeckStrip({ png, lengthMm, nominalMm, printMm, minFeedMm, isFetc
             <div
               aria-hidden
               data-testid="preview-refreshing"
-              className="pointer-events-none absolute inset-0 animate-pulse bg-deck-950/10"
+              className="pointer-events-none absolute inset-0 animate-pulse bg-scrim/10"
             />
           )}
         </div>

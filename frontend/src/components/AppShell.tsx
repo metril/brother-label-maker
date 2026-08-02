@@ -6,10 +6,12 @@ import type { AuthUser } from "../api/types";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
 import { PrinterStatusBadge } from "./PrinterStatusBadge";
 import { TypeRail } from "./TypeRail";
-import { eyebrow, helpText, panel, primaryButtonClass, typeHeading } from "./ui/styles";
+import { eyebrow, helpText, iconButtonClass, panel, primaryButtonClass, typeHeading } from "./ui/styles";
 import { useAuth } from "../hooks/useAuth";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
 import { useJobEventsContext } from "../hooks/useJobEvents";
+import { useTheme } from "../hooks/useTheme";
+import type { Theme } from "../hooks/useTheme";
 
 interface AppShellProps {
   children: ReactNode;
@@ -75,6 +77,39 @@ function UserMenu({ user }: { user: AuthUser | null }) {
         Sign out
       </button>
     </div>
+  );
+}
+
+const THEME_CYCLE: Theme[] = ["dark", "light", "system"];
+const THEME_ICON: Record<Theme, string> = { dark: "●", light: "○", system: "◐" };
+const THEME_LABEL: Record<Theme, string> = { dark: "Dark", light: "Light", system: "System" };
+
+/** The header's own compact theme control -- a single icon button cycling
+ * dark -> light -> system -> dark (Settings.tsx's "Appearance" section has
+ * the full 3-option ui/ThemeToggle.tsx instead) so it costs almost no
+ * header width at the 360px floor, unlike a 3-segment control would.
+ * `aria-label` announces the CURRENT theme (not what clicking does, which
+ * would need updating every click and reads oddly for a toggle) -- the
+ * glyph is decorative (`aria-hidden`), same convention as this file's other
+ * icon buttons (JobTray's `×`, TrayItemRow's `↑`/`↓`/`⧉`). */
+function ThemeCycleButton() {
+  const { theme, setTheme } = useTheme();
+
+  function cycle() {
+    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(theme) + 1) % THEME_CYCLE.length]!;
+    setTheme(next);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={cycle}
+      aria-label={`Theme: ${THEME_LABEL[theme]}`}
+      title={`Theme: ${THEME_LABEL[theme]} (click to change)`}
+      className={iconButtonClass}
+    >
+      <span aria-hidden="true">{THEME_ICON[theme]}</span>
+    </button>
   );
 }
 
@@ -171,6 +206,7 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
 
         <div className="ml-auto flex items-center gap-4">
+          <ThemeCycleButton />
           <PrinterStatusBadge />
           {/* Away from the Designer page, this is the ONLY way to reach the
               tray -- JobTray.tsx (the sticky sidebar/mobile sheet) only

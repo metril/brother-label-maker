@@ -108,7 +108,7 @@ export function PrintButton({
       ? "border-sage-400 bg-sage-400/15 text-sage-400"
       : job.phase === "failed"
         ? "border-rust-500 bg-rust-500/15 text-rust-500"
-        : "border-amber-500 bg-amber-500 text-deck-950 hover:bg-amber-300";
+        : "border-amber-500 bg-amber-500 text-on-accent hover:bg-amber-300";
 
   // Review fix-up: the done-state success line must describe the job that
   // ACTUALLY printed, not whatever the tray/current design happens to look

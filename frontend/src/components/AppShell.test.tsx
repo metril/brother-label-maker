@@ -178,3 +178,36 @@ describe("AppShell -- Design-route scoping (type rail + global tray drawer)", ()
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 });
+
+/** The header's own compact theme control (task 4.4 doc v2) -- an icon
+ * button cycling dark -> light -> system -> dark, announcing the CURRENT
+ * theme via aria-label (Settings.tsx's own full ThemeToggle covers the
+ * radiogroup/keyboard-nav behavior; this only needs to prove the header's
+ * OWN wiring -- correct default, cycling, and that it actually flips
+ * `<html data-theme>`, the same thing index.css's theme blocks key off). */
+describe("AppShell -- compact theme control", () => {
+  it("defaults to announcing Dark, and cycles dark -> light -> system -> dark on repeated clicks", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+
+    const button = await screen.findByRole("button", { name: "Theme: Dark" });
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    await user.click(button);
+    expect(await screen.findByRole("button", { name: "Theme: Light" })).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    await user.click(screen.getByRole("button", { name: "Theme: Light" }));
+    expect(await screen.findByRole("button", { name: "Theme: System" })).toBeInTheDocument();
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Theme: System" }));
+    expect(await screen.findByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+});

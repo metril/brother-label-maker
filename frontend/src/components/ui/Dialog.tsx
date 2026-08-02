@@ -21,7 +21,7 @@ export function Dialog({ open, onClose, label, children, className }: DialogProp
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div aria-hidden onClick={onClose} className="fixed inset-0 bg-deck-950/70" />
+      <div aria-hidden onClick={onClose} className="fixed inset-0 bg-scrim/70" />
       <div
         role="dialog"
         aria-modal="true"

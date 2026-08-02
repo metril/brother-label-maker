@@ -89,7 +89,7 @@ describe("GlobalTrayDrawer -- header button, open/close, and focus management", 
 
     await user.click(trigger);
     await waitFor(() => expect(screen.getByRole("button", { name: "Close print tray" })).toHaveFocus());
-    const scrim = document.querySelector('[aria-hidden][class*="bg-deck-950/70"]');
+    const scrim = document.querySelector('[aria-hidden][class*="bg-scrim/70"]');
     expect(scrim).not.toBeNull();
     await user.click(scrim!);
     await waitFor(() => expect(trigger).toHaveFocus());

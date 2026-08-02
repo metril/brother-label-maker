@@ -157,7 +157,7 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
       </div>
 
       {mobileExpanded && (
-        <div aria-hidden onClick={closeMobileSheet} className="fixed inset-0 z-40 bg-deck-950/70 lg:hidden" />
+        <div aria-hidden onClick={closeMobileSheet} className="fixed inset-0 z-40 bg-scrim/70 lg:hidden" />
       )}
 
       <button
@@ -173,7 +173,7 @@ export function JobTray({ current, onAddToTray }: JobTrayProps) {
           </span>
           <span className="text-[11px] text-deck-400">{itemCountLabel} · tap for details</span>
         </span>
-        <span className="rounded-md border border-amber-500 bg-amber-500 px-4 py-1.5 text-[13px] font-semibold text-deck-950">
+        <span className="rounded-md border border-amber-500 bg-amber-500 px-4 py-1.5 text-[13px] font-semibold text-on-accent">
           Print
         </span>
       </button>

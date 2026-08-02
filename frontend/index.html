@@ -5,6 +5,26 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Label Studio — PT-E720BT</title>
+    <script>
+      // Pre-paint theme (see src/hooks/useTheme.ts): runs before the bundle
+      // loads so the correct theme is already on <html> for the very first
+      // paint -- no flash of the wrong theme while React boots. Mirrors
+      // useTheme's own default exactly: no stored preference at all means
+      // "dark" (this app's identity is dark; system is opt-in), not
+      // "system" -- only an explicit "system" choice ever leaves the
+      // `data-theme` attribute off (letting index.css's own
+      // prefers-color-scheme media query govern instead).
+      (function () {
+        var stored = localStorage.getItem("lm-theme");
+        if (stored === "light") {
+          document.documentElement.dataset.theme = "light";
+        } else if (stored === "system") {
+          delete document.documentElement.dataset.theme;
+        } else {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

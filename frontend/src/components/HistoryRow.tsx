@@ -68,7 +68,7 @@ export function HistoryRow({
   return (
     <tr className="border-b border-deck-800/60 align-top">
       <td className="py-2 pr-3">
-        <div className="flex h-9 w-14 items-center justify-center overflow-hidden rounded-sm" style={{ backgroundColor: "var(--color-tape)" }}>
+        <div className="flex h-9 w-14 items-center justify-center overflow-hidden rounded-sm border border-deck-600/50" style={{ backgroundColor: "var(--color-tape)" }}>
           {item.thumbnail_url ? (
             <img
               src={item.thumbnail_url}

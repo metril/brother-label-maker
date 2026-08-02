@@ -50,7 +50,7 @@ export const dashedAddButtonClass =
   "self-start rounded-md border border-dashed border-deck-600 px-3 py-1 text-[12px] font-medium text-deck-200 hover:border-amber-500 hover:text-amber-300";
 
 export const primaryButtonClass =
-  "rounded-md border border-amber-500 bg-amber-500 px-5 py-2 text-[14px] font-semibold text-deck-950 transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60";
+  "rounded-md border border-amber-500 bg-amber-500 px-5 py-2 text-[14px] font-semibold text-on-accent transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60";
 
 /** The one remaining raw `<input type="checkbox">` shape in the app --
  * HomeboxEntityRow.tsx's per-row select and pages/Homebox.tsx's "Select all

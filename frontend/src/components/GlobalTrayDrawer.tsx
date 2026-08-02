@@ -59,7 +59,7 @@ export function GlobalTrayDrawer() {
         {label}
       </button>
 
-      {dialog.isOpen && <div aria-hidden onClick={dialog.close} className="fixed inset-0 z-40 bg-deck-950/70" />}
+      {dialog.isOpen && <div aria-hidden onClick={dialog.close} className="fixed inset-0 z-40 bg-scrim/70" />}
 
       {/* Always mounted (visibility/translate-toggled below), not
           conditionally unmounted -- see this component's own doc for why:

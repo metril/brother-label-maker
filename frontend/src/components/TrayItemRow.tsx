@@ -51,7 +51,7 @@ export function TrayItemRow({
       <div className="flex items-center gap-2">
         <span className={indexBadge}>{index + 1}</span>
         <div
-          className="flex h-7 w-10 shrink-0 items-center justify-center overflow-hidden rounded-sm"
+          className="flex h-7 w-10 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-deck-600/50"
           style={{ backgroundColor: "var(--color-tape)" }}
         >
           {png ? <img src={png} alt="" style={{ imageRendering: "pixelated", maxHeight: "100%", maxWidth: "100%" }} /> : null}

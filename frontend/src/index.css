@@ -1,32 +1,163 @@
 @import "tailwindcss";
 
-/* -- Design system (task 2.10, locked -- see
-   .superpowers/sdd/we-re-going-to-build-eager-cloud/frontend-design-system.md).
-   The subject is a thermal-transfer industrial label printer -- the palette
-   is warm graphite (brown-shifted greys), NOT neutral near-black: it reads
-   as the machine's own charcoal housing, not a generic dark-mode SaaS app. */
+/* -- Design system (task 2.10, superseded by the theme system below -- see
+   .superpowers/sdd/we-re-going-to-build-eager-cloud/frontend-design-system.md,
+   doc v2). The warm graphite (brown-shifted greys) palette is RETIRED (user
+   directive, 2026-08-02) -- the subject is still a thermal-transfer
+   industrial label printer, but the palette is now a neutral, slightly-cool
+   dark theme plus a paper-grey light theme, switchable at runtime (dark /
+   light / system), rather than a single fixed warm-dark look.
+
+   How this file is organized:
+   1. `@theme` registers every color token Tailwind turns into utilities
+      (bg-deck-900, text-amber-300, etc.) -- the values here are the DARK
+      theme's values, since dark is this app's default identity (see
+      hooks/useTheme.ts). Utilities compile to `var(--color-*)`, so every
+      component file that uses e.g. `bg-deck-900` re-themes automatically
+      just by these custom properties changing value below -- no utility
+      class ever needs to change per theme.
+   2. Three theme blocks re-declare those same custom properties for the
+      three runtime states a user can pick (see hooks/useTheme.ts /
+      components/ui/ThemeToggle.tsx):
+        - `:root[data-theme="dark"]`   -- explicit dark (same values as (1))
+        - `:root[data-theme="light"]`  -- explicit light
+        - `@media (prefers-color-scheme: light) { :root:not([data-theme]) }`
+          -- "system" mode (no `data-theme` attribute at all) with the OS
+          set to light. "System" + OS-dark needs no rule of its own: with no
+          `data-theme` attribute and no matching light-preference media
+          query, the (1) `@theme` block's own dark values already stand.
+   3. A handful of tokens are the SAME in both themes (`--color-tape`, the
+      label substrate; `--color-tape-margin`; `--color-on-accent`;
+      `--color-scrim`) -- declared once in `@theme` and never overridden.
+      `--color-icon-well` is the one semantic token that DOES vary (a light
+      well behind black symbol/image art needs to stay light in dark mode
+      too, but can just match the panel in light mode). */
 @theme {
-  --color-deck-950: #12100e; /* app background */
-  --color-deck-900: #1b1815; /* panels, cards */
-  --color-deck-800: #262119; /* raised controls, inputs */
-  --color-deck-700: #332c22; /* hover states */
-  --color-deck-600: #4a4137; /* hairlines, borders */
-  --color-deck-400: #8a7e6e; /* muted text, labels */
-  --color-deck-200: #d6cfc2; /* body text */
+  --color-deck-950: #0a0c10; /* app background */
+  --color-deck-900: #12151b; /* panels, cards */
+  --color-deck-800: #1b2028; /* raised controls, inputs */
+  --color-deck-700: #262d38; /* hover states */
+  --color-deck-600: #3a4350; /* hairlines, borders */
+  --color-deck-400: #8b95a3; /* muted text, labels */
+  --color-deck-200: #e2e6eb; /* body text */
 
-  --color-tape: #f2efe6; /* the label substrate ONLY */
+  --color-tape: #f2efe6; /* the label substrate ONLY -- same in both themes */
+  /* Unprintable tape margins (FeedDeck's own top/bottom insets) -- a FIXED
+     dark tint over the tape, not a themed neutral: `--color-deck-200` used
+     to double for this, but that token flips from light (dark theme) to
+     dark (light theme), which would make the margin read completely
+     differently -- sometimes subtly darker than the tape, sometimes barely
+     visible -- depending on which theme happened to be active. */
+  --color-tape-margin: #565550;
 
-  --color-amber-500: #e8a33d; /* primary accent, focus rings, active nav */
-  --color-amber-300: #f2c57c; /* accent hover/emphasis */
-  --color-rust-500: #c4553d; /* errors, destructive, cut marks */
-  --color-sage-400: #7e9b7a; /* connected/success (muted, never neon) */
+  --color-amber-500: #f0a63c; /* primary accent, focus rings, active nav */
+  --color-amber-300: #f6c477; /* accent hover/emphasis */
+  --color-rust-500: #e0604a; /* errors, destructive, cut marks */
+  --color-sage-400: #74a878; /* connected/success (muted, never neon) */
+
+  /* Text on amber buttons (primaryButtonClass, PrintButton, the mobile Print
+     chip) -- FIXED near-black ink, not `--color-deck-950`: that token is the
+     app's own darkest-vs-lightest EXTREME corner, so it flips polarity
+     between themes (near-black in dark mode, near-white in light mode) --
+     exactly backwards for the light theme's mid-luminance amber-500, where
+     near-white text on amber measures ~3.95:1 (fails WCAG AA's 4.5:1 for
+     normal text). A single fixed dark ink passes in both themes instead:
+     ~9.9:1 dark / ~4.8:1 light (computed against this file's own amber-500
+     values). Slightly darker than the palette brief's literal #12100c
+     (measured ~4.49:1 in light mode, just under the 4.5 floor) -- the one
+     palette fine-tune made in this task, reported in the commit. */
+  --color-on-accent: #060504;
+  /* Modal/sheet backdrop scrims (Dialog, JobTray's mobile sheet,
+     GlobalTrayDrawer) -- FIXED near-black, not `--color-deck-950/NN`: a
+     translucent scrim built from a token that turns near-white in the light
+     theme would stop reading as a dimming overlay entirely. */
+  --color-scrim: #05070a;
+
+  /* The light well behind black-line symbol/image art (IconField's symbol
+     grid + uploaded-image thumbnail) -- dark theme's default here; light
+     theme only needs to override this one (see the theme blocks below). */
+  --color-icon-well: #dfe3e8;
+
+  /* The Select chevron (ui/inputs.tsx) is a plain CSS background-image, not
+     a Tailwind utility -- background-image data-URIs can't reference
+     `currentColor` the way inline SVG can, so the two pre-rendered chevrons
+     (one per theme's own `--color-deck-400`) are swapped via this custom
+     property instead, the same "redeclare per theme block" mechanism as
+     every color above. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238b95a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   --font-condensed: "Roboto Condensed", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* -- Fonts: copied from backend/assets/fonts/ into public/fonts/ at build
+/* Explicit dark theme (`localStorage["lm-theme"] === "dark"`, or no stored
+   preference at all -- see hooks/useTheme.ts's own doc for why absent means
+   dark, not system). Same values as `@theme` above, restated here so the
+   three runtime states are symmetric and this file stays correct if the
+   `@theme` defaults above ever change independently. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-deck-950: #0a0c10;
+  --color-deck-900: #12151b;
+  --color-deck-800: #1b2028;
+  --color-deck-700: #262d38;
+  --color-deck-600: #3a4350;
+  --color-deck-400: #8b95a3;
+  --color-deck-200: #e2e6eb;
+  --color-amber-500: #f0a63c;
+  --color-amber-300: #f6c477;
+  --color-rust-500: #e0604a;
+  --color-sage-400: #74a878;
+  --color-icon-well: #dfe3e8;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238b95a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* Explicit light theme (`localStorage["lm-theme"] === "light"`) -- paper
+   grey, zero warm cast. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-deck-950: #f6f7f9;
+  --color-deck-900: #ffffff;
+  --color-deck-800: #eceef2;
+  --color-deck-700: #e0e3e9;
+  --color-deck-600: #c6ccd5;
+  --color-deck-400: #5f6b7d;
+  --color-deck-200: #191d24;
+  --color-amber-500: #b26a05;
+  --color-amber-300: #8a4f04;
+  --color-rust-500: #bd3f2b;
+  --color-sage-400: #3e7d46;
+  --color-icon-well: #ffffff;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%235f6b7d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* "System" mode (no `data-theme` attribute at all -- the user picked
+   "System" in ThemeToggle, or index.html's pre-paint script found no stored
+   preference other than the two explicit ones) with the OS itself set to
+   light. The dark half of "system" needs no rule here: with neither a
+   `data-theme` attribute nor this media query matching, the plain `@theme`
+   defaults above (dark) already stand. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --color-deck-950: #f6f7f9;
+    --color-deck-900: #ffffff;
+    --color-deck-800: #eceef2;
+    --color-deck-700: #e0e3e9;
+    --color-deck-600: #c6ccd5;
+    --color-deck-400: #5f6b7d;
+    --color-deck-200: #191d24;
+    --color-amber-500: #b26a05;
+    --color-amber-300: #8a4f04;
+    --color-rust-500: #bd3f2b;
+    --color-sage-400: #3e7d46;
+    --color-icon-well: #ffffff;
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%235f6b7d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+}
+
+/* Fonts: copied from backend/assets/fonts/ into public/fonts/ at build
    time (scripts/copy-fonts.mjs, wired into predev/prebuild) -- never fetched
    from the API at runtime. Six files back the design doc's three families x
    two weight callouts each (Roboto Condensed 400/700, Inter 400/600,
@@ -78,10 +209,6 @@
   font-display: swap;
 }
 
-html {
-  color-scheme: dark;
-}
-
 body {
   margin: 0;
   background-color: var(--color-deck-950);
@@ -114,7 +241,9 @@ body {
    width/height/left, sized directly from physical mm -- see
    feedDeckGeometry.ts): every debounced preview update would then ANIMATE
    the strip's geometry into its new size over 150ms instead of snapping to
-   the backend's actual answer immediately. */
+   the backend's actual answer immediately. This transition also covers
+   theme switching itself -- flipping `data-theme` re-colors every panel/
+   border/text smoothly rather than snapping instantly. */
 * {
   transition-duration: 150ms;
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity,

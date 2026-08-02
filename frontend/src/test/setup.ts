@@ -93,11 +93,17 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   mockWebSocketInstances.length = 0;
-  // stores/tray.ts persists to localStorage (zustand's persist middleware) --
-  // clear it after every test so one test's tray state can never leak into
-  // the next via a shared jsdom localStorage, independent of whatever a
-  // test itself does with useTrayStore.setState(...).
+  // stores/tray.ts persists to localStorage (zustand's persist middleware),
+  // and hooks/useTheme.ts persists `lm-theme` -- clear it after every test
+  // so one test's tray/theme state can never leak into the next via a
+  // shared jsdom localStorage, independent of whatever a test itself does
+  // with useTrayStore.setState(...) or useTheme's own setTheme(...).
   localStorage.clear();
+  // useTheme.ts's `applyTheme` sets/removes this attribute directly on
+  // `document.documentElement` -- a real DOM node shared across every test
+  // in the same jsdom environment (unlike component-local state, which
+  // unmounts), so it needs its own explicit reset alongside localStorage.
+  document.documentElement.removeAttribute("data-theme");
 });
 
 afterAll(() => {

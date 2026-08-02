@@ -121,7 +121,7 @@ function SymbolPicker({ selectedId, onSelect }: { selectedId: string | null; onS
             onClick={() => onSelect(symbol.id)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={`flex h-9 w-9 items-center justify-center rounded-md border p-1.5 ${
-              selectedId === symbol.id ? "border-amber-500 bg-deck-200" : "border-deck-600 bg-deck-200/90 hover:bg-deck-200"
+              selectedId === symbol.id ? "border-amber-500 bg-icon-well" : "border-deck-600 bg-icon-well/90 hover:bg-icon-well"
             }`}
           >
             <img src={symbolSvgUrl(symbol.id)} alt={symbol.name} className="h-full w-full" />
@@ -174,7 +174,7 @@ function ImagePicker({ icon, onChange, onClear }: ImagePickerProps) {
       <img
         src={imagePngUrl(icon.image_id)}
         alt="Uploaded icon"
-        className="h-16 w-16 shrink-0 rounded-md border border-deck-600 bg-deck-200 object-contain p-1"
+        className="h-16 w-16 shrink-0 rounded-md border border-deck-600 bg-icon-well object-contain p-1"
       />
       <div className="flex flex-1 flex-col gap-2">
         <div role="radiogroup" aria-label="Image mode" className="flex gap-1.5">

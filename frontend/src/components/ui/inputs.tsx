@@ -149,10 +149,17 @@ interface SelectProps {
  * from a plain text input at a glance. Inline `style` (not a Tailwind
  * arbitrary-value class) because escaping a data-URI SVG through Tailwind's
  * own bracket-notation quoting is fragile; a plain CSS background-image
- * isn't. */
-const CHEVRON_BACKGROUND =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238A7E6E' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
-
+ * isn't.
+ *
+ * The chevron's own color must track the themed muted text color
+ * (`--color-deck-400`), which a `background-image` data-URI can't do via
+ * `currentColor` the way an inline `<svg>` can (a CSS background image is
+ * resolved as its own independent document, outside this element's
+ * inheritance chain) -- `var(--select-chevron)` instead references a CSS
+ * custom property that index.css itself redeclares per theme (two
+ * pre-rendered chevrons, one per theme's own deck-400 hex), the same
+ * "redeclare in each theme block" mechanism every color in this app already
+ * uses. See that file's own doc comment on `--select-chevron`. */
 export function Select({ id, value, onChange, options, ariaLabel, disabled, className }: SelectProps) {
   return (
     <select
@@ -162,7 +169,7 @@ export function Select({ id, value, onChange, options, ariaLabel, disabled, clas
       aria-label={ariaLabel}
       onChange={(e) => onChange(e.target.value)}
       className={className ?? selectClass}
-      style={{ backgroundImage: CHEVRON_BACKGROUND, backgroundRepeat: "no-repeat", backgroundPosition: "right 0.7rem center" }}
+      style={{ backgroundImage: "var(--select-chevron)", backgroundRepeat: "no-repeat", backgroundPosition: "right 0.7rem center" }}
     >
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>

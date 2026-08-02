@@ -106,4 +106,24 @@ describe("Settings page", () => {
     expect(within(runtime).getAllByText("yes").length).toBeGreaterThanOrEqual(3); // flip pins, els enabled, homebox configured
     expect(within(runtime).getByText("24 mm")).toBeInTheDocument();
   });
+
+  it("shows an Appearance section with the theme toggle, Dark selected by default", async () => {
+    renderWithProviders(<Settings />, { route: "/settings" });
+
+    const appearance = section("Appearance");
+    const group = within(appearance).getByRole("radiogroup", { name: "Theme" });
+    expect(within(group).getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
+    expect(within(group).getByRole("radio", { name: "Light" })).toBeInTheDocument();
+    expect(within(group).getByRole("radio", { name: "System" })).toBeInTheDocument();
+  });
+
+  it("switching to Light in the Appearance section updates <html data-theme> immediately", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Settings />, { route: "/settings" });
+
+    const appearance = section("Appearance");
+    await user.click(within(appearance).getByRole("radio", { name: "Light" }));
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
 });
