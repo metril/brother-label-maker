@@ -219,6 +219,20 @@ def _fresh_libusb_backend():
     backend is constructed here -- this function never makes the
     no-backend-available case any worse.
 
+    Two robustness details (review M4): `_LibUSB` is a private,
+    underscore-prefixed pyusb symbol with no API-stability guarantee, so
+    it's looked up via `getattr(..., "_LibUSB", None)` rather than a direct
+    attribute access -- a future pyusb rename/removal degrades to the same
+    None/no-backend contract above instead of raising a raw AttributeError.
+    And `_LibUSB.__init__` ends with `_check(lib.libusb_init(...))`, which
+    raises `usb.core.USBError` on any negative return (usbfs unavailable,
+    fd exhaustion, ...); this function does NOT catch that here -- it is
+    now called from inside `open()`'s try (moved there by the same review
+    finding), so the USBError propagates straight into `open()`'s own
+    `except (usb.core.USBError, usb.core.NoBackendError)` handler and comes
+    out as `PrinterNotFoundError`, same as every other pyusb failure in
+    `open()` -- never a raw 500 out of `GET /api/printer/status`.
+
     # UNVERIFIED: this closes the *stale-context* half of the documented
     hotplug gap in theory (fresh libusb_init -> fresh sysfs scan on every
     open); confirming it actually picks up a mid-session replug against the
@@ -231,7 +245,10 @@ def _fresh_libusb_backend():
     base = usb.backend.libusb1.get_backend()
     if base is None:
         return None
-    return usb.backend.libusb1._LibUSB(base.lib)
+    libusb_cls = getattr(usb.backend.libusb1, "_LibUSB", None)
+    if libusb_cls is None:
+        return None
+    return libusb_cls(base.lib)
 
 
 class PyUsbTransport:
@@ -294,15 +311,38 @@ class PyUsbTransport:
         for why: the stale-context half of the hotplug gap documented at
         docs/usb-setup.md §Hotplug) and passes it to `usb.core.find` as
         `backend=`, instead of relying on pyusb's own process-lifetime-cached
-        backend. On EVERY failure path out of this method -- no device found,
-        `set_configuration`/`claim_interface` raising (caught below, same as
-        `find` itself), or the existing USBError/NoBackendError wrap -- that
-        fresh backend is `.finalize()`d (guarded against `backend is None`,
-        for when no libusb1 backend could be built at all) before the
-        exception propagates, so a failed open never leaks a libusb context.
+        backend. `_fresh_libusb_backend()` itself is now called INSIDE the
+        try below (review M4) -- it can raise `usb.core.USBError` out of
+        `libusb_init`, and that needs the same wrap-as-PrinterNotFoundError
+        treatment as every other pyusb failure here, not a raw traceback.
+
         On success the backend is handed to the constructor and stashed as
-        `self._backend`, so `close()` finalizes it once instead (see
-        `close()`).
+        `self._backend`, so `close()` finalizes it once the transport is
+        done with it (see `close()`, which also disposes the pyusb device
+        handle first -- review H2).
+
+        On EVERY failure path out of this method -- no device found,
+        `set_configuration`/`claim_interface` raising, or the constructor's
+        own detach dance raising -- the fresh backend is `.finalize()`d
+        (guarded against `backend is None`) before the exception propagates,
+        so a failed open never leaks a libusb context. Finalizing alone is
+        NOT sufficient once `find()` has returned a real `Device`, though
+        (review M3): by the time `set_configuration()`/`claim_interface()`
+        can raise, `managed_open()` has already opened the underlying libusb
+        handle, so finalizing the backend out from under a still-open handle
+        is the same use-after-free class as H2. The
+        `except (usb.core.USBError, usb.core.NoBackendError)` handler below
+        therefore, in order: best-effort re-attaches the kernel driver if
+        the constructor's detach actually ran (so a busy/replugged-mid-open
+        failure doesn't leave the kernel's usblp driver detached with no
+        owner), then disposes the pyusb device handle (suppressed --
+        `usb.util.dispose_resources`, mirroring `close()`), THEN finalizes
+        the backend, all inside a `finally` so an unexpected exception from
+        the best-effort reattach can't skip disposal+finalize (same
+        finally-safe shape as `close()`, review L5) -- and only then raises
+        PrinterNotFoundError. The `find() is None` branch needs none of this:
+        no `Device` was ever constructed there, so there is nothing to
+        dispose, only the backend to finalize.
 
         The whole lookup/claim sequence is wrapped: any usb.core.USBError or
         usb.core.NoBackendError (e.g. permission denied, no libusb backend
@@ -313,8 +353,11 @@ class PyUsbTransport:
         import usb.core
         import usb.util
 
-        backend = _fresh_libusb_backend()
+        backend = None
+        device = None
+        transport = None
         try:
+            backend = _fresh_libusb_backend()
             device = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
             if device is None:
                 if backend is not None:
@@ -329,8 +372,21 @@ class PyUsbTransport:
             usb.util.claim_interface(device, 0)
             return transport
         except (usb.core.USBError, usb.core.NoBackendError) as err:
-            if backend is not None:
-                backend.finalize()
+            usb_error, _usb_timeout_error = _usb_errors()
+            try:
+                if transport is not None and transport._reattach_kernel_driver:
+                    try:
+                        device.attach_kernel_driver(0)
+                    except usb_error:
+                        pass
+            finally:
+                if device is not None:
+                    try:
+                        usb.util.dispose_resources(device)
+                    except Exception:
+                        pass
+                if backend is not None:
+                    backend.finalize()
             raise PrinterNotFoundError(
                 f"USB error opening printer: {err} — check udev permissions "
                 f"(see docs/protocol-notes.md step 1)"
@@ -356,24 +412,54 @@ class PyUsbTransport:
 
     def close(self) -> None:
         """Release the interface, best-effort reattach the kernel driver (both
-        as before), then finalize this transport's own fresh libusb1 context
-        (`self._backend`, built by `open()` via `_fresh_libusb_backend()` --
-        Track B), if it has one. `.finalize()` is idempotent (pyusb's
-        `AutoFinalizedObject`) and guarded against `self._backend is None`
-        (the direct-construction test seam never sets one), so this is safe
-        to call even when there's nothing to finalize.
+        as before), THEN dispose the pyusb device handle, THEN finalize this
+        transport's own fresh libusb1 context (`self._backend`, built by
+        `open()` via `_fresh_libusb_backend()` -- Track B), if it has one.
+
+        The dispose-before-finalize order matters (review H2): pyusb's
+        `usb.util.release_interface()` (`managed_release_interface`) only
+        calls `backend.release_interface()` -- it does NOT close the
+        underlying libusb device handle, which stays open until something
+        calls `usb.util.dispose_resources()` (or the `Device` itself is
+        garbage-collected and finalizes). Finalizing `self._backend` --
+        `libusb_exit()` on the fresh context -- while that handle is still
+        open is a use-after-free: the eventual GC-driven `Device` finalize
+        then calls `libusb_close()` into a context libusb has already freed.
+        So `usb.util.dispose_resources(self._device)` (suppressed -- it's a
+        duck-typed fake with no real handle in the direct-construction test
+        seam, and a no-op/harmless if the device was never opened) always
+        runs before `self._backend.finalize()`.
+
+        Both the dispose and the finalize live in a `finally` (review L5):
+        release_interface/attach_kernel_driver are already narrowly
+        try/except-guarded above, but wrapping the whole sequence in
+        `finally` means even an unexpected exception escaping either of
+        those best-effort steps still can't skip disposal+finalize and leak
+        the fresh libusb context (fds + an event thread) -- rather than
+        relying on every future edit to that guarded section to keep
+        catching the right exception types. `.finalize()` is idempotent
+        (pyusb's `AutoFinalizedObject`) and guarded against
+        `self._backend is None` (the direct-construction test seam never
+        sets one), so this is safe to call even when there's nothing to
+        finalize.
         """
         import usb.util
 
         usb_error, _usb_timeout_error = _usb_errors()
         try:
-            usb.util.release_interface(self._device, 0)
-        except usb_error:
-            pass
-        if self._reattach_kernel_driver:
             try:
-                self._device.attach_kernel_driver(0)
+                usb.util.release_interface(self._device, 0)
             except usb_error:
                 pass
-        if self._backend is not None:
-            self._backend.finalize()
+            if self._reattach_kernel_driver:
+                try:
+                    self._device.attach_kernel_driver(0)
+                except usb_error:
+                    pass
+        finally:
+            try:
+                usb.util.dispose_resources(self._device)
+            except Exception:
+                pass
+            if self._backend is not None:
+                self._backend.finalize()

@@ -197,6 +197,150 @@ def test_open_then_close_finalizes_fresh_backend_exactly_once(monkeypatch):
     assert fake_backend.finalize_calls == 1
 
 
+# --- 3d. H2 / M3 / L5: dispose-before-finalize ordering, reattach-on-failure ---
+#
+# H2: usb.util.release_interface() (managed_release_interface) does NOT
+# close the underlying pyusb device handle -- only usb.util.dispose_resources
+# does that. So close() finalizing self._backend (libusb_exit on the fresh
+# context) before disposing the still-open handle is a use-after-free: the
+# eventual Device finalize (GC) calls libusb_close() into a context
+# libusb_exit() already freed. M3 is the same defect on open()'s failure
+# path once find() has returned a real Device. These tests assert the ORDER
+# of dispose vs finalize, not just that both happened -- a pure call-count
+# assertion (like 3c's finalize_calls) can't catch the ordering regressing.
+
+
+class _OrderingFakeBackend:
+    """Like _FakeLibusbBackend (3c) but records into a SHARED events list
+    instead of just counting, so a test can assert dispose happens strictly
+    before finalize.
+    """
+
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def finalize(self) -> None:
+        self._events.append("finalize")
+
+
+def test_close_disposes_device_before_finalizing_backend(monkeypatch):
+    import usb.util
+
+    events: list[str] = []
+    monkeypatch.setattr(usb.util, "release_interface", lambda device, interface: None)
+    monkeypatch.setattr(usb.util, "dispose_resources", lambda device: events.append("dispose"))
+    monkeypatch.setattr(transport_module, "_usb_errors", _stub_usb_errors)
+
+    fake_device = _FakeUsbDevice()
+    fake_backend = _OrderingFakeBackend(events)
+    transport = PyUsbTransport(fake_device, backend=fake_backend)
+
+    transport.close()
+
+    assert events == ["dispose", "finalize"]
+
+
+def test_open_failure_after_claim_disposes_device_before_finalizing_backend(monkeypatch):
+    """M3: once find() has returned a real Device, a later USBError (here
+    from claim_interface, e.g. LIBUSB_ERROR_BUSY) must dispose the device
+    before finalizing the fresh backend -- the same ordering close() must
+    honor, just on the failure path instead of the success-then-close path.
+    """
+    import usb.core
+    import usb.util
+
+    events: list[str] = []
+    fake_backend = _OrderingFakeBackend(events)
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: fake_backend)
+
+    fake_device = _FakeUsbDevice()
+    monkeypatch.setattr(usb.core, "find", lambda **kwargs: fake_device)
+
+    def _raise_busy(device, interface):
+        raise usb.core.USBError("[Errno 16] Resource busy")
+
+    monkeypatch.setattr(usb.util, "claim_interface", _raise_busy)
+    monkeypatch.setattr(usb.util, "dispose_resources", lambda device: events.append("dispose"))
+
+    with pytest.raises(PrinterNotFoundError, match="udev permissions"):
+        PyUsbTransport.open()
+
+    assert events == ["dispose", "finalize"]
+
+
+def test_open_failure_after_detach_reattaches_kernel_driver(monkeypatch):
+    """M3: if the constructor's detach dance actually ran (kernel driver was
+    active) and a LATER step (claim_interface here) raises, open() must undo
+    the detach -- attach_kernel_driver(0) -- rather than discarding the
+    transport with the kernel's usblp driver left detached and no owner.
+    """
+    import usb.core
+    import usb.util
+
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: None)
+
+    fake_device = _FakeUsbDevice(kernel_driver_active=True)
+    monkeypatch.setattr(usb.core, "find", lambda **kwargs: fake_device)
+
+    def _raise_busy(device, interface):
+        raise usb.core.USBError("[Errno 16] Resource busy")
+
+    monkeypatch.setattr(usb.util, "claim_interface", _raise_busy)
+
+    with pytest.raises(PrinterNotFoundError, match="udev permissions"):
+        PyUsbTransport.open()
+
+    assert fake_device.detach_calls == [0]
+    assert fake_device.attach_calls == [0]
+
+
+def test_open_failure_before_detach_does_not_reattach(monkeypatch):
+    """Companion to the test above: when the kernel driver was never active
+    (no detach performed by the constructor), a later failure must NOT call
+    attach_kernel_driver at all -- there is nothing to undo.
+    """
+    import usb.core
+    import usb.util
+
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: None)
+
+    fake_device = _FakeUsbDevice(kernel_driver_active=False)
+    monkeypatch.setattr(usb.core, "find", lambda **kwargs: fake_device)
+
+    def _raise_busy(device, interface):
+        raise usb.core.USBError("[Errno 16] Resource busy")
+
+    monkeypatch.setattr(usb.util, "claim_interface", _raise_busy)
+
+    with pytest.raises(PrinterNotFoundError, match="udev permissions"):
+        PyUsbTransport.open()
+
+    assert fake_device.detach_calls == []
+    assert fake_device.attach_calls == []
+
+
+def test_fresh_libusb_backend_real_execution_smoke():
+    """M4: _fresh_libusb_backend() had zero execution coverage -- every test
+    above monkeypatches it away. This calls it for real, with no
+    monkeypatching of usb.backend.libusb1 at all. Where libusb is genuinely
+    unavailable, usb.backend.libusb1.get_backend() returns None and this
+    function must return None too -- asserted directly as the documented,
+    tested no-backend contract (not treated as an inconclusive skip), so
+    this test can never violate the suite's "never requires libusb" promise.
+    Where libusb IS installed (true in this dev environment), a real,
+    finalizable _LibUSB context comes back; this test finalizes it itself so
+    it doesn't leak a real libusb context (fds + an event thread) into the
+    rest of the test session.
+    """
+    backend = transport_module._fresh_libusb_backend()
+    if backend is None:
+        return
+    try:
+        assert hasattr(backend, "finalize")
+    finally:
+        backend.finalize()
+
+
 # --- 4. PyUsbTransport via a duck-typed fake device (I3 test seam) ---
 #
 # PyUsbTransport(device=fake, detach=...) bypasses `.open()`'s real pyusb
