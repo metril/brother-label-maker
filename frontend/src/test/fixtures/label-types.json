@@ -993,5 +993,99 @@
       "title": "BreakerBoxParams",
       "type": "object"
     }
+  },
+  {
+    "type": "homebox_asset",
+    "title": "HomeBox Asset",
+    "category": "homebox",
+    "min_tape_mm": 12,
+    "params_schema": {
+      "properties": {
+        "asset_id": {
+          "description": "the asset's display id (e.g. \"000-042\"); rendered in JetBrains Mono",
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "the asset's display name",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "location": {
+          "default": "",
+          "description": "pre-resolved location breadcrumb (e.g. \"Garage › Shelf B\"); omitted from the label entirely when blank",
+          "maxLength": 160,
+          "title": "Location",
+          "type": "string"
+        },
+        "qr_data": {
+          "description": "the full URL to encode, already composed by the caller per HomeBox's own QR scheme -- rendered verbatim, never re-derived from asset_id",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Qr Data",
+          "type": "string"
+        },
+        "show_qr": {
+          "default": true,
+          "description": "render the QR code; False produces a text-only asset tag",
+          "title": "Show Qr",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "asset_id",
+        "name",
+        "qr_data"
+      ],
+      "title": "HomeboxAssetParams",
+      "type": "object"
+    }
+  },
+  {
+    "type": "homebox_location",
+    "title": "HomeBox Location",
+    "category": "homebox",
+    "min_tape_mm": 12,
+    "params_schema": {
+      "properties": {
+        "name": {
+          "description": "the location's display name",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "default": "",
+          "description": "pre-resolved ancestor breadcrumb (e.g. \"Garage › Workshop\"); omitted from the label entirely when blank",
+          "maxLength": 160,
+          "title": "Path",
+          "type": "string"
+        },
+        "qr_data": {
+          "description": "the full URL to encode, already composed by the caller per HomeBox's own QR scheme -- rendered verbatim",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Qr Data",
+          "type": "string"
+        },
+        "show_qr": {
+          "default": true,
+          "description": "render the QR code; False produces a text-only location tag",
+          "title": "Show Qr",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "qr_data"
+      ],
+      "title": "HomeboxLocationParams",
+      "type": "object"
+    }
   }
 ]

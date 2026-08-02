@@ -7,50 +7,83 @@ import { renderWithQueryClient } from "../../test/utils";
 import symbolsFixture from "../../test/fixtures/symbols.json";
 import { SymbolBrowser } from "./SymbolBrowser";
 
+/** Mirrors SymbolBrowser's own category+search predicate (see that
+ * component's `filtered` computation) so count-line and presence/absence
+ * assertions below stay correct however big/composed the fixture is --
+ * the fixture grew from 858 to 8362 entries (5 new icon sources) between
+ * commits e62516b and 566655d, and hardcoded counts/identifiers went
+ * stale along with it. */
+function filterFixture(category: string, query: string) {
+  const q = query.trim().toLowerCase();
+  return symbolsFixture.filter((s) => {
+    if (category !== "all" && s.category !== category) return false;
+    if (!q) return true;
+    return s.id.includes(q) || s.name.toLowerCase().includes(q) || s.tags.some((t) => t.includes(q));
+  });
+}
+
+const ALL_COUNT_TEXT = `${symbolsFixture.length} symbols`;
+
 describe("SymbolBrowser: browse mode", () => {
   it("renders the full catalog with a search box and category tabs, no selection chip", async () => {
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
 
-    expect(await screen.findByText("858 symbols")).toBeInTheDocument();
+    expect(await screen.findByText(ALL_COUNT_TEXT)).toBeInTheDocument();
     expect(screen.getByLabelText("Search symbols")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "All" })).toBeInTheDocument();
-    // "safety" has no entries in the fixture -- no empty tab (same rule
-    // IconField.test.tsx's category-tabs test covers for select mode).
-    expect(screen.queryByRole("radio", { name: "Safety" })).not.toBeInTheDocument();
+    // "safety" used to have no entries in the (858-entry) fixture, so its
+    // tab didn't show up (the "no empty tabs" rule) -- the regenerated
+    // fixture's new sources (lucide_/tabler_/remix_/bootstrap_/fluent_)
+    // carry safety-category icons, so it's populated like every other
+    // category now.
+    expect(screen.getByRole("radio", { name: "Safety" })).toBeInTheDocument();
     expect(screen.queryByText("Clear")).not.toBeInTheDocument();
   });
 
   it("search filters the grid and the count line updates", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
-    await screen.findByText("858 symbols");
+    await screen.findByText(ALL_COUNT_TEXT);
 
     await user.type(screen.getByLabelText("Search symbols"), "off");
-    expect(screen.getByText("43 symbols")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Alarm Off" })).toBeInTheDocument();
+    const offMatches = filterFixture("all", "off");
+    expect(screen.getByText(`${offMatches.length} symbols`)).toBeInTheDocument();
+    // "Camera Video Off" (bootstrap_camera_video_off) -- unlike "Alarm Off"
+    // pre-regeneration, its name is unique across the whole catalog (several
+    // new sources duplicate names like "Wifi Off"/"Bolt" across id
+    // prefixes) and it sorts early enough by id to land inside the initial
+    // 96-item window.
+    expect(await screen.findByRole("option", { name: "Camera Video Off" })).toBeInTheDocument();
   });
 
   it("category tabs filter the grid and compose with an active search", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
-    await screen.findByText("858 symbols");
+    await screen.findByText(ALL_COUNT_TEXT);
 
     await user.click(screen.getByRole("radio", { name: "Electrical" }));
-    expect(screen.getByText("53 symbols")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Bolt" })).toBeInTheDocument();
+    const electrical = filterFixture("electrical", "");
+    expect(screen.getByText(`${electrical.length} symbols`)).toBeInTheDocument();
+    // "Electrical Services" is a uniquely-named electrical icon within the
+    // initial window -- "Bolt" (the pre-regeneration example) now names
+    // three separate icons (material/lucide/tabler sources), so it's no
+    // longer safe to query by that name alone.
+    expect(await screen.findByRole("option", { name: "Electrical Services" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Assignment Globe" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "All" }));
     await user.type(screen.getByLabelText("Search symbols"), "off");
     await user.click(screen.getByRole("radio", { name: "Network" }));
-    expect(screen.getByText("7 symbols")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Wifi Off" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Alarm Off" })).not.toBeInTheDocument();
+    const networkOff = filterFixture("network", "off");
+    expect(screen.getByText(`${networkOff.length} symbols`)).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Cellular Off" })).toBeInTheDocument();
+    // "Camera Video Off" matched the search term but isn't Network-category.
+    expect(screen.queryByRole("option", { name: "Camera Video Off" })).not.toBeInTheDocument();
   });
 
   it("windowing: renders an initial slice of 96 and grows it when the IntersectionObserver sentinel fires", async () => {
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
-    await screen.findByText("858 symbols");
+    await screen.findByText(ALL_COUNT_TEXT);
 
     expect(screen.getAllByRole("option")).toHaveLength(96);
 
@@ -63,7 +96,7 @@ describe("SymbolBrowser: browse mode", () => {
   it("keyboard nav past the rendered window's edge grows the window and lands focus on the right option", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
-    await screen.findByText("858 symbols");
+    await screen.findByText(ALL_COUNT_TEXT);
 
     // symbols.json is sorted by id; entries 95/96 (0-indexed) straddle the
     // initial 96-item window boundary.
@@ -143,14 +176,18 @@ describe("SymbolBrowser: select mode", () => {
     const onSelectSpy = vi.fn();
     renderWithQueryClient(<Harness onSelectSpy={onSelectSpy} />);
 
-    await user.type(await screen.findByLabelText("Search symbols"), "bolt");
-    const bolt = await screen.findByRole("option", { name: "Bolt" });
-    await user.click(bolt);
+    // "electrical services" (unlike "bolt", pre-regeneration) matches
+    // exactly one icon in the 8362-entry fixture -- several new sources
+    // add their own "Bolt"-named icons, which would make a single-result
+    // query ambiguous.
+    await user.type(await screen.findByLabelText("Search symbols"), "electrical services");
+    const match = await screen.findByRole("option", { name: "Electrical Services" });
+    await user.click(match);
 
-    expect(onSelectSpy).toHaveBeenCalledWith("bolt");
-    expect(screen.getByText("Bolt")).toBeInTheDocument();
+    expect(onSelectSpy).toHaveBeenCalledWith("electrical_services");
+    expect(screen.getByText("Electrical Services")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Bolt details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Electrical Services details" })).not.toBeInTheDocument();
   });
 
   it("the selected chip's Clear button deselects via onClear", async () => {
@@ -158,8 +195,8 @@ describe("SymbolBrowser: select mode", () => {
     const onClearSpy = vi.fn();
     renderWithQueryClient(<Harness onClearSpy={onClearSpy} />);
 
-    await user.type(await screen.findByLabelText("Search symbols"), "bolt");
-    await user.click(await screen.findByRole("option", { name: "Bolt" }));
+    await user.type(await screen.findByLabelText("Search symbols"), "electrical services");
+    await user.click(await screen.findByRole("option", { name: "Electrical Services" }));
     await user.click(screen.getByRole("button", { name: "Clear" }));
 
     expect(onClearSpy).toHaveBeenCalled();

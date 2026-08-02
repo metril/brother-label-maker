@@ -9,6 +9,24 @@ import symbolsFixture from "../../test/fixtures/symbols.json";
 import { IconField } from "./IconField";
 import type { OverrideFieldProps } from "./types";
 
+/** Mirrors SymbolBrowser's own category+search predicate (see that
+ * component's `filtered` computation, and symbols/SymbolBrowser.test.tsx's
+ * identical helper) so count-line and presence/absence assertions below
+ * stay correct however big/composed the fixture is -- the fixture grew
+ * from 858 to 8362 entries (5 new icon sources) between commits e62516b
+ * and 566655d, and hardcoded counts/identifiers went stale along with
+ * it. */
+function filterFixture(category: string, query: string) {
+  const q = query.trim().toLowerCase();
+  return symbolsFixture.filter((s) => {
+    if (category !== "all" && s.category !== category) return false;
+    if (!q) return true;
+    return s.id.includes(q) || s.name.toLowerCase().includes(q) || s.tags.some((t) => t.includes(q));
+  });
+}
+
+const ALL_COUNT_TEXT = `${symbolsFixture.length} symbols`;
+
 function Harness({ initial, onChangeSpy }: { initial: Icon | null; onChangeSpy?: (v: unknown) => void }) {
   const [value, setValue] = useState<Icon | null>(initial);
   const props: OverrideFieldProps = {
@@ -34,12 +52,16 @@ describe("IconField", () => {
     renderWithQueryClient(<Harness initial={null} onChangeSpy={onChangeSpy} />);
 
     await user.click(screen.getByRole("radio", { name: "Symbol" }));
-    await user.type(screen.getByLabelText("Search symbols"), "bolt");
+    // "electrical services" (unlike "bolt", pre-regeneration) matches
+    // exactly one icon in the 8362-entry fixture -- several new sources
+    // add their own "Bolt"-named icons, which would make a single-result
+    // query ambiguous.
+    await user.type(screen.getByLabelText("Search symbols"), "electrical services");
 
-    const bolt = await screen.findByRole("option", { name: "Bolt" });
-    await user.click(bolt);
+    const match = await screen.findByRole("option", { name: "Electrical Services" });
+    await user.click(match);
 
-    expect(onChangeSpy).toHaveBeenCalledWith({ kind: "symbol", id: "bolt" });
+    expect(onChangeSpy).toHaveBeenCalledWith({ kind: "symbol", id: "electrical_services" });
   });
 
   it("image upload: selecting a file POSTs to /api/images and shows a thumbnail from the returned image_id", async () => {
@@ -68,26 +90,34 @@ describe("IconField", () => {
     expect(screen.queryByAltText("Uploaded icon")).not.toBeInTheDocument();
   });
 
-  it("category tabs filter the grid and the count line reflects the active category (fixture spans all three sources)", async () => {
+  it("category tabs filter the grid and the count line reflects the active category (fixture spans all eight icon sources)", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<Harness initial={null} />);
     await user.click(screen.getByRole("radio", { name: "Symbol" }));
 
-    // Unfiltered: the full 858-entry catalog (task's "no empty tabs" rule
-    // -- "Safety" never shows up since the fixture has no entries in it).
-    expect(screen.getByText("858 symbols")).toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: "Safety" })).not.toBeInTheDocument();
+    // Unfiltered: the full fixture catalog. "Safety" used to have no
+    // entries in the (858-entry) fixture, so its tab didn't show up (the
+    // "no empty tabs" rule) -- the regenerated fixture's new sources
+    // (lucide_/tabler_/remix_/bootstrap_/fluent_) carry safety-category
+    // icons, so it's populated like every other category now.
+    expect(screen.getByText(ALL_COUNT_TEXT)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Safety" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "Electrical" }));
-    expect(screen.getByText("53 symbols")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Bolt" })).toBeInTheDocument();
+    const electrical = filterFixture("electrical", "");
+    expect(screen.getByText(`${electrical.length} symbols`)).toBeInTheDocument();
+    // "Electrical Services" is a uniquely-named electrical icon within the
+    // initial window -- "Bolt" (the pre-regeneration example) now names
+    // three separate icons (material/lucide/tabler sources), so it's no
+    // longer safe to query by that name alone.
+    expect(await screen.findByRole("option", { name: "Electrical Services" })).toBeInTheDocument();
     // "Assignment Globe" is a general-category (material_*) entry -- absent
     // once filtered to Electrical, proving the tab actually filters rather
     // than just relabeling.
     expect(screen.queryByRole("option", { name: "Assignment Globe" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "All" }));
-    expect(screen.getByText("858 symbols")).toBeInTheDocument();
+    expect(screen.getByText(ALL_COUNT_TEXT)).toBeInTheDocument();
   });
 
   it("search composes with the active category filter, and the count line updates with both", async () => {
@@ -96,15 +126,20 @@ describe("IconField", () => {
     await user.click(screen.getByRole("radio", { name: "Symbol" }));
 
     await user.type(screen.getByLabelText("Search symbols"), "off");
-    expect(screen.getByText("43 symbols")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Alarm Off" })).toBeInTheDocument();
+    const offMatches = filterFixture("all", "off");
+    expect(screen.getByText(`${offMatches.length} symbols`)).toBeInTheDocument();
+    // "Camera Video Off" (bootstrap_camera_video_off) -- unlike "Alarm Off"
+    // pre-regeneration, its name is unique across the whole catalog and it
+    // sorts early enough by id to land inside the initial 96-item window.
+    expect(await screen.findByRole("option", { name: "Camera Video Off" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "Network" }));
-    expect(screen.getByText("7 symbols")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Wifi Off" })).toBeInTheDocument();
-    // "Alarm Off" matched the search term but isn't Network-category --
-    // composing the two filters, not just applying one or the other.
-    expect(screen.queryByRole("option", { name: "Alarm Off" })).not.toBeInTheDocument();
+    const networkOff = filterFixture("network", "off");
+    expect(screen.getByText(`${networkOff.length} symbols`)).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Cellular Off" })).toBeInTheDocument();
+    // "Camera Video Off" matched the search term but isn't Network-category
+    // -- composing the two filters, not just applying one or the other.
+    expect(screen.queryByRole("option", { name: "Camera Video Off" })).not.toBeInTheDocument();
   });
 
   it("windowing: renders an initial slice of 96 and grows it when the IntersectionObserver sentinel fires", async () => {
