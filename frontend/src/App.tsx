@@ -8,6 +8,7 @@ import { Diagnostics } from "./pages/Diagnostics";
 import { Gallery } from "./pages/Gallery";
 import { History } from "./pages/History";
 import { Homebox } from "./pages/Homebox";
+import { Library } from "./pages/Library";
 import { Presets } from "./pages/Presets";
 import { Settings } from "./pages/Settings";
 import { AUTH_ME_QUERY_KEY } from "./hooks/useAuth";
@@ -64,6 +65,7 @@ function App() {
               <Route path="/presets" element={<Presets />} />
               <Route path="/history" element={<History />} />
               <Route path="/gallery" element={<Gallery />} />
+              <Route path="/library" element={<Library />} />
               <Route path="/homebox" element={<Homebox />} />
               <Route path="/diagnostics" element={<Diagnostics />} />
               <Route path="/settings" element={<Settings />} />

@@ -50,6 +50,25 @@ describe("App routing (task 2.13)", () => {
     expect(await screen.findByRole("heading", { name: "Text" })).toBeInTheDocument();
   });
 
+  it("Library is a working nav link between Gallery and Diagnostics", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const nav = screen.getByRole("navigation", { name: "Sections" });
+    await user.click(within(nav).getByRole("link", { name: "Library" }));
+
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Library" })).toHaveAttribute("aria-current", "page");
+
+    // App.tsx's BrowserRouter reads the real jsdom `window.location`, which
+    // (unlike MemoryRouter) persists across tests in this file -- navigate
+    // back to Design before finishing, same convention the "primary nav
+    // links" test above already follows, so the next test's fresh
+    // render(<App />) still starts from "/".
+    await user.click(within(nav).getByRole("link", { name: "Design" }));
+    expect(await screen.findByRole("heading", { name: "Text" })).toBeInTheDocument();
+  });
+
   it("Designer state (the module-level store) survives a round trip through Presets/History", async () => {
     const user = userEvent.setup();
     render(<App />);

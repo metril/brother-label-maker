@@ -197,6 +197,9 @@ export function AppShell({ children }: AppShellProps) {
           <NavLink to="/gallery" className={navLinkClass}>
             Gallery
           </NavLink>
+          <NavLink to="/library" className={navLinkClass}>
+            Library
+          </NavLink>
           <NavLink to="/diagnostics" className={navLinkClass}>
             Diagnostics
           </NavLink>
