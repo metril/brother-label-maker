@@ -8,26 +8,35 @@ The label-icon catalog `backend/src/labelmaker/render/symbols.py` loads
 | Material Symbols (original 60, task 2.7) | none (bare id, e.g. `bolt`) | Apache-2.0 | 60 |
 | Material Symbols (commit 7 pipeline) | `material_` | Apache-2.0 | see `index.json` |
 | Phosphor (fill weight, commit 7 pipeline) | `phosphor_` | MIT | see `index.json` |
+| Lucide (full set, Track D1 pipeline) | `lucide_` | ISC | see `index.json` |
 
 All rows share one manifest, `index.json`: a flat JSON list of
 `{id, name, tags, path, category, source, license}`. `category` is one of
-`general|electrical|network|av|arrow|safety|misc` -- `safety` is reserved
-for a possible future source (see `backend/scripts/symbols_pipeline/
-README.md`'s "Adding a source" section) and nothing currently populates it.
-`source`/`license` name which row above (and which pinned version) an entry
-came from. The `backend/scripts/symbols_pipeline/` directory holds the
-fetch/normalize tooling that produced everything except the original 60 --
-see its own `README.md` for how to run it and how to add another source.
+`general|electrical|network|av|arrow|safety|misc` -- `safety` sat unused
+(reserved for a possible future source, see `backend/scripts/symbols_pipeline/
+README.md`'s "Adding a source" section) until the Lucide pipeline's
+keyword-map (see `scripts/symbols_pipeline/lucide_ids.txt`'s header) started
+populating it. `source`/`license` name which row above (and which pinned
+version) an entry came from. The `backend/scripts/symbols_pipeline/`
+directory holds the fetch/normalize tooling that produced everything except
+the original 60 -- see its own `README.md` for how to run it and how to add
+another source.
 
 Every bundled file, regardless of source, is exactly one
-`<svg viewBox="0 0 24 24">` wrapping exactly one `<path d="..." transform="...">`
--- no `style`/`font-family`, no embedded raster data, no additional groups.
-`render/symbols.py`'s `_validate_symbol_svg` enforces this shape at load
-time; `backend/scripts/symbols_pipeline/common.py`'s `validate_shape` +
-`rasterize_check` enforce the same shape PLUS a real-resvg non-blank render
-at generation time, before a file is ever committed (see that pipeline's own
-README for detail) -- so every file under this directory has already passed
-both checks once.
+`<svg viewBox="0 0 24 24">` wrapping exactly one `<path d="...">` -- no
+`style`/`font-family`, no embedded raster data, no additional groups. Most
+files also carry a `transform="..."` attribute on that `<path>` (Material's
+and Phosphor's normalization step, reconciling their native coordinate
+systems with this project's 24x24 square -- see each section below); Lucide's
+files instead carry `fill-rule="evenodd"` and no `transform` at all, since its
+native viewBox already IS `0 0 24 24` and its stroke-to-fill conversion step
+needs the explicit fill-rule instead (see its own section below).
+`render/symbols.py`'s `_validate_symbol_svg` enforces the single-`<path>`/
+viewBox/no-style-or-font-family shape at load time; `backend/scripts/
+symbols_pipeline/common.py`'s `validate_shape` + `rasterize_check` enforce
+the same shape PLUS a real-resvg non-blank render at generation time, before
+a file is ever committed (see that pipeline's own README for detail) -- so
+every file under this directory has already passed both checks once.
 
 ## Material Symbols -- original 60 (task 2.7, bare ids)
 
@@ -104,6 +113,53 @@ and by rendering every file through the real pipeline (see `test_symbols.py`).
   skipped-and-logged by `fetch_phosphor.py` if any ever showed up in a future
   curated-list expansion, though none of the currently curated ids hit that.
 
+## Lucide -- full set (Track D1 pipeline, `lucide_*` ids)
+
+- Source: the [`lucide-static`](https://www.npmjs.com/package/lucide-static)
+  npm package, version **1.28.0** (pinned in `fetch_lucide.py`),
+  `icons/<icon>.svg` (native `viewBox="0 0 24 24"`, but stroke-based markup --
+  see Normalization below).
+- License: **ISC**. Upstream's own `LICENSE` file at that version is
+  reproduced byte-for-byte as
+  [`LICENSE-ISC-lucide.txt`](./LICENSE-ISC-lucide.txt) in this directory. That
+  file also carries a second notice: a named subset of Lucide's icons are
+  derived from the Feather project and additionally MIT-licensed (Cole Bemis)
+  -- reproducing upstream's `LICENSE` file verbatim, exactly as for the other
+  two sources, carries that notice along with it regardless of which specific
+  bundled ids it names.
+- Manifest `source` value: `lucide@1.28.0`.
+- Normalization -- **stroke-to-fill outlining, a lossy transform** (unlike
+  Material's/Phosphor's verbatim-`d` reuse above): Lucide's source SVGs are
+  stroke-based line icons (`path`/`circle`/`rect`/`line`/`polyline` elements,
+  `fill="none" stroke="currentColor" stroke-width="2"`), not the
+  already-filled single-`<path>` pictograms Material and Phosphor ship, so
+  there is no verbatim `d` to reuse. `fetch_lucide.py` converts every
+  candidate through `npx oslllo-svg-fixer@6.0.1` (a rasterize-then-potrace
+  stroke outliner, batch-run once over the whole curated set), which traces
+  each stroked icon into a single filled `<path>` -- an approximation of the
+  original stroked outline, not an exact vector operation, chosen (over
+  algebraically offsetting each stroke) because it's the tool built for
+  exactly this conversion and its output was verified, both automatically
+  (every accepted file passes the same `validate_shape`/`rasterize_check`
+  gate as every other source) and by hand (rendering a sample including
+  hole-shaped icons like "circle" and "at-sign" through the real resvg
+  pipeline and eyeballing the result), to reproduce the source icon faithfully
+  at this catalog's 24x24 size. Because Lucide's native viewBox is already
+  `0 0 24 24`, no `transform` is applied afterward (unlike Material's/
+  Phosphor's coordinate-system reconciliation) -- the traced path keeps
+  `fill-rule="evenodd"` instead (needed so a traced hole, e.g. "circle"'s
+  ring or "at-sign"'s counter, renders as a hole rather than filling in
+  solid; see `fetch_lucide.py`'s `_build_svg_document` docstring).
+- Selection: `backend/scripts/symbols_pipeline/lucide_ids.txt` -- unlike
+  Material's/Phosphor's hand-trimmed subsets, this is the FULL current
+  Lucide set (1756 icons, every key in the npm package's own `tags.json`;
+  deliberately excludes 251 old-name alias files the package also ships,
+  each byte-identical geometry to an icon already listed under its current
+  name). `category` is assigned by a deterministic keyword-map on each id's
+  own name (the npm package ships no ready-made category metadata) --
+  see that file's header comment for the exact rule, including the small
+  hand-picked exception list layered on top of it.
+
 ## Adding another source
 
 See `backend/scripts/symbols_pipeline/README.md`'s "Adding a source"
@@ -111,12 +167,13 @@ section for the mechanics. Add a section here (upstream license text if
 required alongside a `LICENSE-<spdx-id>-<source>.txt` in this directory,
 exact pinned version/commit, normalization notes, and a per-file license
 table instead if a single license doesn't cover the whole source) following
-the same shape as the two sections above.
+the same shape as the sections above.
 
 ## Generation
 
 Everything except the original 60 is generated by
-`backend/scripts/symbols_pipeline/`'s `fetch_material.py`/`fetch_phosphor.py`
--- see that directory's own `README.md` for how to re-run them (idempotent)
-or add another source. The original 60 were a one-off hand-curated script
-(task 2.7) that predates this pipeline and isn't part of it.
+`backend/scripts/symbols_pipeline/`'s `fetch_material.py`/`fetch_phosphor.py`/
+`fetch_lucide.py` -- see that directory's own `README.md` for how to re-run
+them (idempotent) or add another source. The original 60 were a one-off
+hand-curated script (task 2.7) that predates this pipeline and isn't part of
+it.

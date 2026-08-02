@@ -26,12 +26,12 @@ from labelmaker.render.symbols import (
     symbol_object,
 )
 
-# The three id "groups" the manifest can currently contain: the original 60
-# (bare ids, no prefix) plus the two commit-7 pipeline sources. Every test
-# below that talks about "every source" means these three groups. (A future
-# source's category bucket, "safety", is already a valid manifest category --
-# see common.VALID_CATEGORIES -- but nothing populates it yet.)
-_SOURCE_PREFIXES = ("material_", "phosphor_")
+# The id "groups" the manifest can currently contain: the original 60
+# (bare ids, no prefix) plus one prefix per pipeline source. Every test
+# below that talks about "every source" means these groups. A new source
+# must add its prefix here (the pipeline README's "Adding a source" step 7
+# points at this tuple).
+_SOURCE_PREFIXES = ("material_", "phosphor_", "lucide_")
 
 
 def _source_group(symbol_id: str) -> str:
