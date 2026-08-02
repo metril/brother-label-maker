@@ -1,8 +1,12 @@
-"""POST /api/print, POST /api/print/estimate, GET /api/print/jobs/{id},
-POST /api/print/jobs/{id}/cancel, GET /api/print/jobs/{id}/stream.
+"""POST /api/print, POST /api/print/estimate, POST /api/print/preview,
+GET /api/print/jobs/{id}, POST /api/print/jobs/{id}/cancel,
+GET /api/print/jobs/{id}/stream.
 
 The actual render/build/print work happens in jobs/worker.py, off a queue --
 this router only does cheap validation, persistence, and job-record I/O.
+POST /api/print/preview is the one exception that does real render work
+inline (synchronously, off the event-loop thread) rather than queuing a job
+-- see jobs/chained_preview.py.
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ from pydantic import BaseModel, Field
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
 from labelmaker.driver.geometry import dots_to_mm
 from labelmaker.driver.protocol import ChainMode
-from labelmaker.render import render_definition
+from labelmaker.jobs.chained_preview import build_chained_preview
+from labelmaker.render import preview_png, render_definition
 from labelmaker.render.document import LabelDefinition
 from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition, ordered_values
@@ -202,6 +207,116 @@ async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> dict:
         lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
     )
     return {"label_count": label_count, **dataclasses.asdict(tape_estimate)}
+
+
+class PrintPreviewRequest(PrintRequest):
+    """POST /api/print/preview's body: identical to PrintRequest (labels/
+    options/serialization) plus `scale` -- the same nearest-neighbor PNG
+    upscale factor POST /api/render/preview already exposes for a single
+    label (router_labels.py's PreviewRequest), applied here to the whole
+    composited chain strip."""
+
+    scale: int = Field(default=2, ge=1, le=8)
+
+
+class ChainedPreviewSegment(BaseModel):
+    """One label's position along the composited preview strip.
+
+    UNIT TRAP: start_mm/end_mm/length_mm are tape-length millimetres
+    (render.geometry.dots_to_mm of the composite's pixel x-offsets), never
+    pixels -- see ChainedPreviewResponse's own UNIT TRAP note for the
+    pixel side of this same contract.
+    """
+
+    index: int
+    start_mm: float
+    end_mm: float
+    length_mm: float
+
+
+class ChainedPreviewResponse(BaseModel):
+    """POST /api/print/preview's response: a single composited PNG showing
+    the whole chained job as it will physically lay out on tape (butted for
+    chain_ff, blank gaps for cut_each, cut-mark dashes for strip_marks --
+    see jobs/chained_preview.build_chained_preview), plus the SAME
+    TapeEstimate fields POST /api/print/estimate returns (never re-derived
+    here -- render.estimate.estimate() is the one authoritative source for
+    all of total_mm/content_mm/feed_overhead_mm/per_label_mm/notes).
+
+    UNIT TRAP: `png_b64` decodes to an image scaled by `scale`
+    (nearest-neighbor -- see render/rasterize.py's preview_png) -- never
+    derive a millimetre figure from its pixel dimensions; use total_mm /
+    segments' start_mm/end_mm/length_mm instead, which are always UNSCALED
+    tape-length millimetres regardless of `scale`.
+    """
+
+    png_b64: str
+    chain_mode: ChainMode
+    total_mm: float
+    content_mm: float
+    feed_overhead_mm: float
+    per_label_mm: float
+    notes: list[str]
+    segments: list[ChainedPreviewSegment]
+    # Per-label RenderWarning.message strings, each prefixed "label {i}: "
+    # (0-based, same index space as `segments`) -- the same "label {i}: ..."
+    # convention _validate_serialized_print's own 422 messages use above,
+    # applied here to non-fatal warnings instead of a raised error.
+    warnings: list[str]
+
+
+@router.post("/preview")
+async def preview_print_job(
+    body: PrintPreviewRequest, config: AppConfigDep
+) -> ChainedPreviewResponse:
+    """A single composited preview of the whole chained job. Validated
+    exactly like POST /api/print and POST /api/print/estimate -- via
+    _validate_and_measure, reused as-is here for parity (serialization
+    expansion, serialization-vs-multi-label shape, per-label param/tape
+    validation, single-shared-tape check) -- before jobs/chained_preview.
+    build_chained_preview does the actual per-label render + composite, off
+    the event-loop thread like every other render/rasterize call in this
+    codebase. No job is created; nothing is enqueued or persisted (same as
+    POST /api/print/estimate).
+    """
+    await _validate_and_measure(body, config.data_dir)
+
+    try:
+        preview = await anyio.to_thread.run_sync(
+            build_chained_preview,
+            body.labels,
+            body.serialization,
+            config.data_dir,
+            body.options.chain_mode,
+            body.options.margin_mm,
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+
+    png_bytes = await anyio.to_thread.run_sync(preview_png, preview.image, body.scale)
+
+    warnings = [
+        f"label {i}: {warning.message}"
+        for i, label_warnings in enumerate(preview.label_warnings)
+        for warning in label_warnings
+    ]
+
+    return ChainedPreviewResponse(
+        png_b64=base64.b64encode(png_bytes).decode("ascii"),
+        chain_mode=body.options.chain_mode,
+        total_mm=preview.estimate.total_mm,
+        content_mm=preview.estimate.content_mm,
+        feed_overhead_mm=preview.estimate.feed_overhead_mm,
+        per_label_mm=preview.estimate.per_label_mm,
+        notes=preview.estimate.notes,
+        segments=[
+            ChainedPreviewSegment(
+                index=s.index, start_mm=s.start_mm, end_mm=s.end_mm, length_mm=s.length_mm
+            )
+            for s in preview.segments
+        ],
+        warnings=warnings,
+    )
 
 
 def _job_to_response(job: dict) -> dict:
