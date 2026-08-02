@@ -3,6 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { Diagnostics } from "./Diagnostics";
 import { renderWithProviders } from "../test/utils";
+import { inertKeepAliveStatus } from "../test/msw/handlers";
 import { server } from "../test/msw/server";
 
 function section(heading: string): HTMLElement {
@@ -98,6 +99,7 @@ describe("Diagnostics page", () => {
             is_e720bt: true,
           },
           error: null,
+          keep_alive: inertKeepAliveStatus,
         }),
       ),
     );
@@ -105,5 +107,56 @@ describe("Diagnostics page", () => {
     renderWithProviders(<Diagnostics />, { route: "/diagnostics" });
 
     expect(await screen.findByText(/unknown -- byte 0x14 is not decoded by this app/)).toBeInTheDocument();
+  });
+
+  it("shows the keep-awake poller's status in the Printer section", async () => {
+    server.use(
+      http.get("/api/printer/status", () =>
+        HttpResponse.json({
+          connected: true,
+          printer_mode: "usb",
+          status: null,
+          error: null,
+          keep_alive: {
+            enabled: true,
+            last_attempt_at: "2026-08-02T04:00:00.000000Z",
+            last_result: "ok",
+            last_error: null,
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<Diagnostics />, { route: "/diagnostics" });
+
+    const printer = await screen.findByRole("heading", { name: "Printer" }).then((h) => h.closest("section")!);
+    const keepAwakeRow = await within(printer).findByText("Keep-awake").then((el) => el.closest("div")!);
+    expect(within(keepAwakeRow).getByText("yes")).toBeInTheDocument();
+    expect(within(printer).getByText("OK")).toBeInTheDocument();
+  });
+
+  it("shows a readable label and the raw error for a keep-awake poll failure", async () => {
+    server.use(
+      http.get("/api/printer/status", () =>
+        HttpResponse.json({
+          connected: false,
+          printer_mode: "usb",
+          status: null,
+          error: "no USB printer found",
+          keep_alive: {
+            enabled: true,
+            last_attempt_at: "2026-08-02T04:00:00.000000Z",
+            last_result: "error",
+            last_error: "USB error opening printer: no backend available",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<Diagnostics />, { route: "/diagnostics" });
+
+    const printer = await screen.findByRole("heading", { name: "Printer" }).then((h) => h.closest("section")!);
+    expect(await within(printer).findByText("Error")).toBeInTheDocument();
+    expect(within(printer).getByText("USB error opening printer: no backend available")).toBeInTheDocument();
   });
 });

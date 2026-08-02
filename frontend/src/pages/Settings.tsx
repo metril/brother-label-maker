@@ -42,7 +42,21 @@ function ProvenanceBadge({ source }: { source: SettingsSource }) {
   );
 }
 
-function ResetToEnvButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+function ResetToEnvButton({
+  onClick,
+  disabled,
+  label = "Reset to env",
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  /** Defaults to "Reset to env" -- accurate for every field that has a real
+   * AppConfig/env tier to fall back to. The two DB-only fields
+   * (keep_printer_awake/keep_awake_interval_min, see settings_overlay.py)
+   * have no env tier at all -- provenance() for those only ever reports
+   * "db" or "default" -- so their own reset buttons pass "Reset to
+   * default" instead, since that's genuinely what clicking it does. */
+  label?: string;
+}) {
   return (
     <button
       type="button"
@@ -50,7 +64,7 @@ function ResetToEnvButton({ onClick, disabled }: { onClick: () => void; disabled
       disabled={disabled}
       className="text-[11px] font-medium text-deck-400 underline decoration-dotted hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
     >
-      Reset to env
+      {label}
     </button>
   );
 }
@@ -107,7 +121,17 @@ function SelectSettingRow({ label, fieldKey, rows, options }: SelectSettingRowPr
   );
 }
 
-function SwitchSettingRow({ label, fieldKey, rows }: { label: string; fieldKey: string; rows: SettingRow[] }) {
+function SwitchSettingRow({
+  label,
+  fieldKey,
+  rows,
+  resetLabel,
+}: {
+  label: string;
+  fieldKey: string;
+  rows: SettingRow[];
+  resetLabel?: string;
+}) {
   const row = findRow(rows, fieldKey);
   const mutation = useUpdateSettings();
   const checked = row?.value === true;
@@ -126,7 +150,11 @@ function SwitchSettingRow({ label, fieldKey, rows }: { label: string; fieldKey: 
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton onClick={() => mutation.mutate({ [fieldKey]: null })} disabled={mutation.isPending} />
+          <ResetToEnvButton
+            onClick={() => mutation.mutate({ [fieldKey]: null })}
+            disabled={mutation.isPending}
+            {...(resetLabel ? { label: resetLabel } : {})}
+          />
         )}
       </div>
       <SettingErrorText mutation={mutation} />
@@ -147,6 +175,77 @@ const BIT_ORDER_OPTIONS = [
   { value: "lsb_first", label: "LSB first" },
 ];
 
+// -- keep-awake poller (commit 6): a DB-only Switch + buffered number field,
+// no AppConfig/env tier for either (settings_overlay.py's _DB_ONLY_DEFAULTS)
+// -- ridden on the same SwitchSettingRow every other boolean setting uses,
+// and a KeepAwakeIntervalField mirroring ElsTapeMmField's buffered-number
+// pattern below (the only other numeric editable field on this page) since
+// a free-typed number needs the same "don't fight the user mid-edit,
+// explicit Save" contract NumberInput itself documents.
+
+const KEEP_AWAKE_INTERVAL_MIN_MIN = 1;
+const KEEP_AWAKE_INTERVAL_MIN_MAX = 60;
+
+function KeepAwakeIntervalField({ rows }: { rows: SettingRow[] }) {
+  const row = findRow(rows, "keep_awake_interval_min");
+  const serverValue = typeof row?.value === "number" ? row.value : null;
+  const mutation = useUpdateSettings();
+  const [value, setValue] = useState<number | undefined>(serverValue ?? undefined);
+
+  useEffect(() => {
+    setValue(serverValue ?? undefined);
+  }, [serverValue]);
+
+  const outOfRange =
+    value === undefined || value < KEEP_AWAKE_INTERVAL_MIN_MIN || value > KEEP_AWAKE_INTERVAL_MIN_MAX;
+
+  function handleSave() {
+    if (outOfRange || value === undefined) return;
+    mutation.mutate({ keep_awake_interval_min: value });
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="flex items-center text-deck-200">
+          Keep-awake interval (minutes)
+          {row && <ProvenanceBadge source={row.source} />}
+        </span>
+        {row?.source === "db" && (
+          <ResetToEnvButton
+            onClick={() => mutation.mutate({ keep_awake_interval_min: null })}
+            disabled={mutation.isPending}
+            label="Reset to default"
+          />
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <NumberInput
+          value={value}
+          onChange={setValue}
+          min={KEEP_AWAKE_INTERVAL_MIN_MIN}
+          max={KEEP_AWAKE_INTERVAL_MIN_MAX}
+          ariaLabel="Keep-awake interval (minutes)"
+        />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={outOfRange || mutation.isPending}
+          className={primaryButtonClass}
+        >
+          Save
+        </button>
+      </div>
+      {outOfRange && (
+        <p role="alert" className={errorText}>
+          must be between {KEEP_AWAKE_INTERVAL_MIN_MIN} and {KEEP_AWAKE_INTERVAL_MIN_MAX}
+        </p>
+      )}
+      <SettingErrorText mutation={mutation} />
+    </div>
+  );
+}
+
 function PrinterSection({ rows }: { rows: SettingRow[] }) {
   return (
     <section className={panel}>
@@ -165,6 +264,19 @@ function PrinterSection({ rows }: { rows: SettingRow[] }) {
         />
         <SelectSettingRow label="Bit order" fieldKey="printer_bit_order" rows={rows} options={BIT_ORDER_OPTIONS} />
         <SwitchSettingRow label="Flip pins" fieldKey="printer_flip_pins" rows={rows} />
+      </div>
+      <div className="mt-3 border-t border-deck-800 pt-3">
+        <SwitchSettingRow
+          label="Keep printer awake"
+          fieldKey="keep_printer_awake"
+          rows={rows}
+          resetLabel="Reset to default"
+        />
+        <KeepAwakeIntervalField rows={rows} />
+        <p className={helpText}>
+          Sends a status request every N minutes to stop the printer&apos;s auto power-off idle timer (USB mode
+          only).
+        </p>
       </div>
     </section>
   );

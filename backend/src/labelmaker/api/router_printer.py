@@ -9,7 +9,7 @@ from collections.abc import Callable
 import anyio
 from fastapi import APIRouter
 
-from labelmaker.api.deps import SettingsDep
+from labelmaker.api.deps import KeepaliveStatusDep, SettingsDep
 from labelmaker.driver.printer import get_status
 from labelmaker.driver.status import PrinterStatus, StatusTimeoutError
 from labelmaker.driver.transport import (
@@ -68,7 +68,7 @@ def _fetch_usb_status() -> PrinterStatus:
 
 
 @router.get("/status")
-async def printer_status(settings: SettingsDep) -> dict:
+async def printer_status(settings: SettingsDep, keepalive_status: KeepaliveStatusDep) -> dict:
     # Reads the settings overlay's EFFECTIVE printer_mode (override if one
     # is stored, else AppConfig/env), not `config.printer_mode` directly --
     # a DB override set via PUT /api/settings must be reflected here (both
@@ -78,6 +78,12 @@ async def printer_status(settings: SettingsDep) -> dict:
     printer_mode = settings.effective().printer_mode
     fetch = _fetch_mock_status if printer_mode == "mock" else _fetch_usb_status
 
+    # commit 6: the optional keep-awake poller's own status (jobs/
+    # keepalive.py), additive on every branch below -- a shallow copy so
+    # the response body is a snapshot at request time, not the same live
+    # dict `run_keepalive` keeps mutating in the background.
+    keep_alive = dict(keepalive_status)
+
     try:
         status = await anyio.to_thread.run_sync(fetch)
     except _StatusLockTimeout:
@@ -86,6 +92,7 @@ async def printer_status(settings: SettingsDep) -> dict:
             "printer_mode": printer_mode,
             "status": None,
             "error": "printer busy (print job in progress)",
+            "keep_alive": keep_alive,
         }
     except (PrinterNotFoundError, StatusTimeoutError, TransportError) as exc:
         return {
@@ -93,10 +100,12 @@ async def printer_status(settings: SettingsDep) -> dict:
             "printer_mode": printer_mode,
             "status": None,
             "error": str(exc),
+            "keep_alive": keep_alive,
         }
     return {
         "connected": True,
         "printer_mode": printer_mode,
         "status": status.to_dict(),
         "error": None,
+        "keep_alive": keep_alive,
     }

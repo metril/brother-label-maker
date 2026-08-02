@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import type { KeepAliveStatus } from "../api/types";
 import { StatusChip } from "../components/StatusChip";
 import { Pending } from "../components/ui/Pending";
 import { errorText, eyebrow, fieldLabelText, panel, panelHeading, typeHeading } from "../components/ui/styles";
@@ -10,6 +11,7 @@ import { useHistoryList } from "../hooks/useHistory";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
 import { useJobEventsContext } from "../hooks/useJobEvents";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
+import { formatAbsoluteTime, formatRelativeTime } from "../lib/time";
 import { buildRawMediaReport, describeMedia, describeMediaTypeRaw } from "../lib/printerStatus";
 
 const RECENT_JOBS_COUNT = 5;
@@ -31,6 +33,52 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function BoolValue({ value }: { value: boolean | null }) {
   if (value == null) return <span className="text-deck-400">—</span>;
   return <span className={value ? "text-sage-400" : "text-rust-500"}>{value ? "yes" : "no"}</span>;
+}
+
+/** commit 6: a readable label for the keep-awake poller's last attempt --
+ * `null` covers both "never enabled" and "enabled but hasn't attempted a
+ * poll yet" (see KeepAliveStatus's own doc in api/types.ts). */
+function keepAliveResultText(result: KeepAliveStatus["last_result"]): string {
+  switch (result) {
+    case "ok":
+      return "OK";
+    case "skipped_busy":
+      return "Skipped (printer busy)";
+    case "error":
+      return "Error";
+    default:
+      return "—";
+  }
+}
+
+/** The keep-awake poller's own row group inside the Printer section
+ * (task/commit 6) -- enabled/disabled, when it last attempted a poll (if
+ * ever), and that attempt's outcome. Shown regardless of `connected`/
+ * `status` (the poller's own state is independent of whether THIS request
+ * could reach the printer). */
+function KeepAliveRows({ keepAlive }: { keepAlive: KeepAliveStatus }) {
+  return (
+    <div>
+      <Row label="Keep-awake">
+        <BoolValue value={keepAlive.enabled} />
+      </Row>
+      <Row label="Last poll">
+        {keepAlive.last_attempt_at ? (
+          <time dateTime={keepAlive.last_attempt_at} title={formatAbsoluteTime(keepAlive.last_attempt_at)}>
+            {formatRelativeTime(keepAlive.last_attempt_at)}
+          </time>
+        ) : (
+          "never"
+        )}
+      </Row>
+      <Row label="Last result">{keepAliveResultText(keepAlive.last_result)}</Row>
+      {keepAlive.last_error && (
+        <p role="alert" className={`${errorText} mt-2`}>
+          {keepAlive.last_error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The Diagnostics page (task 4.2): one screen an operator opens when
@@ -95,6 +143,7 @@ export function Diagnostics() {
                 <BoolValue value={printer.data.connected} />
               </Row>
             </div>
+            <KeepAliveRows keepAlive={printer.data.keep_alive} />
             {printer.data.error && (
               <p role="alert" className={errorText}>
                 {printer.data.error}

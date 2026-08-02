@@ -38,6 +38,14 @@ def get_settings_overlay(request: Request) -> SettingsOverlay:
     return request.app.state.settings
 
 
+def get_keepalive_status(request: Request) -> dict:
+    """commit 6: the optional keep-awake poller's own live status dict
+    (jobs/keepalive.py's `run_keepalive` mutates it in place; main.py's
+    lifespan creates it before that task's first loop iteration runs) --
+    surfaced additively on GET /api/printer/status (router_printer.py)."""
+    return request.app.state.keepalive_status
+
+
 def get_homebox(request: Request) -> HomeBoxClient:
     """503 (not 404) when unconfigured: the route exists, the deployment
     just hasn't been given HOMEBOX_URL/HOMEBOX_API_KEY -- the message says
@@ -62,6 +70,7 @@ BusDep = Annotated[EventBus, Depends(get_bus)]
 QueueDep = Annotated["asyncio.Queue[str]", Depends(get_queue)]
 HomeBoxDep = Annotated[HomeBoxClient, Depends(get_homebox)]
 SettingsDep = Annotated[SettingsOverlay, Depends(get_settings_overlay)]
+KeepaliveStatusDep = Annotated[dict, Depends(get_keepalive_status)]
 
 
 def error_message(exc: Exception) -> str:

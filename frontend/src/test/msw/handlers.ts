@@ -39,10 +39,23 @@ export const uploadImageHandler = http.post("/api/images", () =>
   HttpResponse.json({ image_id: "img-1", width: 64, height: 64 }, { status: 201 }),
 );
 
+/** commit 6: the keep-awake poller's own status block, additive on GET
+ * /api/printer/status -- "never enabled, never attempted" is the realistic
+ * default for most tests (this fixture's own printer_mode is "mock", where
+ * the poller is inert by design). Diagnostics.test.tsx overrides this via
+ * server.use(...) for the scenarios it actually asserts on. */
+export const inertKeepAliveStatus = {
+  enabled: false,
+  last_attempt_at: null,
+  last_result: null,
+  last_error: null,
+};
+
 export const printerStatusConnectedHandler = http.get("/api/printer/status", () =>
   HttpResponse.json({
     connected: true,
     printer_mode: "mock",
+    keep_alive: inertKeepAliveStatus,
     status: {
       model_code: 129,
       series_code: 48,
@@ -74,6 +87,7 @@ export const printerStatusDisconnectedHandler = http.get("/api/printer/status", 
     printer_mode: "usb",
     status: null,
     error: "printer not found",
+    keep_alive: inertKeepAliveStatus,
   }),
 );
 

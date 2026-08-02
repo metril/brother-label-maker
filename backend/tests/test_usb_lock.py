@@ -69,11 +69,19 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
 
     status_resp = await client.get("/api/printer/status")
     assert status_resp.status_code == 200
-    assert status_resp.json() == {
+    body = status_resp.json()
+    keep_alive = body.pop("keep_alive")  # commit 6: additive, checked separately below
+    assert body == {
         "connected": True,
         "printer_mode": "mock",
         "status": None,
         "error": "printer busy (print job in progress)",
+    }
+    assert keep_alive == {
+        "enabled": False,
+        "last_attempt_at": None,
+        "last_result": None,
+        "last_error": None,
     }
 
     # Wait for the job to reach a terminal state -- proves _open_print_close

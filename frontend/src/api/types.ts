@@ -442,11 +442,25 @@ export interface PrinterStatusDetail {
   is_e720bt: boolean;
 }
 
+/** commit 6: the optional keep-awake poller's own status (additive field on
+ * GET /api/printer/status) -- see backend/jobs/keepalive.py. `last_result`
+ * is `null` only before the poller's very first attempt (e.g. right after
+ * boot, or whenever it's never been enabled); once it has attempted at
+ * least once, `last_attempt_at`/`last_result` keep the most recent
+ * attempt's outcome even while currently disabled or inert (mock mode). */
+export interface KeepAliveStatus {
+  enabled: boolean;
+  last_attempt_at: string | null;
+  last_result: "ok" | "skipped_busy" | "error" | null;
+  last_error: string | null;
+}
+
 export interface PrinterStatusResponse {
   connected: boolean;
   printer_mode: "mock" | "usb";
   status: PrinterStatusDetail | null;
   error: string | null;
+  keep_alive: KeepAliveStatus;
 }
 
 export type JobEventType =

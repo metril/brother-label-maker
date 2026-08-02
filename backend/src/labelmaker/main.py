@@ -36,6 +36,7 @@ from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
 from labelmaker.homebox import build_client
 from labelmaker.jobs.events import EventBus
+from labelmaker.jobs.keepalive import initial_keepalive_status, run_keepalive
 from labelmaker.jobs.worker import run_worker
 from labelmaker.settings_overlay import SettingsOverlay
 
@@ -141,14 +142,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # honored from the very first request after a restart too.
         effective = settings.effective()
         app.state.homebox = build_client(effective.homebox_url, effective.homebox_api_key)
+        # commit 6: the optional keep-awake poller's own status, seeded
+        # BEFORE run_keepalive's first loop iteration runs -- see
+        # jobs/keepalive.py's initial_keepalive_status docstring.
+        app.state.keepalive_status = initial_keepalive_status(effective.keep_printer_awake)
 
         worker_task = asyncio.create_task(run_worker(app.state))
+        keepalive_task = asyncio.create_task(run_keepalive(app.state))
         try:
             yield
         finally:
             worker_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker_task
+            keepalive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await keepalive_task
             if app.state.homebox is not None:
                 await app.state.homebox.close()
             await db.close()

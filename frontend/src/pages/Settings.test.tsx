@@ -148,6 +148,105 @@ describe("Settings page", () => {
     });
   });
 
+  // -- Keep-awake poller (commit 6) ------------------------------------------
+
+  describe("Keep-awake fields", () => {
+    it("shows the current switch state, interval, and provenance", async () => {
+      server.use(
+        http.get("/api/settings", () =>
+          HttpResponse.json(
+            settingsWith({
+              keep_printer_awake: { value: true, source: "db" },
+              keep_awake_interval_min: { value: 10, source: "db" },
+            }),
+          ),
+        ),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      expect(await within(printer).findByRole("switch", { name: "Keep printer awake" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(within(printer).getByLabelText("Keep-awake interval (minutes)")).toHaveValue(10);
+      expect(within(printer).getByText(/Sends a status request every N minutes/)).toBeInTheDocument();
+    });
+
+    it("toggling Keep printer awake immediately PUTs the new value", async () => {
+      const user = userEvent.setup();
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      await user.click(await within(printer).findByRole("switch", { name: "Keep printer awake" }));
+
+      await waitFor(() => expect(capturedBody).toEqual({ keep_printer_awake: true }));
+    });
+
+    it("resetting the keep-awake switch to default (no env tier) PUTs null", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get("/api/settings", () =>
+          HttpResponse.json(settingsWith({ keep_printer_awake: { value: true, source: "db" } })),
+        ),
+      );
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      await within(printer).findByRole("switch", { name: "Keep printer awake" });
+      await user.click(within(printer).getByRole("button", { name: "Reset to default" }));
+
+      await waitFor(() => expect(capturedBody).toEqual({ keep_printer_awake: null }));
+    });
+
+    it("disables Save and shows an inline error for an out-of-range interval", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      const input = await within(printer).findByLabelText("Keep-awake interval (minutes)");
+      await user.clear(input);
+      await user.type(input, "100");
+
+      expect(within(printer).getByRole("alert")).toHaveTextContent("must be between 1 and 60");
+      expect(within(printer).getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("saves a valid keep-awake interval", async () => {
+      const user = userEvent.setup();
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      const input = await within(printer).findByLabelText("Keep-awake interval (minutes)");
+      await user.clear(input);
+      await user.type(input, "15");
+      await user.click(within(printer).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(capturedBody).toEqual({ keep_awake_interval_min: 15 }));
+    });
+  });
+
   // -- HomeBox section -------------------------------------------------------
 
   describe("HomeBox section", () => {

@@ -23,6 +23,26 @@ async def test_printer_status_mock_mode_reports_connected_reference_status(clien
     assert body["status"]["is_e720bt"] is True
 
 
+async def test_printer_status_includes_a_keep_alive_block(client):
+    # commit 6: additive field -- present alongside every existing key
+    # (connected/printer_mode/status/error), not replacing any of them.
+    # keep_printer_awake defaults False (DB-only, no override stored), so
+    # right after boot the poller has never actually attempted a poll yet.
+    resp = await client.get("/api/printer/status")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["connected"] is True  # every other pre-existing key still present
+    assert body["printer_mode"] == "mock"
+    keep_alive = body["keep_alive"]
+    assert keep_alive == {
+        "enabled": False,
+        "last_attempt_at": None,
+        "last_result": None,
+        "last_error": None,
+    }
+
+
 async def test_printer_status_usb_mode_no_device_reports_disconnected(tmp_path, monkeypatch):
     # No real USB hardware in CI/dev -- PyUsbTransport.open() raising
     # PrinterNotFoundError (its documented behavior when no device matches)
@@ -48,6 +68,7 @@ async def test_printer_status_usb_mode_no_device_reports_disconnected(tmp_path, 
     assert body["printer_mode"] == "usb"
     assert body["status"] is None
     assert "no USB printer found" in body["error"]
+    assert "keep_alive" in body  # additive, present on the disconnected branch too
 
 
 async def test_printer_status_honors_a_db_override_over_the_config_printer_mode(
