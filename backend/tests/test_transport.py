@@ -96,6 +96,12 @@ def test_importing_transport_module_does_not_import_usb():
 def test_open_wraps_usb_error_as_printer_not_found_error(monkeypatch):
     import usb.core
 
+    # Track B: open() now calls _fresh_libusb_backend() before find() --
+    # monkeypatched to None so this never attempts a real libusb load (CI
+    # has no libusb installed; see module docstring above and
+    # transport.py's own module docstring).
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: None)
+
     def _raise_find(**kwargs):
         raise usb.core.USBError("[Errno 13] Access denied")
 
@@ -108,6 +114,8 @@ def test_open_wraps_usb_error_as_printer_not_found_error(monkeypatch):
 def test_open_wraps_no_backend_error_as_printer_not_found_error(monkeypatch):
     import usb.core
 
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: None)
+
     def _raise_find(**kwargs):
         raise usb.core.NoBackendError("no backend available")
 
@@ -115,6 +123,78 @@ def test_open_wraps_no_backend_error_as_printer_not_found_error(monkeypatch):
 
     with pytest.raises(PrinterNotFoundError, match="udev permissions"):
         PyUsbTransport.open()
+
+
+# --- 3c. PyUsbTransport.open(): fresh-libusb-context finalize lifecycle (Track B) ---
+#
+# _fresh_libusb_backend() itself (real usb.backend.libusb1 access) is not
+# exercised here -- these tests monkeypatch it to a fake, so they never
+# touch usb.backend.libusb1 or require a real libusb install either. What
+# IS covered: open() finalizes the backend on every failure path, and
+# close() finalizes it exactly once after a successful open.
+
+
+class _FakeLibusbBackend:
+    """Stand-in for what _fresh_libusb_backend() returns -- just enough
+    surface (a counted .finalize()) to prove open()/close() call it at the
+    right times, without a real usb.backend.libusb1._LibUSB anywhere.
+    """
+
+    def __init__(self) -> None:
+        self.finalize_calls = 0
+
+    def finalize(self) -> None:
+        self.finalize_calls += 1
+
+
+def test_open_no_backend_available_still_raises_printer_not_found(monkeypatch):
+    import usb.core
+
+    # No libusb1 backend at all (mirrors get_backend() returning None) --
+    # open() must still fail cleanly (device not found) rather than raise
+    # on the `backend is None` guard itself.
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: None)
+    monkeypatch.setattr(usb.core, "find", lambda **kwargs: None)
+
+    with pytest.raises(PrinterNotFoundError, match="no USB printer found"):
+        PyUsbTransport.open()
+
+
+def test_open_device_not_found_finalizes_fresh_backend(monkeypatch):
+    import usb.core
+
+    fake_backend = _FakeLibusbBackend()
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: fake_backend)
+    monkeypatch.setattr(usb.core, "find", lambda **kwargs: None)
+
+    with pytest.raises(PrinterNotFoundError, match="no USB printer found"):
+        PyUsbTransport.open()
+
+    assert fake_backend.finalize_calls == 1
+
+
+def test_open_then_close_finalizes_fresh_backend_exactly_once(monkeypatch):
+    import usb.core
+    import usb.util
+
+    fake_backend = _FakeLibusbBackend()
+    monkeypatch.setattr(transport_module, "_fresh_libusb_backend", lambda: fake_backend)
+
+    fake_device = _FakeUsbDevice()
+    monkeypatch.setattr(usb.core, "find", lambda **kwargs: fake_device)
+    monkeypatch.setattr(usb.util, "claim_interface", lambda device, interface: None)
+    monkeypatch.setattr(usb.util, "release_interface", lambda device, interface: None)
+    monkeypatch.setattr(transport_module, "_usb_errors", _stub_usb_errors)
+
+    transport = PyUsbTransport.open()
+
+    assert transport._backend is fake_backend
+    assert fake_device.set_configuration_calls == 1
+    assert fake_backend.finalize_calls == 0  # not yet -- still open
+
+    transport.close()
+
+    assert fake_backend.finalize_calls == 1
 
 
 # --- 4. PyUsbTransport via a duck-typed fake device (I3 test seam) ---
@@ -154,12 +234,19 @@ class _FakeUsbDevice:
         self.read_calls: list[tuple[int, int, int | None]] = []
         self.read_raises: Exception | None = None
         self.read_result: bytes = b""
+        self.set_configuration_calls = 0
 
     def is_kernel_driver_active(self, interface: int) -> bool:
         return self.kernel_driver_active
 
     def detach_kernel_driver(self, interface: int) -> None:
         self.detach_calls.append(interface)
+
+    def set_configuration(self) -> None:
+        # Only exercised via PyUsbTransport.open() (test 3c below) -- the
+        # rest of this file constructs PyUsbTransport directly and never
+        # goes through open()'s device.set_configuration() call at all.
+        self.set_configuration_calls += 1
 
     def attach_kernel_driver(self, interface: int) -> None:
         self.attach_calls.append(interface)
