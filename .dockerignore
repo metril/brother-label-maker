@@ -33,8 +33,11 @@ backend/.ruff_cache
 backend/scripts
 
 # Repo-local tooling, docs, and secrets that never belong in the image.
+# .env is matched at ANY depth (not root-anchored like its neighbors):
+# a docker/.env once sat inside the build context (context: ..) carrying a
+# live API key -- review finding M8, docs/code-review-2026-08.md.
 /.superpowers
 /data
-/.env
+**/.env
 /docs
 /*.md
