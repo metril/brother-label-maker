@@ -14,9 +14,10 @@ endpoints in support of BarTender-model serialization -- neither one
 renders anything; see labelmaker.render.serialize's module docstring for
 the expansion model itself.
 
-GET /api/symbols / GET /api/symbols/{id} (task 2.7) expose render/symbols.
-py's curated Material Symbols library -- the catalog and one icon's raw SVG,
-respectively -- for a UI icon picker and for symbol_object() ids to be
+GET /api/symbols / GET /api/symbols/{id} (task 2.7, expanded to 1000+ icons
+across Material Symbols and Phosphor by commit 7's symbols pipeline) expose
+render/symbols.py's curated icon library -- the catalog and one icon's raw
+SVG, respectively -- for a UI icon picker and for symbol_object() ids to be
 discoverable independent of this project's own source tree.
 """
 

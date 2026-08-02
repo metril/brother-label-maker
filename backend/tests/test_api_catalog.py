@@ -77,8 +77,13 @@ async def test_symbols_returns_the_full_curated_catalog(client):
     body = resp.json()
     assert isinstance(body, list)
     assert len(body) == len(list_symbols())
+    # Manifest v2 (commit 7's symbols pipeline): gained category/source/
+    # license alongside the original id/name/tags/path -- additive only, so
+    # this stays an exact-key-set check rather than a subset check (a
+    # regression that silently drops one of the new fields from the API
+    # response, while list_symbols() itself still has it, should fail here).
     for entry in body:
-        assert set(entry.keys()) == {"id", "name", "tags", "path"}
+        assert set(entry.keys()) == {"id", "name", "tags", "path", "category", "source", "license"}
     ids = {entry["id"] for entry in body}
     assert "bolt" in ids
     assert "wifi" in ids

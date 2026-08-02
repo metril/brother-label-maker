@@ -1,11 +1,15 @@
-"""Tests for labelmaker.render.symbols: the curated Material Symbols icon
-library (task 2.7) -- index parsing, per-file asset integrity, and
-symbol_object()'s placement/scaling.
+"""Tests for labelmaker.render.symbols: the curated icon library (task 2.7,
+expanded to 1000+ icons across Material Symbols and Phosphor by commit 7's
+symbols pipeline, backend/scripts/symbols_pipeline/) -- index parsing,
+per-file asset integrity, mtime-keyed caching, and symbol_object()'s
+placement/scaling.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 
 import pytest
@@ -21,6 +25,21 @@ from labelmaker.render.symbols import (
     list_symbols,
     symbol_object,
 )
+
+# The three id "groups" the manifest can currently contain: the original 60
+# (bare ids, no prefix) plus the two commit-7 pipeline sources. Every test
+# below that talks about "every source" means these three groups. (A future
+# source's category bucket, "safety", is already a valid manifest category --
+# see common.VALID_CATEGORIES -- but nothing populates it yet.)
+_SOURCE_PREFIXES = ("material_", "phosphor_")
+
+
+def _source_group(symbol_id: str) -> str:
+    for prefix in _SOURCE_PREFIXES:
+        if symbol_id.startswith(prefix):
+            return prefix
+    return "legacy"
+
 
 # --- 1. ensure_symbols_dir() -------------------------------------------------
 
@@ -38,10 +57,24 @@ def test_ensure_symbols_dir_raises_when_missing(monkeypatch, tmp_path):
 # --- 2. list_symbols() / index parsing --------------------------------------
 
 
-def test_list_symbols_returns_between_40_and_60_entries():
+def test_list_symbols_meets_floor_and_every_source_contributes():
+    # >= 1000 is the pipeline's *target* (see backend/scripts/symbols_pipeline/
+    # README.md), not a hard requirement here -- a source's curated list could
+    # legitimately shrink on any given run. What must always hold: the
+    # pre-pipeline floor of 60 (the original hand-curated set), and every one
+    # of the three id groups (legacy/material/phosphor) contributing at least
+    # one icon -- i.e. the pipeline actually ran and merged, not just "didn't
+    # shrink below 60 by accident".
     infos = list_symbols()
-    assert 40 <= len(infos) <= 60
     assert all(isinstance(i, SymbolInfo) for i in infos)
+    assert len(infos) >= 60, f"expected >= 60 symbols total, found {len(infos)}"
+
+    by_group: dict[str, list[SymbolInfo]] = {}
+    for info in infos:
+        by_group.setdefault(_source_group(info.id), []).append(info)
+    for group in ("legacy", *_SOURCE_PREFIXES):
+        count = len(by_group.get(group, []))
+        assert count >= 1, f"source group {group!r} contributed 0 symbols (total={len(infos)})"
 
 
 def test_list_symbols_ids_are_unique():
@@ -50,17 +83,86 @@ def test_list_symbols_ids_are_unique():
 
 
 def test_list_symbols_covers_expected_categories_via_tags():
+    # "safety" is deliberately not in this list: it's a valid manifest
+    # category (see common.VALID_CATEGORIES) reserved for a possible future
+    # source, but nothing currently populates it -- see
+    # backend/scripts/symbols_pipeline/README.md.
     all_tags = {tag for info in list_symbols() for tag in info.tags}
     for expected in ("electrical", "network", "av", "arrow", "misc"):
         assert expected in all_tags, f"no symbol tagged {expected!r}"
 
 
-def test_index_json_is_a_flat_list_of_the_documented_shape():
+def test_list_symbols_every_entry_has_a_non_empty_license():
+    for info in list_symbols():
+        assert info.license, f"{info.id}: empty license field"
+
+
+def test_index_json_is_a_flat_list_of_the_documented_manifest_v2_shape():
     raw = json.loads((SYMBOLS_DIR / "index.json").read_text())
     assert isinstance(raw, list)
+    valid_categories = {"general", "electrical", "network", "av", "arrow", "safety", "misc"}
     for entry in raw:
-        assert set(entry) == {"id", "name", "tags", "path"}
+        assert set(entry) == {"id", "name", "tags", "path", "category", "source", "license"}
         assert entry["path"] == f"{entry['id']}.svg"
+        bad_category = f"{entry['id']}: bad category {entry['category']!r}"
+        assert entry["category"] in valid_categories, bad_category
+        assert entry["source"], f"{entry['id']}: empty source field"
+        assert entry["license"], f"{entry['id']}: empty license field"
+
+
+# --- 2b. mtime-keyed caching -------------------------------------------------
+
+
+def _write_index(tmp_path, entries: list[dict]) -> None:
+    (tmp_path / "index.json").write_text(json.dumps(entries))
+
+
+def test_list_symbols_and_get_symbol_info_invalidate_on_index_mtime_change(monkeypatch, tmp_path):
+    entry_a = {
+        "id": "a", "name": "A", "tags": [], "path": "a.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }
+    _write_index(tmp_path, [entry_a])
+    (tmp_path / "a.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+
+    first = list_symbols()
+    assert [i.id for i in first] == ["a"]
+    assert get_symbol_info("a").id == "a"
+
+    # Rewrite index.json with a second entry, forcing a distinct mtime_ns
+    # (os.utime, rather than trusting two back-to-back writes to land in
+    # different nanosecond buckets on every filesystem) -- this is the exact
+    # scenario the cache key is meant to detect: same path, changed content.
+    entry_b = {
+        "id": "b", "name": "B", "tags": [], "path": "b.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }
+    _write_index(tmp_path, [entry_a, entry_b])
+    (tmp_path / "b.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
+    index_path = tmp_path / "index.json"
+    newer_ns = index_path.stat().st_mtime_ns + 1_000_000_000  # +1s, unambiguously newer
+    os.utime(index_path, ns=(newer_ns, newer_ns))
+
+    second = list_symbols()
+    assert [i.id for i in second] == ["a", "b"], "list_symbols() served a stale cached value"
+    assert get_symbol_info("b").id == "b", "get_symbol_info() served a stale cached value"
+
+
+def test_list_symbols_returns_a_copy_callers_cant_use_to_corrupt_the_cache(monkeypatch, tmp_path):
+    entry = {
+        "id": "a", "name": "A", "tags": [], "path": "a.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }
+    _write_index(tmp_path, [entry])
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+
+    infos = list_symbols()
+    extra = SymbolInfo(
+        id="z", name="Z", tags=[], path="z.svg", category="misc", source="t", license="t"
+    )
+    infos.append(extra)
+    assert [i.id for i in list_symbols()] == ["a"]
 
 
 # --- 3. Asset integrity: every listed file exists, is valid, 24x24 ---------
@@ -88,11 +190,51 @@ def test_every_indexed_symbol_file_is_a_single_path_24x24_svg():
         assert "font-family" not in raw, f"{info.id}: unexpected font-family attribute"
 
 
-def test_every_indexed_symbol_file_renders_nonblank_via_resvg():
-    # Belt-and-suspenders over the string-shape check above: every file
-    # actually rasterizes to *some* ink, through the real resvg pipeline,
-    # not just a string that superficially looks like valid SVG.
-    for info in list_symbols():
+_RASTERIZE_SAMPLE_SIZE = 100
+
+
+def _stratified_rasterize_sample(infos: list[SymbolInfo]) -> list[SymbolInfo]:
+    """A deterministic, hash-stratified sample targeting _RASTERIZE_SAMPLE_SIZE
+    total. Deterministic (sha256 of the id, not `random`) so a failure is
+    reproducible across runs/machines without pinning a seed; "stratified"
+    means every source group gets some representation rather than a plain
+    sort-by-hash-and-take-N-from-the-front risking one large source (e.g.
+    material_*, ~700+ entries) crowding out a small one.
+
+    This is deliberately a SAMPLE, not the full catalog: the pipeline itself
+    already rasterize-gates every single file at generation time (see
+    common.rasterize_check + backend/scripts/symbols_pipeline/README.md's
+    "pipeline-time quality gate" section) -- this test is a regression check
+    against the committed files drifting or bitrotting later, not the first
+    line of defense. Set SYMBOLS_FULL_SWEEP=1 to check every file instead
+    (slow: this rasterizes real SVGs through resvg one at a time).
+    """
+    if os.environ.get("SYMBOLS_FULL_SWEEP") == "1":
+        return infos
+
+    by_group: dict[str, list[SymbolInfo]] = {}
+    for info in infos:
+        by_group.setdefault(_source_group(info.id), []).append(info)
+    for group in by_group.values():
+        group.sort(key=lambda i: hashlib.sha256(i.id.encode()).hexdigest())
+
+    sample: list[SymbolInfo] = []
+    remaining_groups = [g for g in by_group.values() if g]
+    per_group = max(_RASTERIZE_SAMPLE_SIZE // max(len(remaining_groups), 1), 1)
+    for group in remaining_groups:
+        sample.extend(group[:per_group])
+    return sample
+
+
+def test_indexed_symbol_files_render_nonblank_via_resvg():
+    # Belt-and-suspenders over the string-shape check above: every sampled
+    # file actually rasterizes to *some* ink, through the real resvg
+    # pipeline, not just a string that superficially looks like valid SVG.
+    # See _stratified_rasterize_sample()'s docstring for sample vs.
+    # SYMBOLS_FULL_SWEEP=1 full-sweep semantics.
+    sample = _stratified_rasterize_sample(list_symbols())
+    assert sample, "sample is empty -- list_symbols() returned nothing?"
+    for info in sample:
         svg_group = symbol_object(info.id, size_px=24)
         label = RenderedLabel(
             svg=_svg_document(24, 24, svg_group), width_px=24, height_px=24
@@ -180,7 +322,10 @@ def test_symbol_object_larger_size_produces_more_ink_pixels():
 
 
 def _write_index_and_file(tmp_path, filename: str, svg_text: str):
-    index = [{"id": "broken", "name": "Broken", "tags": ["misc"], "path": filename}]
+    index = [{
+        "id": "broken", "name": "Broken", "tags": ["misc"], "path": filename,
+        "category": "misc", "source": "test", "license": "test",
+    }]
     (tmp_path / "index.json").write_text(json.dumps(index))
     (tmp_path / filename).write_text(svg_text)
 
@@ -217,7 +362,10 @@ def test_symbol_object_raises_on_style_attribute(monkeypatch, tmp_path):
 
 
 def test_symbol_object_raises_on_missing_file(monkeypatch, tmp_path):
-    index = [{"id": "ghost", "name": "Ghost", "tags": [], "path": "ghost.svg"}]
+    index = [{
+        "id": "ghost", "name": "Ghost", "tags": [], "path": "ghost.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }]
     (tmp_path / "index.json").write_text(json.dumps(index))
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
     with pytest.raises(RuntimeError, match="symbol file missing"):

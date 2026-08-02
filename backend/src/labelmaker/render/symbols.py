@@ -1,24 +1,33 @@
-"""Curated Material Symbols icon library (task 2.7) -- a small "objects"
-module, parallel to render/objects.py's barcode groups: `symbol_object()`
-places one bundled icon's vector path at a given size/position on a label's
-canvas, ready to drop straight into an SVG document body.
+"""Curated icon library (task 2.7, expanded to ~1000+ icons in commit 7's
+symbols pipeline) -- a small "objects" module, parallel to render/objects.py's
+barcode groups: `symbol_object()` places one bundled icon's vector path at a
+given size/position on a label's canvas, ready to drop straight into an SVG
+document body.
 
 Assets live outside the installed package at backend/assets/symbols/,
 sibling to backend/assets/fonts/ (see fonts.py's FONTS_DIR docstring for
 the same layout assumption -- Path(__file__).resolve().parents[3] walks
-render/ -> labelmaker/ -> src/ -> backend/). Two files there matter to this
-module: `index.json` (the catalog: `[{id, name, tags, path}, ...]`) and one
-`<id>.svg` per catalog entry -- see backend/assets/symbols/LICENSES.md for
-where they came from (Material Symbols, Apache-2.0) and exactly how they
-were normalized.
+render/ -> labelmaker/ -> src/ -> backend/). Two things there matter to this
+module: `index.json` (the manifest v2 catalog: `[{id, name, tags, path,
+category, source, license}, ...]`) and one `<id>.svg` per catalog entry --
+see backend/assets/symbols/LICENSES.md for where they came from (Material
+Symbols/Apache-2.0, Phosphor/MIT -- each entry's `source`/`license` fields
+name which) and exactly how they were normalized. The original 60 ids are
+bare (e.g. "bolt"); everything the backend/scripts/symbols_pipeline/
+pipeline added is namespaced by source (`material_*`, `phosphor_*`) so old
+saved label definitions/presets referencing a bare id keep resolving. (The
+`safety` manifest category exists for a possible future source and is
+currently unused -- see the pipeline's own README.md.)
 
 -- The single-path-24x24 assumption --
 
 Every bundled file is assumed to be exactly one `<svg viewBox="0 0 24 24">`
 wrapping exactly one `<path d="..." .../>` (LICENSES.md documents the
 normalization step that makes this true for every file this project
-curated). `symbol_object()` doesn't parse SVG generically -- it takes
-everything between the outer `<svg ...>` and `</svg>` tags verbatim (a
+curated, including the pipeline-generated ones -- Material/Phosphor each
+start from a different native coordinate system and get rewritten to this
+same shape). `symbol_object()` doesn't parse SVG generically -- it
+takes everything between the outer `<svg ...>` and `</svg>` tags verbatim (a
 plain string slice, via regex) and re-wraps it in a translate+scale `<g>`.
 This is deliberately NOT a general SVG-inlining mechanism: it trusts the
 curated file's inner content is already just path data with no `<script>`,
@@ -28,8 +37,21 @@ checks the shape (single `<path>`, correct viewBox, no `style`/`font-family`
 attributes) every time a symbol is loaded, raising loudly rather than
 silently inlining something this mechanism wasn't designed for. This same
 per-load check is what test_symbols.py's asset-integrity test exercises
-against all 60 bundled files up front, so a curation mistake is caught by
-the test suite, not discovered later at render time.
+against every bundled file up front, so a curation mistake is caught by the
+test suite, not discovered later at render time. The pipeline itself
+(backend/scripts/symbols_pipeline/common.py) reruns this exact check (plus a
+rasterize gate) at generation time, before a file is ever committed.
+
+-- Caching --
+
+index.json now holds 1000+ entries, so list_symbols()/get_symbol_info() no
+longer re-read+re-validate it on every call: both cache on
+`(str(index_path), index_path.stat().st_mtime_ns)` -- a cache hit is free, a
+miss (first call, or index.json's mtime changed -- including a test that
+monkeypatches SYMBOLS_DIR to a tmp_path, which naturally has its own
+distinct path in the cache key) transparently re-parses. Nothing needs to
+call an explicit "invalidate" function; touching/rewriting index.json is
+enough.
 """
 
 from __future__ import annotations
@@ -55,6 +77,16 @@ class SymbolInfo(BaseModel):
     name: str
     tags: list[str]
     path: str
+    # Manifest v2 (commit 7): category is one of general/electrical/network/
+    # av/arrow/safety/misc (see backend/scripts/symbols_pipeline/common.py's
+    # VALID_CATEGORIES -- "safety" is reserved for a possible future source
+    # and currently unused); source/license are free-form provenance strings
+    # ("material-symbols@0.45.10"/"Apache-2.0", "phosphor@2.1.1"/"MIT") --
+    # see LICENSES.md for the full per-source detail these two fields
+    # summarize.
+    category: str
+    source: str
+    license: str
 
 
 def ensure_symbols_dir() -> None:
@@ -71,26 +103,57 @@ def ensure_symbols_dir() -> None:
         )
 
 
-def list_symbols() -> list[SymbolInfo]:
-    """The full 60-icon catalog, freshly re-read from index.json every call
-    (no caching) -- same convention as fonts.py's list_fonts()/font_path():
-    a test that points SYMBOLS_DIR elsewhere sees the change immediately,
-    rather than a stale value cached from whatever SYMBOLS_DIR was at first
-    call. index.json is small (60 entries); re-parsing it is cheap.
-    """
+def _current_index_path() -> Path:
     ensure_symbols_dir()
     index_path = SYMBOLS_DIR / "index.json"
     if not index_path.is_file():
         raise RuntimeError(f"symbols index not found: {index_path}")
-    raw = json.loads(index_path.read_text())
-    return [SymbolInfo.model_validate(entry) for entry in raw]
+    return index_path
+
+
+def _cache_key(index_path: Path) -> tuple[str, int]:
+    """`(path, mtime_ns)` -- a test that monkeypatches SYMBOLS_DIR gets a
+    distinct key automatically (different path), and rewriting index.json
+    in place (the pipeline's emit_source(), or a test fixture) bumps mtime_ns
+    and so is picked up on the very next call with no explicit invalidation.
+    """
+    return (str(index_path), index_path.stat().st_mtime_ns)
+
+
+_list_cache: tuple[tuple[str, int], list[SymbolInfo]] | None = None
+
+
+def list_symbols() -> list[SymbolInfo]:
+    """The full catalog (1000+ entries as of commit 7's symbols pipeline),
+    cached by `_cache_key()` -- see the module docstring's "Caching" section.
+    Returns a fresh list each call (a shallow copy of the cached one) so a
+    caller mutating the returned list can't corrupt the cache.
+    """
+    global _list_cache
+    index_path = _current_index_path()
+    key = _cache_key(index_path)
+    if _list_cache is None or _list_cache[0] != key:
+        raw = json.loads(index_path.read_text())
+        infos = [SymbolInfo.model_validate(entry) for entry in raw]
+        _list_cache = (key, infos)
+    return list(_list_cache[1])
+
+
+_info_cache: tuple[tuple[str, int], dict[str, SymbolInfo]] | None = None
 
 
 def get_symbol_info(symbol_id: str) -> SymbolInfo:
-    for info in list_symbols():
-        if info.id == symbol_id:
-            return info
-    valid = sorted(info.id for info in list_symbols())
+    """O(1) id lookup via a cached `{id: SymbolInfo}` dict, same cache key
+    convention as list_symbols() (see module docstring)."""
+    global _info_cache
+    index_path = _current_index_path()
+    key = _cache_key(index_path)
+    if _info_cache is None or _info_cache[0] != key:
+        _info_cache = (key, {info.id: info for info in list_symbols()})
+    by_id = _info_cache[1]
+    if symbol_id in by_id:
+        return by_id[symbol_id]
+    valid = sorted(by_id)
     raise ValueError(
         f"unknown symbol id {symbol_id!r}; {len(valid)} valid id(s), see GET /api/symbols "
         f"(first 10: {valid[:10]})"

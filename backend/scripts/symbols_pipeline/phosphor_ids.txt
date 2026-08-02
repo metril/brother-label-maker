@@ -1,0 +1,101 @@
+# Phosphor "fill" weight curated id list (backend/scripts/symbols_pipeline)
+#
+# Source: @phosphor-icons/core@2.1.1 (npm), assets/fill/<id>-fill.svg,
+# viewBox 0 0 256 256. fetch_phosphor.py normalizes every accepted icon to
+# viewBox="0 0 24 24" via transform="scale(0.09375)" (24/256 == 0.09375; no
+# translate needed since Phosphor's viewBox already originates at 0,0 --
+# contrast with Material's 0,-960 origin, see material_ids.txt).
+#
+# Format: same convention as material_ids.txt -- '#'-prefixed lines are
+# comments, a '# category: <bucket>' line sets the manifest `category` for
+# subsequent ids, '##' sub-headings are human-only notes. One bare Phosphor
+# icon id per line (the filename under assets/fill/, without the "-fill.svg"
+# suffix).
+#
+# Curation intent (see the approved plan): gap-fillers Material Symbols
+# lacks -- distinctive, mostly single-object glyphs (animals, clothing,
+# camping/sports gear, stationery, simple medical objects) rather than
+# Material's more abstract/compound UI iconography. Ids that turned out to
+# duplicate a Material Symbols selection already in material_ids.txt (e.g.
+# Material's own "recycling", "water_drop", "backpack", "potted_plant",
+# "archive", "luggage") were deliberately dropped here to avoid two icons
+# for the same concept -- see fetch_phosphor.py's skip log if that ever
+# changes.
+
+# category: general
+## -- pets / baby --
+paw-print
+bone
+cat
+dog
+bird
+fish-simple
+baby
+
+## -- clothing --
+t-shirt
+pants
+dress
+hoodie
+sneaker
+sunglasses
+shirt-folded
+
+## -- cleaning / gifting --
+broom
+spray-bottle
+gift
+basket
+
+## -- nature --
+leaf
+tree
+flower
+
+## -- misc distinctive objects --
+balloon
+cube
+magnet
+puzzle-piece
+umbrella
+
+## -- simple medical objects --
+bandaids
+first-aid
+first-aid-kit
+pill
+syringe
+heart
+
+## -- office / stationery --
+compass
+flag
+flag-banner
+globe
+paperclip
+push-pin
+scissors
+target
+eraser
+
+## -- tools --
+hammer
+screwdriver
+toolbox
+wrench
+paint-roller
+paint-bucket
+ruler
+
+## -- outdoor / hobby --
+barbell
+tent
+campfire
+
+## -- pantry --
+jar
+coffee
+
+## -- weather / climate --
+sun
+snowflake
