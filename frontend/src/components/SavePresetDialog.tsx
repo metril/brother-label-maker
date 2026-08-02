@@ -3,8 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ApiError, postPreset } from "../api/client";
 import { useDialogController } from "../hooks/useDialogController";
-import { Checkbox, TextInput } from "./ui/inputs";
+import { TextInput } from "./ui/inputs";
 import { Dialog } from "./ui/Dialog";
+import { Switch } from "./ui/Switch";
 import { dashedAddButtonClass, errorText, fieldLabelText, iconButtonClass, primaryButtonClass } from "./ui/styles";
 import type { Tape } from "../api/types";
 
@@ -126,8 +127,8 @@ export function SavePresetDialog({ labelType, labelTypeTitle, params, tape, disa
               </label>
               <TextInput id="preset-name" value={name} onChange={setName} placeholder="e.g. Rack uplink label" maxLength={80} />
             </div>
-            <Checkbox id="preset-favorite" checked={favorite} onChange={setFavorite} label="Favorite" />
-            <Checkbox id="preset-any-tape" checked={anyTape} onChange={setAnyTape} label="Any tape (don't pin a width)" />
+            <Switch id="preset-favorite" checked={favorite} onChange={setFavorite} label="Favorite" />
+            <Switch id="preset-any-tape" checked={anyTape} onChange={setAnyTape} label="Any tape (don't pin a width)" />
             {save.isError && (
               <p role="alert" className={errorText}>
                 {save.error instanceof ApiError ? save.error.message : "could not save preset"}

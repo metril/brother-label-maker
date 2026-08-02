@@ -5,7 +5,16 @@ import { HomeboxEntityRow } from "../components/HomeboxEntityRow";
 import { HomeboxLocationTree } from "../components/HomeboxLocationTree";
 import { Pending } from "../components/ui/Pending";
 import { TextInput } from "../components/ui/inputs";
-import { errorText, fieldLabelText, iconButtonClass, panel, panelHeading, primaryButtonClass, typeHeading } from "../components/ui/styles";
+import {
+  checkboxClass,
+  errorText,
+  fieldLabelText,
+  iconButtonClass,
+  panel,
+  panelHeading,
+  primaryButtonClass,
+  typeHeading,
+} from "../components/ui/styles";
 import { useHomeboxAssetMatches, useHomeboxEntities } from "../hooks/useHomeboxEntities";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
 import { useHomeboxTree } from "../hooks/useHomeboxTree";
@@ -240,7 +249,7 @@ export function Homebox() {
                     type="checkbox"
                     checked={allOnPageSelected}
                     onChange={toggleSelectAllOnPage}
-                    className="h-4 w-4 rounded border-deck-600 bg-deck-800 accent-amber-500"
+                    className={checkboxClass}
                   />
                   Select all on page
                 </label>

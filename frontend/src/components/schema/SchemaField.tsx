@@ -4,8 +4,9 @@ import { humanizeEnumValue, humanizeFieldName } from "../../schema/humanize";
 import { classifyField, resolveRef, splitNullable, type JsonSchemaObject } from "../../schema/jsonSchema";
 import { numberFieldErrorMessage } from "../../schema/numberValidity";
 import type { PathSegment } from "../../schema/paths";
-import { Checkbox, NumberInput, Select, TextInput } from "../ui/inputs";
+import { NumberInput, Select, TextInput } from "../ui/inputs";
 import { SegmentedControl } from "../ui/SegmentedControl";
+import { Switch } from "../ui/Switch";
 import { errorText, fieldLabelText, helpText } from "../ui/styles";
 import { ArrayOfNumbers } from "./ArrayOfNumbers";
 import { ArrayOfObjects } from "./ArrayOfObjects";
@@ -204,7 +205,7 @@ function FieldControl({ fieldKey, schema, root, value, onChange, path, id, label
     case "boolean":
       return (
         <div>
-          <Checkbox id={id} checked={Boolean(value)} onChange={onChange} label={label} />
+          <Switch id={id} checked={Boolean(value)} onChange={onChange} label={label} />
           {help && <p className={helpText}>{help}</p>}
         </div>
       );

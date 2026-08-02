@@ -51,3 +51,16 @@ export const dashedAddButtonClass =
 
 export const primaryButtonClass =
   "rounded-md border border-amber-500 bg-amber-500 px-5 py-2 text-[14px] font-semibold text-deck-950 transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60";
+
+/** The one remaining raw `<input type="checkbox">` shape in the app --
+ * HomeboxEntityRow.tsx's per-row select and pages/Homebox.tsx's "Select all
+ * on page" both keep genuine `role="checkbox"` multi-select semantics
+ * (ui/Switch.tsx's own docstring explains why that's a DIFFERENT widget
+ * from a boolean setting, not just a style choice), so neither became a
+ * Switch. This constant only consolidates their previously-triplicated
+ * class string (the third copy lived on ui/inputs.tsx's now-removed
+ * Checkbox) -- it deliberately stays a plain class fragment rather than a
+ * shared component, since the two call sites differ in visible-label
+ * shape (aria-label-only vs. a wrapping `<label>` with visible text) and
+ * forcing one markup shape on both would cost more than it'd save. */
+export const checkboxClass = "h-4 w-4 rounded border-deck-600 bg-deck-800 accent-amber-500";

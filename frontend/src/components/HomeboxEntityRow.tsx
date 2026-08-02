@@ -1,3 +1,4 @@
+import { checkboxClass } from "./ui/styles";
 import type { HomeboxEntitySummary } from "../api/types";
 
 interface HomeboxEntityRowProps {
@@ -22,7 +23,7 @@ export function HomeboxEntityRow({ entity, checked, onToggle }: HomeboxEntityRow
         checked={checked}
         onChange={onToggle}
         aria-label={`Select ${entity.name}`}
-        className="h-4 w-4 shrink-0 rounded border-deck-600 bg-deck-800 accent-amber-500"
+        className={`${checkboxClass} shrink-0`}
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] text-deck-200" title={entity.name}>

@@ -3,9 +3,10 @@ import { useSequenceExpand } from "../hooks/useSequenceExpand";
 import { collationPattern, DEFAULT_SEQUENCE, parseListTextarea, SEQUENCE_KIND_OPTIONS } from "../lib/sequence";
 import { useDesignerStore } from "../stores/designer";
 import { SequenceCsvUpload } from "./SequenceCsvUpload";
-import { Checkbox, NumberInput, Textarea, TextInput } from "./ui/inputs";
+import { NumberInput, Textarea, TextInput } from "./ui/inputs";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
+import { Switch } from "./ui/Switch";
 import { errorText, eyebrow, fieldLabelText, helpText } from "./ui/styles";
 import type { Collation, ExpandResponse, Sequence, SequenceKind } from "../api/types";
 import type { SequenceFieldErrors } from "../lib/sequence";
@@ -50,7 +51,7 @@ export function SequenceEditor() {
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between gap-4">
         <span className={eyebrow}>Serialize</span>
-        <Checkbox id="serialize-toggle" checked={enabled} onChange={setEnabled} label="On" />
+        <Switch id="serialize-toggle" checked={enabled} onChange={setEnabled} label="On" />
       </div>
 
       {!enabled ? (

@@ -65,7 +65,7 @@ describe("Designer + serialization -- Print button label and request body", () =
     renderWithProviders(<Designer />);
     await typeLineWithToken(user);
 
-    await user.click(await screen.findByRole("checkbox", { name: "On" }));
+    await user.click(await screen.findByRole("switch", { name: "On" }));
     const count = await screen.findByLabelText("Count");
     await user.clear(count);
     await user.type(count, "24");
@@ -86,7 +86,7 @@ describe("Designer + serialization -- over-cap blocks print", () => {
     renderWithProviders(<Designer />);
     await typeLineWithToken(user);
 
-    await user.click(await screen.findByRole("checkbox", { name: "On" }));
+    await user.click(await screen.findByRole("switch", { name: "On" }));
     const count = await screen.findByLabelText("Count");
     await user.clear(count);
     await user.type(count, "500");
@@ -151,7 +151,7 @@ describe("Designer + serialization -- no stale/mismatched serialization ever rea
     renderWithProviders(<Designer />);
     await typeLineWithToken(user);
 
-    await user.click(await screen.findByRole("checkbox", { name: "On" }));
+    await user.click(await screen.findByRole("switch", { name: "On" }));
     const count = await screen.findByLabelText("Count");
     await user.clear(count);
     await user.type(count, "24");
@@ -203,7 +203,7 @@ describe("Designer + serialization -- preview index stepper", () => {
     renderWithProviders(<Designer />);
     await typeLineWithToken(user);
 
-    await user.click(await screen.findByRole("checkbox", { name: "On" }));
+    await user.click(await screen.findByRole("switch", { name: "On" }));
     const count = await screen.findByLabelText("Count");
     await user.clear(count);
     await user.type(count, "3");

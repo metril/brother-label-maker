@@ -58,7 +58,7 @@ describe("SavePresetDialog", () => {
     await waitFor(() => expect(closeButton).toHaveFocus());
 
     await user.type(screen.getByLabelText("Name"), "Rack uplink");
-    await user.click(screen.getByRole("checkbox", { name: "Favorite" }));
+    await user.click(screen.getByRole("switch", { name: "Favorite" }));
     await user.click(screen.getByRole("button", { name: "Save preset" }));
 
     await waitFor(() =>
@@ -113,13 +113,13 @@ describe("SavePresetDialog", () => {
     await user.click(screen.getByRole("button", { name: "+ Save as preset" }));
     await user.type(screen.getByLabelText("Name"), "Rack uplink");
 
-    const anyTapeCheckbox = screen.getByRole("checkbox", { name: "Any tape (don't pin a width)" });
-    expect(anyTapeCheckbox).not.toBeChecked();
+    const anyTapeSwitch = screen.getByRole("switch", { name: "Any tape (don't pin a width)" });
+    expect(anyTapeSwitch).not.toBeChecked();
     // Switching it on updates the dialog's own help copy too -- the same
     // "say what's about to happen" convention the rest of this dialog's
     // description line already follows.
     expect(screen.getByText(/Saves this text design at 24mm/)).toBeInTheDocument();
-    await user.click(anyTapeCheckbox);
+    await user.click(anyTapeSwitch);
     expect(screen.getByText(/without pinning it to a tape width/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save preset" }));

@@ -4,9 +4,9 @@ import { useTrayPreviews } from "../hooks/useTrayPreviews";
 import { useTrayStore } from "../stores/tray";
 import { PrintButton } from "./PrintButton";
 import { TrayItemRow } from "./TrayItemRow";
-import { Checkbox } from "./ui/inputs";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
+import { Switch } from "./ui/Switch";
 import { dashedAddButtonClass, eyebrow, helpText } from "./ui/styles";
 import type { ChainMode, LabelDefinition, PrintOptions, Sequence } from "../api/types";
 
@@ -221,7 +221,7 @@ export function TrayPanel({ current, onAddToTray }: TrayPanelProps) {
         <p className={helpText}>{CHAIN_MODE_OPTIONS.find((o) => o.value === chainMode)?.description}</p>
       </div>
 
-      <Checkbox id="auto-cut" checked={autoCut} onChange={setAutoCut} label="Auto-cut" />
+      <Switch id="auto-cut" checked={autoCut} onChange={setAutoCut} label="Auto-cut" />
 
       <div className="rounded-lg border border-deck-700 bg-deck-800/40 p-3">
         <p className={eyebrow}>Tape estimate</p>

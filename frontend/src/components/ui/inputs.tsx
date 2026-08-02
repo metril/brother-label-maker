@@ -128,28 +128,6 @@ export function NumberInput({ id, value, onChange, min, max, step, ariaLabel, cl
   );
 }
 
-interface CheckboxProps {
-  id?: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-}
-
-export function Checkbox({ id, checked, onChange, label }: CheckboxProps) {
-  return (
-    <label htmlFor={id} className="flex items-center gap-2 text-[14px] text-deck-200">
-      <input
-        id={id}
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 rounded border-deck-600 bg-deck-800 accent-amber-500"
-      />
-      {label}
-    </label>
-  );
-}
-
 interface SelectOption {
   value: string;
   label: string;

@@ -51,7 +51,7 @@ describe("SequenceEditor -- off by default", () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SequenceEditor />);
 
-    await user.click(screen.getByRole("checkbox", { name: "On" }));
+    await user.click(screen.getByRole("switch", { name: "On" }));
 
     expect(screen.getByRole("radiogroup", { name: "Serialization kind" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Numbers" })).toHaveAttribute("aria-checked", "true");

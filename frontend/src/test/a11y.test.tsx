@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SchemaForm } from "../components/schema/SchemaForm";
 import { TypeRail } from "../components/TypeRail";
+import { Switch } from "../components/ui/Switch";
 import { buildDefaultParams } from "../schema/defaults";
 import type { JsonSchemaObject } from "../schema/jsonSchema";
 import { useDesignerStore } from "../stores/designer";
@@ -43,7 +45,7 @@ describe("accessibility smoke", () => {
     renderWithQueryClient(<SchemaForm labelType="text" schema={TEXT_TYPE.params_schema} params={params} onChange={() => {}} />);
 
     // Repeatable-row text input (array-of-string), a select-backed override
-    // (FontFamilyField), a checkbox, and a bounded number field -- one of
+    // (FontFamilyField), a switch, and a bounded number field -- one of
     // each control family this engine renders, all reachable by label text.
     expect(screen.getByLabelText("Lines 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Bold")).toBeInTheDocument();
@@ -54,8 +56,24 @@ describe("accessibility smoke", () => {
     const params = buildDefaultParams(TEXT_TYPE.params_schema);
     renderWithQueryClient(<SchemaForm labelType="text" schema={TEXT_TYPE.params_schema} params={params} onChange={() => {}} />);
 
-    const boldCheckbox = screen.getByLabelText("Bold");
-    boldCheckbox.focus();
-    expect(document.activeElement).toBe(boldCheckbox);
+    const boldSwitch = screen.getByLabelText("Bold");
+    boldSwitch.focus();
+    expect(document.activeElement).toBe(boldSwitch);
+  });
+
+  it("Switch: exposes role=switch with aria-checked tracking state, reachable by its label, and toggles via keyboard (Space)", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [checked, setChecked] = useState(false);
+      return <Switch id="a11y-switch" checked={checked} onChange={setChecked} label="Notify" />;
+    }
+    renderWithQueryClient(<Harness />);
+
+    const toggle = screen.getByRole("switch", { name: "Notify" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    toggle.focus();
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
   });
 });

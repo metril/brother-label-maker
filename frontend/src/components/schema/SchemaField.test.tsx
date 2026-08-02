@@ -76,15 +76,15 @@ describe("SchemaField shapes", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("boolean: renders a real checkbox toggled by its own label", async () => {
+  it("boolean: renders a real switch toggled by its own label", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const schema: JsonSchemaObject = { type: "boolean" };
     render(<SchemaField fieldKey="bold" schema={schema} root={schema} value={false} onChange={onChange} path={["bold"]} allParams={{}} />);
 
-    const checkbox = screen.getByLabelText("Bold");
-    expect(checkbox).toHaveAttribute("type", "checkbox");
-    await user.click(checkbox);
+    const toggle = screen.getByLabelText("Bold");
+    expect(toggle).toHaveAttribute("role", "switch");
+    await user.click(toggle);
     expect(onChange).toHaveBeenCalledWith(true);
   });
 
