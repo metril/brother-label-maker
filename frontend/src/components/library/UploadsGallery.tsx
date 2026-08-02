@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, deleteImage, getImages, imagePngUrl, postImage } from "../../api/client";
+import { ApiError, deleteImage, getImages, imageThumbUrl, postImage } from "../../api/client";
 import { useDialogController } from "../../hooks/useDialogController";
 import { formatAbsoluteTime, formatRelativeTime } from "../../lib/time";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -145,7 +145,7 @@ export function UploadsGallery() {
               <li key={item.image_id} className="flex flex-col gap-1.5 rounded-lg border border-deck-800 bg-deck-900/40 p-2">
                 <div className="flex aspect-square items-center justify-center overflow-hidden rounded-md border border-deck-600 bg-icon-well p-1.5">
                   <img
-                    src={imagePngUrl(item.image_id)}
+                    src={imageThumbUrl(item.image_id)}
                     alt={`Upload ${item.image_id}`}
                     loading="lazy"
                     className="h-full w-full object-contain"

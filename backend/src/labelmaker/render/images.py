@@ -125,16 +125,32 @@ def uploads_dir(data_dir: Path) -> Path:
     return data_dir / "uploads"
 
 
-def image_path(image_id: str, data_dir: Path) -> Path:
-    """The ONE choke point every `image_id` -> filesystem-path resolution in
-    this codebase goes through -- see module docstring's "image_id is
-    untrusted input" section for why both checks below exist and what they
-    each independently guard against.
+def thumbs_dir(data_dir: Path) -> Path:
+    """`data_dir/uploads/thumbs` -- disk-cached, resized copies of uploads
+    for thumbnail-sized UI surfaces (UploadsGallery's grid tiles, task
+    H6) that would otherwise pull a multi-MB full-resolution original just
+    to paint a ~120px tile -- see api/router_images.py's
+    `GET /api/images/{id}/thumb`. Nested UNDER uploads_dir() (not a
+    sibling): containment is then a strict subset of uploads_dir()'s own,
+    so nothing thumb-related can ever resolve outside uploads_dir/ even if
+    thumb_path()'s own containment check below were somehow bypassed."""
+    return uploads_dir(data_dir) / "thumbs"
+
+
+def _resolve_contained(image_id: str, base: Path) -> Path:
+    """Shared by image_path()/thumb_path() below: validate `image_id`
+    against `IMAGE_ID_RE` (a client-controlled HTTP path parameter, not
+    necessarily a value this project's own upload endpoint ever minted --
+    see module docstring's "image_id is untrusted input" section), then
+    resolve `{image_id}.png` under `base` and assert the result is still
+    contained within `base`'s own resolved form. Raises `ValueError`
+    (422-mappable) for either failure, never silently returning an
+    out-of-bounds path.
     """
     if not IMAGE_ID_RE.match(image_id):
         raise ValueError(f"invalid image_id {image_id!r}")
 
-    base = uploads_dir(data_dir).resolve()
+    base = base.resolve()
     candidate = (base / f"{image_id}.png").resolve()
     if not candidate.is_relative_to(base):
         # Unreachable given IMAGE_ID_RE above (no '/', '.', or other
@@ -144,6 +160,29 @@ def image_path(image_id: str, data_dir: Path) -> Path:
         # symlink that resolves somewhere unexpected.
         raise ValueError(f"invalid image_id {image_id!r}")
     return candidate
+
+
+def image_path(image_id: str, data_dir: Path) -> Path:
+    """The ONE choke point every `image_id` -> original-upload filesystem
+    path resolution in this codebase goes through -- see module
+    docstring's "image_id is untrusted input" section for why
+    `_resolve_contained()`'s checks exist and what they each independently
+    guard against.
+    """
+    return _resolve_contained(image_id, uploads_dir(data_dir))
+
+
+def thumb_path(image_id: str, data_dir: Path) -> Path:
+    """The thumb-cache counterpart to image_path() above -- same
+    `IMAGE_ID_RE` + resolve()-containment discipline (via
+    `_resolve_contained()`), this time against `thumbs_dir()` rather than
+    `uploads_dir()`. `image_id` reaches this from an HTTP path parameter a
+    client controls (`GET /api/images/{id}/thumb`), so a cache-file path
+    built from it is just as much a filesystem-access choke point as the
+    original upload's own path -- same function, same guarantees, just a
+    different base directory.
+    """
+    return _resolve_contained(image_id, thumbs_dir(data_dir))
 
 
 def image_object(

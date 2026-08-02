@@ -235,6 +235,15 @@ export function imagePngUrl(imageId: string): string {
   return `${API_BASE}/images/${imageId}`;
 }
 
+/** GET /api/images/{id}/thumb (task H6) -- a bounded (256px-longest-edge)
+ * cached thumbnail of the same upload, generated once server-side. Grid-
+ * tile-sized UI (UploadsGallery.tsx) should use THIS, not imagePngUrl
+ * above, to avoid pulling a multi-MB full-resolution original just to
+ * paint a ~120px square. */
+export function imageThumbUrl(imageId: string): string {
+  return `${API_BASE}/images/${imageId}/thumb`;
+}
+
 /** GET /api/images (task D2a's Uploads library) -- every previously
  * uploaded image, newest first, server-paginated (same page/page_size/
  * total shape as getHistory below; router_images.py's own list_images

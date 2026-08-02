@@ -38,11 +38,21 @@ describe("UploadsGallery", () => {
           total: 2,
         }),
       ),
+      // H6: grid tiles must request the bounded THUMBNAIL route, never the
+      // full-resolution original -- overridden here (not in the shared
+      // handlers.ts) since no other suite needs this endpoint stubbed.
+      http.get("/api/images/:id/thumb", () => new HttpResponse(new Uint8Array([1, 2, 3]), { status: 200 })),
     );
     renderWithQueryClient(<UploadsGallery />);
 
-    expect(await screen.findByRole("img", { name: "Upload img-1" })).toHaveAttribute("src", "/api/images/img-1");
-    expect(screen.getByRole("img", { name: "Upload img-2" })).toHaveAttribute("src", "/api/images/img-2");
+    expect(await screen.findByRole("img", { name: "Upload img-1" })).toHaveAttribute(
+      "src",
+      "/api/images/img-1/thumb",
+    );
+    expect(screen.getByRole("img", { name: "Upload img-2" })).toHaveAttribute(
+      "src",
+      "/api/images/img-2/thumb",
+    );
     expect(screen.getByText("64×48 · 2.0 KB")).toBeInTheDocument();
     expect(screen.getByText("100×50 · 1.4 MB")).toBeInTheDocument();
     expect(screen.getByText("2 of 2 uploads")).toBeInTheDocument();

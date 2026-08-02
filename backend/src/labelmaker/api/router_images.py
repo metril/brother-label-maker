@@ -1,5 +1,6 @@
 """POST /api/images (upload), GET /api/images (list, task D2a), GET
-/api/images/{id} (serve), DELETE /api/images/{id} (task 2.7).
+/api/images/{id} (serve), GET /api/images/{id}/thumb (bounded thumbnail,
+task H6), DELETE /api/images/{id} (task 2.7).
 
 Uploaded images (logos, photos for a text label's `icon.kind="image"`
 threshold/dither art -- see render/types/text_label.py and render/images.py)
@@ -50,12 +51,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from PIL import Image
 from pydantic import BaseModel
 
 from labelmaker.api.deps import AppConfigDep, error_message
-from labelmaker.render.images import IMAGE_ID_RE, image_path, uploads_dir
+from labelmaker.render.images import IMAGE_ID_RE, image_path, thumb_path, uploads_dir
 
 _LOG = logging.getLogger(__name__)
 
@@ -65,6 +66,22 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 MAX_DECODED_PIXELS = 8_000_000  # 8MP
 _READ_CHUNK_BYTES = 1024 * 1024
 _ALLOWED_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
+
+# H6 (2026-08 review): the grid tiles in UploadsGallery.tsx are ~100-150px
+# `aspect-square` cells, but were pulling the full-resolution stored
+# original -- up to 16MB for a photo-like upload re-encoded as PNG -- to
+# paint each one. 256px longest edge is comfortably >2x any tile's CSS
+# size (retina-safe) while keeping the cached thumbnail itself trivially
+# small (tens of KB, not MB).
+THUMBNAIL_MAX_EDGE = 256
+
+# Uploads are immutable per image_id (delete+reupload always mints a fresh
+# uuid4().hex -- see upload_image below -- so no id is ever rewritten in
+# place); a long max-age is therefore safe even without any invalidation
+# story. The ETag/Last-Modified FileResponse adds automatically (from the
+# file's own stat()) still lets a conditional GET short-circuit to a 304
+# before this max-age is even consulted.
+_CACHE_CONTROL = "public, max-age=86400"
 
 
 class ImageUploadResponse(BaseModel):
@@ -301,14 +318,66 @@ async def list_images(config: AppConfigDep, page: int = 1, page_size: int = 20) 
         raise HTTPException(status_code=422, detail=error_message(exc)) from exc
 
 
+def _generate_thumbnail(source_path: Path, dest_path: Path) -> None:
+    """Render `source_path` (an already-normalized plain-RGB upload, see
+    `upload_image`'s docstring) down to at most `THUMBNAIL_MAX_EDGE` px on
+    its longest edge -- aspect ratio preserved, LANCZOS resampling (same
+    resample filter render/images.py's own `image_object()` resize uses),
+    written to `dest_path` as PNG. `Image.thumbnail()` only ever shrinks
+    (never upscales) in place, so a source already at/under the cap is
+    copied through unchanged rather than distorted -- that's what makes
+    caching the *dest_path* bytes byte-for-byte safe to serve regardless
+    of the source's own dimensions.
+
+    Caller's responsibility: `dest_path`'s parent directory need not exist
+    yet -- created here -- but `source_path` must already exist (this
+    function does not itself resolve/validate an `image_id`; both routes
+    below call `image_path()`/`thumb_path()` for that first).
+    """
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source_path) as img:
+        img.load()
+        thumb = img.copy()
+        thumb.thumbnail((THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE), Image.Resampling.LANCZOS)
+        thumb.save(dest_path, format="PNG")
+
+
 @router.get("/{image_id}")
-async def get_image(image_id: str, config: AppConfigDep) -> Response:
+async def get_image(image_id: str, config: AppConfigDep) -> FileResponse:
     path = _resolve_existing_image_path(image_id, config.data_dir)
-    return Response(content=path.read_bytes(), media_type="image/png")
+    # FileResponse (not Response(path.read_bytes())): streams the file off
+    # the event loop via the threadpool instead of buffering the whole
+    # multi-MB original into memory per request, and computes etag/
+    # last-modified from the file's own stat() for free -- see H6.
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": _CACHE_CONTROL})
+
+
+@router.get("/{image_id}/thumb")
+async def get_image_thumb(image_id: str, config: AppConfigDep) -> FileResponse:
+    """H6 fix: a bounded (`THUMBNAIL_MAX_EDGE`-px-longest-edge) counterpart
+    to `GET /api/images/{id}` for grid-tile-sized UI (UploadsGallery.tsx).
+    Generated once with PIL on first request and cached to disk at
+    `thumb_path()` (`data_dir/uploads/thumbs/{id}.png`) beside the
+    original; every request after that is a disk read, not a re-render.
+    Same 404-not-500 containment discipline as the full-image route --
+    `_resolve_existing_image_path` gates on the ORIGINAL existing first,
+    so a hostile/unknown/path-escaping `image_id` never reaches
+    `thumb_path()` at all.
+    """
+    path = _resolve_existing_image_path(image_id, config.data_dir)
+    thumb = thumb_path(image_id, config.data_dir)
+    if not thumb.is_file():
+        _generate_thumbnail(path, thumb)
+    return FileResponse(thumb, media_type="image/png", headers={"Cache-Control": _CACHE_CONTROL})
 
 
 @router.delete("/{image_id}", status_code=204)
 async def delete_image(image_id: str, config: AppConfigDep) -> Response:
     path = _resolve_existing_image_path(image_id, config.data_dir)
     path.unlink()
+    # Best-effort: the thumb may not exist yet (never requested) -- that's
+    # not an error, just nothing to clean up. thumb_path() itself can't
+    # raise here (image_id already passed IMAGE_ID_RE + containment via
+    # _resolve_existing_image_path above).
+    thumb_path(image_id, config.data_dir).unlink(missing_ok=True)
     return Response(status_code=204)

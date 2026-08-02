@@ -20,7 +20,7 @@ import zlib
 import pytest
 from PIL import Image
 
-from labelmaker.api.router_images import MAX_DECODED_PIXELS, MAX_UPLOAD_BYTES
+from labelmaker.api.router_images import MAX_DECODED_PIXELS, MAX_UPLOAD_BYTES, THUMBNAIL_MAX_EDGE
 
 
 def _png_bytes(width: int = 20, height: int = 10, color=(200, 50, 50)) -> bytes:
@@ -45,6 +45,17 @@ def _rgba_png_bytes(width: int = 10, height: int = 10) -> bytes:
     img = Image.new("RGBA", (width, height), (10, 20, 30, 0))  # fully transparent
     buf = io.BytesIO()
     img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _large_png_bytes(width: int = 800, height: int = 400, color=(90, 140, 210)) -> bytes:
+    """Well over THUMBNAIL_MAX_EDGE on its longest edge -- unlike the
+    module's default 20x10 `_png_bytes()`, a thumbnail generated from this
+    one is actually SMALLER than the source, exercising the real shrink
+    path rather than PIL's Image.thumbnail() no-op-on-already-small-source
+    case."""
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), color).save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -492,3 +503,191 @@ async def test_list_images_skips_symlinked_but_well_formed_id_not_500(app_and_cl
     body = resp.json()
     assert body["items"] == []
     assert body["total"] == 0
+
+
+# --- 9. GET /api/images/{id}/thumb (task H6) ---------------------------------
+
+
+async def test_get_image_thumb_returns_smaller_png_with_correct_headers(client):
+    upload = await client.post(
+        "/api/images",
+        files={"file": ("photo.png", io.BytesIO(_large_png_bytes(800, 400)), "image/png")},
+    )
+    image_id = upload.json()["image_id"]
+
+    resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.headers["cache-control"] == "public, max-age=86400"
+    assert "etag" in resp.headers
+    assert "last-modified" in resp.headers
+
+    decoded = Image.open(io.BytesIO(resp.content))
+    assert decoded.format == "PNG"
+    # 800x400 (2:1) downscaled to fit within THUMBNAIL_MAX_EDGE on its
+    # longest edge, aspect ratio preserved.
+    assert decoded.size == (THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE // 2)
+    assert max(decoded.size) <= THUMBNAIL_MAX_EDGE
+    assert len(resp.content) < len(_large_png_bytes(800, 400))
+
+
+async def test_get_image_thumb_does_not_upscale_a_small_source(client):
+    # _png_bytes()'s default 20x10 is already well under THUMBNAIL_MAX_EDGE
+    # -- PIL's Image.thumbnail() only ever shrinks, so the thumb route must
+    # return the SAME dimensions, not an upscaled 256-edge image.
+    upload = await client.post(
+        "/api/images", files={"file": ("small.png", io.BytesIO(_png_bytes(20, 10)), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp.status_code == 200
+    decoded = Image.open(io.BytesIO(resp.content))
+    assert decoded.size == (20, 10)
+
+
+async def test_get_image_thumb_is_cached_to_disk_beside_original(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+
+    upload = await client.post(
+        "/api/images",
+        files={"file": ("photo.png", io.BytesIO(_large_png_bytes(800, 400)), "image/png")},
+    )
+    image_id = upload.json()["image_id"]
+
+    thumb_file = data_dir / "uploads" / "thumbs" / f"{image_id}.png"
+    assert not thumb_file.is_file()  # not generated until first request
+
+    resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp.status_code == 200
+    assert thumb_file.is_file()
+
+    # Second request serves the cached file straight from disk -- same
+    # bytes, no re-render.
+    resp2 = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp2.content == resp.content
+
+
+async def test_get_image_thumb_unknown_id_returns_404(client):
+    resp = await client.get("/api/images/deadbeefdeadbeefdeadbeefdeadbeef/thumb")
+    assert resp.status_code == 404
+
+
+async def test_get_image_thumb_malformed_id_returns_404(client):
+    resp = await client.get("/api/images/not-a-valid-id/thumb")
+    assert resp.status_code == 404
+
+
+async def test_get_image_thumb_symlinked_but_well_formed_id_returns_404_not_500(app_and_client):
+    # Same containment-escape shape as the full-image 3b tests above: a
+    # regex-valid id whose resolved ORIGINAL path escapes uploads_dir/ must
+    # 404 before the thumb route ever calls thumb_path() or touches PIL.
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    outside = data_dir.parent / "outside-uploads-thumb"
+    outside.mkdir(parents=True, exist_ok=True)
+    secret = outside / "secret.png"
+    secret.write_bytes(_png_bytes())
+
+    image_id = uuid.uuid4().hex
+    (uploads / f"{image_id}.png").symlink_to(secret)
+
+    resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp.status_code == 404
+
+
+async def test_delete_image_removes_cached_thumb(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+
+    upload = await client.post(
+        "/api/images",
+        files={"file": ("photo.png", io.BytesIO(_large_png_bytes()), "image/png")},
+    )
+    image_id = upload.json()["image_id"]
+    thumb_file = data_dir / "uploads" / "thumbs" / f"{image_id}.png"
+
+    thumb_resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert thumb_resp.status_code == 200
+    assert thumb_file.is_file()
+
+    delete_resp = await client.delete(f"/api/images/{image_id}")
+    assert delete_resp.status_code == 204
+    assert not thumb_file.is_file()
+
+    # And the route 404s afterward rather than re-generating from a
+    # (deleted) original.
+    resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp.status_code == 404
+
+
+async def test_delete_image_without_a_thumb_ever_requested_still_succeeds(client):
+    # DELETE must not fail just because no one ever hit the /thumb route
+    # for this image -- thumb_path().unlink(missing_ok=True) is the whole
+    # point.
+    upload = await client.post(
+        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    resp = await client.delete(f"/api/images/{image_id}")
+    assert resp.status_code == 204
+
+
+async def test_thumb_regenerated_after_delete_and_reupload(app_and_client):
+    # Delete + reupload the SAME bytes always mints a fresh uuid4().hex id
+    # (see upload_image), so this isn't really "the same thumb file
+    # changing contents" -- it's confirming that cycle behaves cleanly
+    # end-to-end: the old id's thumb is gone, the new id has none cached
+    # yet, and requesting it generates a correct thumb for the NEW id
+    # without any cross-contamination from the old one.
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    payload = _large_png_bytes(800, 400)
+
+    first = await client.post(
+        "/api/images", files={"file": ("photo.png", io.BytesIO(payload), "image/png")}
+    )
+    first_id = first.json()["image_id"]
+    first_thumb_resp = await client.get(f"/api/images/{first_id}/thumb")
+    assert first_thumb_resp.status_code == 200
+    first_thumb_file = data_dir / "uploads" / "thumbs" / f"{first_id}.png"
+    assert first_thumb_file.is_file()
+
+    delete_resp = await client.delete(f"/api/images/{first_id}")
+    assert delete_resp.status_code == 204
+    assert not first_thumb_file.is_file()
+
+    second = await client.post(
+        "/api/images", files={"file": ("photo.png", io.BytesIO(payload), "image/png")}
+    )
+    second_id = second.json()["image_id"]
+    assert second_id != first_id
+    second_thumb_file = data_dir / "uploads" / "thumbs" / f"{second_id}.png"
+    assert not second_thumb_file.is_file()  # not generated until requested
+
+    second_thumb_resp = await client.get(f"/api/images/{second_id}/thumb")
+    assert second_thumb_resp.status_code == 200
+    assert second_thumb_file.is_file()
+    decoded = Image.open(io.BytesIO(second_thumb_resp.content))
+    assert decoded.size == (THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE // 2)
+
+
+# --- 10. FileResponse headers on GET /api/images/{id} (task H6) -------------
+
+
+async def test_get_image_full_route_carries_cache_and_conditional_headers(client):
+    upload = await client.post(
+        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    resp = await client.get(f"/api/images/{image_id}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.headers["cache-control"] == "public, max-age=86400"
+    assert "etag" in resp.headers
+    assert "last-modified" in resp.headers
