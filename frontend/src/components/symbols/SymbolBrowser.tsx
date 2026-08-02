@@ -182,17 +182,30 @@ export function SymbolBrowser(props: SymbolBrowserProps) {
   const activeId = (markedId && visible.some((s) => s.id === markedId) ? markedId : visible[0]?.id) ?? null;
 
   function focusByIndex(index: number) {
-    if (filtered.length === 0) return;
-    const wrapped = (index + filtered.length) % filtered.length;
-    const target = filtered[wrapped]!;
-    if (wrapped >= windowCount) {
+    // H7 (docs/code-review-2026-08.md): this used to wrap out-of-range
+    // indices with `(index + filtered.length) % filtered.length`, so
+    // ArrowUp/ArrowLeft on the FIRST rendered option resolved to
+    // `filtered.length - 1` -- past the rendered edge, which the branch
+    // below then grows the window to cover. With "All" active against the
+    // full catalog that's the entire filtered list committed in one React
+    // pass (8362 nodes against the real catalog, from a single keypress).
+    // No wraparound: an index outside [0, filtered.length) is simply not a
+    // valid target, the same way ArrowUp on the first option of a plain
+    // HTML <select> does nothing rather than looping around to the last.
+    // This also covers the old `filtered.length === 0` guard (index can
+    // never satisfy `>= 0 && < 0`).
+    if (index < 0 || index >= filtered.length) return;
+    const target = filtered[index]!;
+    if (index >= windowCount) {
       // Walked past the rendered edge -- grow the window enough to cover
       // this index (rounded up to a WINDOW_SIZE boundary, the same
-      // granularity the sentinel itself grows by) and focus it once it
-      // renders (the pendingFocusId effect above does that the instant it
-      // shows up).
+      // granularity the sentinel itself grows by -- forward nav only ever
+      // walks one option past the current edge at a time, so this can
+      // only ever add ONE WINDOW_SIZE step) and focus it once it renders
+      // (the pendingFocusId effect above does that the instant it shows
+      // up).
       pendingFocusIdRef.current = target.id;
-      setWindowCount(Math.min(filtered.length, Math.ceil((wrapped + 1) / WINDOW_SIZE) * WINDOW_SIZE));
+      setWindowCount(Math.min(filtered.length, Math.ceil((index + 1) / WINDOW_SIZE) * WINDOW_SIZE));
       return;
     }
     buttonRefs.current.get(target.id)?.focus();

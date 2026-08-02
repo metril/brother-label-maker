@@ -28,11 +28,62 @@ export const fontsHandler = http.get("/api/fonts", () => HttpResponse.json(fonts
  * HSe -- B2: GET /api/tapes). TapeSelector filters this down by family. */
 export const tapesHandler = http.get("/api/tapes", () => HttpResponse.json(tapesFixture));
 
-/** The full symbols catalog fixture (858 entries as of commit 7's manifest
- * v2 expansion: task 2.7's original 60 bare-id icons plus `material_*`/
- * `phosphor_*` entries) -- regenerate with `npm run fixtures` (backend must
- * be running) whenever the pipeline's curated id lists change. */
-export const symbolsHandler = http.get("/api/symbols", () => HttpResponse.json(symbolsFixture));
+/** How many entries to keep per (category, source) bucket when building the
+ * trimmed default symbols slice below -- see `trimmedSymbolsFixture`'s own
+ * comment for why this exists. 8 keeps the slice in the low hundreds
+ * (currently 302 of 8362 as the fixture stands) while still giving every
+ * category/source combination several representatives to search, filter,
+ * and window against. */
+const TRIMMED_SYMBOLS_PER_BUCKET = 8;
+
+/** H9 (docs/code-review-2026-08.md): the symbols fixture grew 858 -> 8362
+ * entries (2.1 MB) this round, and every one of the 48 test files pulls it
+ * in through this module's `defaultHandlers`. Re-serializing all 8362
+ * objects on every `GET /api/symbols` (plus react-query's structural
+ * sharing and jsdom rendering ~96 `<img>` grid cells on first paint) pushed
+ * the three symbol-catalog suites (SymbolBrowser/Library/IconField) right
+ * up against testing-library's 1000ms `findBy` default -- reproduced at
+ * 12/20 failures with no artificial load.
+ *
+ * Those suites don't need the full catalog to exercise search/category/
+ * windowing/keyboard-nav -- they need every category and every source
+ * ("id prefix") still represented, so this walks the full fixture (already
+ * globally sorted by id -- see the windowing tests that depend on that
+ * order being preserved) and keeps only the first
+ * `TRIMMED_SYMBOLS_PER_BUCKET` entries per (category, source) bucket.
+ * Filtering a sorted array preserves relative order, so the result is
+ * still sorted by id. Entirely content-relative -- no index or
+ * total-count assumption anywhere in it -- so it stays correct against
+ * whatever the sibling catalog-regen agent ships next: the bucket keys and
+ * their membership come from the data itself, not a hardcoded list.
+ *
+ * Exported so SymbolBrowser.test.tsx / Library.test.tsx / IconField.test.tsx
+ * can derive their own expected counts and named picks from the SAME slice
+ * this handler actually serves, instead of the full (and, for those
+ * suites' purposes, irrelevant) 8362-entry fixture. The one test that
+ * legitimately needs the full catalog (SymbolBrowser.test.tsx's dedicated
+ * scale test for this same finding) overrides this handler with
+ * `server.use(...)` and imports the raw fixture directly. */
+function buildTrimmedSymbolsSlice<T extends { category: string; source: string }>(full: T[]): T[] {
+  const seenPerBucket = new Map<string, number>();
+  const trimmed: T[] = [];
+  for (const symbol of full) {
+    const bucket = `${symbol.category}|${symbol.source}`;
+    const seen = seenPerBucket.get(bucket) ?? 0;
+    if (seen < TRIMMED_SYMBOLS_PER_BUCKET) {
+      trimmed.push(symbol);
+      seenPerBucket.set(bucket, seen + 1);
+    }
+  }
+  return trimmed;
+}
+
+export const trimmedSymbolsFixture = buildTrimmedSymbolsSlice(symbolsFixture);
+
+/** Serves the trimmed slice above by default -- see its comment for why.
+ * Tests that specifically need the full 8362-entry catalog (the H9 scale
+ * test) override this with `server.use(...)`. */
+export const symbolsHandler = http.get("/api/symbols", () => HttpResponse.json(trimmedSymbolsFixture));
 
 export const symbolSvgHandler = http.get("/api/symbols/:id", () =>
   HttpResponse.xml('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>'),

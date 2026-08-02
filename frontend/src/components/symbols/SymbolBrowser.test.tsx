@@ -2,8 +2,11 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 import { mockIntersectionObserverInstances } from "../../test/setup";
 import { renderWithQueryClient } from "../../test/utils";
+import { server } from "../../test/msw/server";
+import { trimmedSymbolsFixture } from "../../test/msw/handlers";
 import symbolsFixture from "../../test/fixtures/symbols.json";
 import { SymbolBrowser } from "./SymbolBrowser";
 
@@ -12,17 +15,60 @@ import { SymbolBrowser } from "./SymbolBrowser";
  * assertions below stay correct however big/composed the fixture is --
  * the fixture grew from 858 to 8362 entries (5 new icon sources) between
  * commits e62516b and 566655d, and hardcoded counts/identifiers went
- * stale along with it. */
+ * stale along with it. Runs against `trimmedSymbolsFixture` (H9,
+ * docs/code-review-2026-08.md) -- the same slice test/msw/handlers.ts's
+ * default `symbolsHandler` actually serves -- not the raw 8362-entry
+ * fixture; the one test in this file that needs the full catalog
+ * (the scale test at the bottom) overrides the handler and reasons about
+ * `symbolsFixture` directly instead. */
 function filterFixture(category: string, query: string) {
   const q = query.trim().toLowerCase();
-  return symbolsFixture.filter((s) => {
+  return trimmedSymbolsFixture.filter((s) => {
     if (category !== "all" && s.category !== category) return false;
     if (!q) return true;
     return s.id.includes(q) || s.name.toLowerCase().includes(q) || s.tags.some((t) => t.includes(q));
   });
 }
 
-const ALL_COUNT_TEXT = `${symbolsFixture.length} symbols`;
+/** Mirrors the count line's own singular/plural rendering (`{n} symbol{n
+ * === 1 ? "" : "s"}`) -- the trimmed slice's per-bucket cap means a
+ * category+search combination can genuinely narrow to exactly one match
+ * (unlike the raw fixture, where every filtered count used in this file
+ * happened to be > 1), so a hardcoded " symbols" would go stale the moment
+ * that happens. */
+function countText(n: number) {
+  return `${n} symbol${n === 1 ? "" : "s"}`;
+}
+
+/** Mirrors SymbolBrowser's own (non-exported) CATEGORY_LABELS map, only for
+ * the categories this file's picks actually land in. */
+const CATEGORY_LABELS: Record<string, string> = {
+  general: "General",
+  electrical: "Electrical",
+  network: "Network",
+  av: "AV",
+  arrow: "Arrow",
+  misc: "Misc",
+  safety: "Safety",
+};
+
+const ALL_COUNT_TEXT = countText(trimmedSymbolsFixture.length);
+
+/** The trimmed slice packs the head of every (category, source) bucket
+ * together, which occasionally puts two icons sharing a plain generic name
+ * (e.g. "Add", contributed once by the original bare-id set and again by
+ * one of the newer prefixed sources) inside the same window -- fine for
+ * the component (ids are always unique) but ambiguous for `getByRole(...,
+ * { name })` in a test. Picks the first `count` entries (in the slice's
+ * own id order, so still well inside the initial window) whose name is
+ * unique across the whole slice, so name-based queries below are
+ * unambiguous by construction however the sibling catalog regen reshuffles
+ * bucket contents. */
+function firstUniquelyNamed(count: number) {
+  const nameCounts = new Map<string, number>();
+  for (const s of trimmedSymbolsFixture) nameCounts.set(s.name, (nameCounts.get(s.name) ?? 0) + 1);
+  return trimmedSymbolsFixture.filter((s) => nameCounts.get(s.name) === 1).slice(0, count);
+}
 
 describe("SymbolBrowser: browse mode", () => {
   it("renders the full catalog with a search box and category tabs, no selection chip", async () => {
@@ -47,12 +93,10 @@ describe("SymbolBrowser: browse mode", () => {
 
     await user.type(screen.getByLabelText("Search symbols"), "off");
     const offMatches = filterFixture("all", "off");
-    expect(screen.getByText(`${offMatches.length} symbols`)).toBeInTheDocument();
-    // "Camera Video Off" (bootstrap_camera_video_off) -- unlike "Alarm Off"
-    // pre-regeneration, its name is unique across the whole catalog (several
-    // new sources duplicate names like "Wifi Off"/"Bolt" across id
-    // prefixes) and it sorts early enough by id to land inside the initial
-    // 96-item window.
+    expect(screen.getByText(countText(offMatches.length))).toBeInTheDocument();
+    // "Camera Video Off" (bootstrap_camera_video_off) -- its name is unique
+    // across the trimmed slice and it sorts early enough by id to land
+    // inside the initial 96-item window.
     expect(await screen.findByRole("option", { name: "Camera Video Off" })).toBeInTheDocument();
   });
 
@@ -63,20 +107,27 @@ describe("SymbolBrowser: browse mode", () => {
 
     await user.click(screen.getByRole("radio", { name: "Electrical" }));
     const electrical = filterFixture("electrical", "");
-    expect(screen.getByText(`${electrical.length} symbols`)).toBeInTheDocument();
+    expect(screen.getByText(countText(electrical.length))).toBeInTheDocument();
     // "Electrical Services" is a uniquely-named electrical icon within the
     // initial window -- "Bolt" (the pre-regeneration example) now names
     // three separate icons (material/lucide/tabler sources), so it's no
     // longer safe to query by that name alone.
     expect(await screen.findByRole("option", { name: "Electrical Services" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Assignment Globe" })).not.toBeInTheDocument();
+    // "AC Unit" is a uniquely-named general-category icon in the trimmed
+    // slice -- absent once filtered to Electrical, proving the tab
+    // actually filters rather than just relabeling.
+    expect(screen.queryByRole("option", { name: "AC Unit" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "All" }));
     await user.type(screen.getByLabelText("Search symbols"), "off");
     await user.click(screen.getByRole("radio", { name: "Network" }));
     const networkOff = filterFixture("network", "off");
-    expect(screen.getByText(`${networkOff.length} symbols`)).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Cellular Off" })).toBeInTheDocument();
+    expect(screen.getByText(countText(networkOff.length))).toBeInTheDocument();
+    // "Bluetooth Off" (lucide_bluetooth_off) -- the trimmed slice's
+    // per-bucket cap only keeps one network+"off" match, so this narrows to
+    // exactly 1 (see `countText`'s own comment on why the count-line
+    // assertion above can't hardcode "symbols").
+    expect(await screen.findByRole("option", { name: "Bluetooth Off" })).toBeInTheDocument();
     // "Camera Video Off" matched the search term but isn't Network-category.
     expect(screen.queryByRole("option", { name: "Camera Video Off" })).not.toBeInTheDocument();
   });
@@ -98,10 +149,13 @@ describe("SymbolBrowser: browse mode", () => {
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
     await screen.findByText(ALL_COUNT_TEXT);
 
-    // symbols.json is sorted by id; entries 95/96 (0-indexed) straddle the
-    // initial 96-item window boundary.
-    const lastVisible = symbolsFixture[95]!;
-    const firstBeyondWindow = symbolsFixture[96]!;
+    // trimmedSymbolsFixture is a content-relative subset of symbols.json,
+    // which is sorted by id -- filtering a sorted array preserves relative
+    // order, so the trimmed slice is sorted by id too, and entries 95/96
+    // (0-indexed) straddle the initial 96-item window boundary the same
+    // way they would against the raw fixture.
+    const lastVisible = trimmedSymbolsFixture[95]!;
+    const firstBeyondWindow = trimmedSymbolsFixture[96]!;
 
     screen.getByRole("option", { name: lastVisible.name }).focus();
     await user.keyboard("{ArrowRight}");
@@ -115,16 +169,16 @@ describe("SymbolBrowser: browse mode", () => {
   it("clicking an icon opens a detail panel with its name/id/category/tags/source/license, and clicking it again closes it", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
-    // symbolsFixture[0] ("add") is well inside the initial window and has a
-    // known category/tags/source/license to assert against.
-    const first = symbolsFixture[0]!;
+    // A uniquely-named entry well inside the initial window, with a known
+    // category/tags/source/license to assert against.
+    const first = firstUniquelyNamed(1)[0]!;
     const option = await screen.findByRole("option", { name: first.name });
 
     await user.click(option);
 
     const panel = screen.getByRole("group", { name: `${first.name} details` });
     expect(within(panel).getByText(first.id)).toBeInTheDocument();
-    expect(within(panel).getByText("Misc")).toBeInTheDocument();
+    expect(within(panel).getByText(CATEGORY_LABELS[first.category] ?? first.category)).toBeInTheDocument();
     expect(within(panel).getByText(first.tags.join(", "))).toBeInTheDocument();
     expect(within(panel).getByText(`${first.source} · ${first.license}`)).toBeInTheDocument();
     expect(option).toHaveAttribute("aria-selected", "true");
@@ -137,8 +191,7 @@ describe("SymbolBrowser: browse mode", () => {
   it("the detail panel's own Close button closes it, and opening a different icon swaps the panel", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
-    const first = symbolsFixture[0]!;
-    const second = symbolsFixture[1]!;
+    const [first, second] = firstUniquelyNamed(2) as [(typeof trimmedSymbolsFixture)[number], (typeof trimmedSymbolsFixture)[number]];
 
     await user.click(await screen.findByRole("option", { name: first.name }));
     expect(screen.getByRole("group", { name: `${first.name} details` })).toBeInTheDocument();
@@ -177,9 +230,9 @@ describe("SymbolBrowser: select mode", () => {
     renderWithQueryClient(<Harness onSelectSpy={onSelectSpy} />);
 
     // "electrical services" (unlike "bolt", pre-regeneration) matches
-    // exactly one icon in the 8362-entry fixture -- several new sources
-    // add their own "Bolt"-named icons, which would make a single-result
-    // query ambiguous.
+    // exactly one icon in the trimmed slice -- several new sources add
+    // their own "Bolt"-named icons, which would make a single-result query
+    // ambiguous.
     await user.type(await screen.findByLabelText("Search symbols"), "electrical services");
     const match = await screen.findByRole("option", { name: "Electrical Services" });
     await user.click(match);
@@ -202,4 +255,66 @@ describe("SymbolBrowser: select mode", () => {
     expect(onClearSpy).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
   });
+});
+
+describe("SymbolBrowser: H7 regression -- arrow nav at the first option", () => {
+  it("ArrowUp on the first rendered option does not grow the window past one WINDOW_SIZE step", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<SymbolBrowser mode="browse" />);
+    await screen.findByText(ALL_COUNT_TEXT);
+
+    const initialOptions = screen.getAllByRole("option");
+    const initialCount = initialOptions.length;
+    expect(initialCount).toBe(96);
+    // Roving tabindex's fallback tab stop with nothing marked/selected is
+    // the first rendered option (SymbolBrowser's own `activeId` fallback)
+    // -- focus it directly, the same node a Tab keypress into the listbox
+    // would land on, then walk backward off the front edge. (ArrowLeft on
+    // the first option takes the identical `focusByIndex(index - 1)` path
+    // -- see handleKeyDown -- so this one direction exercises the fix for
+    // both.)
+    initialOptions[0]!.focus();
+
+    await user.keyboard("{ArrowUp}");
+
+    // Before the fix (H7, docs/code-review-2026-08.md): focusByIndex(-1)
+    // wrapped to `filtered.length - 1` and grew the window in one step to
+    // cover it -- i.e. the ENTIRE filtered set (8362 nodes against the
+    // real catalog). Growth everywhere else in this component (forward
+    // nav past the rendered edge, the IntersectionObserver sentinel) only
+    // ever adds one WINDOW_SIZE (96) step at a time, so this must too.
+    const afterCount = screen.getAllByRole("option").length;
+    expect(afterCount).toBeLessThanOrEqual(initialCount + 96);
+    // The trimmed slice (302 entries as the fixture stands) is well past
+    // one growth step beyond the initial window (192) -- if the window
+    // ever jumped to the full filtered set here, this is what would catch
+    // it, independent of exactly how many entries the slice trims to.
+    expect(afterCount).toBeLessThan(trimmedSymbolsFixture.length);
+  });
+});
+
+describe("SymbolBrowser: full-catalog scale (H9)", () => {
+  it("windowed grid renders only the initial slice against the real, unsliced 8362-entry catalog", async () => {
+    // The one test in this suite that legitimately needs the full fixture
+    // (see trimmedSymbolsFixture's own comment in test/msw/handlers.ts) --
+    // overrides the default (trimmed) symbolsHandler for this test only. A
+    // generous findBy/test timeout is legitimate here specifically because
+    // this is deliberately exercising the full 2.1 MB payload's
+    // parse/serialize/structural-sharing/render cost that H9 was about in
+    // the first place.
+    server.use(http.get("/api/symbols", () => HttpResponse.json(symbolsFixture)));
+    const user = userEvent.setup();
+    renderWithQueryClient(<SymbolBrowser mode="browse" />);
+
+    expect(await screen.findByText(countText(symbolsFixture.length), {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(96);
+
+    // Belt-and-suspenders for H7 at the exact scale the review reproduced
+    // it at (96 -> 8362 options after a single ArrowUp on the first
+    // option) -- the clamp fix must hold here, not just against the
+    // trimmed default slice used by the regression test above.
+    screen.getAllByRole("option")[0]!.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(96 + 96);
+  }, 10000);
 });

@@ -2104,18 +2104,6 @@
     "license": "MIT"
   },
   {
-    "id": "bootstrap_cassette",
-    "name": "Cassette",
-    "tags": [
-      "cassette",
-      "misc"
-    ],
-    "path": "bootstrap_cassette.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
     "id": "bootstrap_cc_circle",
     "name": "Cc Circle",
     "tags": [
@@ -3069,19 +3057,6 @@
       "misc"
     ],
     "path": "bootstrap_cup.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_cup_hot",
-    "name": "Cup Hot",
-    "tags": [
-      "cup",
-      "hot",
-      "misc"
-    ],
-    "path": "bootstrap_cup_hot.svg",
     "category": "misc",
     "source": "bootstrap-icons@1.13.1",
     "license": "MIT"
@@ -5463,57 +5438,6 @@
     "license": "MIT"
   },
   {
-    "id": "bootstrap_house",
-    "name": "House",
-    "tags": [
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_add",
-    "name": "House Add",
-    "tags": [
-      "add",
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house_add.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_check",
-    "name": "House Check",
-    "tags": [
-      "check",
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house_check.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_dash",
-    "name": "House Dash",
-    "tags": [
-      "dash",
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house_dash.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
     "id": "bootstrap_house_door",
     "name": "House Door",
     "tags": [
@@ -5522,110 +5446,6 @@
       "misc"
     ],
     "path": "bootstrap_house_door.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_down",
-    "name": "House Down",
-    "tags": [
-      "down",
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house_down.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_exclamation",
-    "name": "House Exclamation",
-    "tags": [
-      "exclamation",
-      "house",
-      "safety"
-    ],
-    "path": "bootstrap_house_exclamation.svg",
-    "category": "safety",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_gear",
-    "name": "House Gear",
-    "tags": [
-      "gear",
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house_gear.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_heart",
-    "name": "House Heart",
-    "tags": [
-      "heart",
-      "house",
-      "misc"
-    ],
-    "path": "bootstrap_house_heart.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_lock",
-    "name": "House Lock",
-    "tags": [
-      "house",
-      "lock",
-      "safety"
-    ],
-    "path": "bootstrap_house_lock.svg",
-    "category": "safety",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_slash",
-    "name": "House Slash",
-    "tags": [
-      "house",
-      "misc",
-      "slash"
-    ],
-    "path": "bootstrap_house_slash.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_up",
-    "name": "House Up",
-    "tags": [
-      "house",
-      "misc",
-      "up"
-    ],
-    "path": "bootstrap_house_up.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_house_x",
-    "name": "House X",
-    "tags": [
-      "house",
-      "misc",
-      "x"
-    ],
-    "path": "bootstrap_house_x.svg",
     "category": "misc",
     "source": "bootstrap-icons@1.13.1",
     "license": "MIT"
@@ -5773,18 +5593,6 @@
       "misc"
     ],
     "path": "bootstrap_laptop.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_layers",
-    "name": "Layers",
-    "tags": [
-      "layers",
-      "misc"
-    ],
-    "path": "bootstrap_layers.svg",
     "category": "misc",
     "source": "bootstrap-icons@1.13.1",
     "license": "MIT"
@@ -7006,19 +6814,6 @@
     "license": "MIT"
   },
   {
-    "id": "bootstrap_rocket_takeoff",
-    "name": "Rocket Takeoff",
-    "tags": [
-      "misc",
-      "rocket",
-      "takeoff"
-    ],
-    "path": "bootstrap_rocket_takeoff.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
     "id": "bootstrap_router",
     "name": "Router",
     "tags": [
@@ -7295,35 +7090,6 @@
     "license": "MIT"
   },
   {
-    "id": "bootstrap_sign_dead_end",
-    "name": "Sign Dead End",
-    "tags": [
-      "dead",
-      "end",
-      "misc",
-      "sign"
-    ],
-    "path": "bootstrap_sign_dead_end.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_sign_do_not_enter",
-    "name": "Sign Do Not Enter",
-    "tags": [
-      "do",
-      "enter",
-      "misc",
-      "not",
-      "sign"
-    ],
-    "path": "bootstrap_sign_do_not_enter.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
     "id": "bootstrap_sign_intersection",
     "name": "Sign Intersection",
     "tags": [
@@ -7451,32 +7217,6 @@
     "license": "MIT"
   },
   {
-    "id": "bootstrap_sign_railroad",
-    "name": "Sign Railroad",
-    "tags": [
-      "misc",
-      "railroad",
-      "sign"
-    ],
-    "path": "bootstrap_sign_railroad.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_sign_stop",
-    "name": "Sign Stop",
-    "tags": [
-      "misc",
-      "sign",
-      "stop"
-    ],
-    "path": "bootstrap_sign_stop.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
     "id": "bootstrap_sign_stop_lights",
     "name": "Sign Stop Lights",
     "tags": [
@@ -7544,19 +7284,6 @@
       "turn"
     ],
     "path": "bootstrap_sign_turn_slight_right.svg",
-    "category": "misc",
-    "source": "bootstrap-icons@1.13.1",
-    "license": "MIT"
-  },
-  {
-    "id": "bootstrap_sign_yield",
-    "name": "Sign Yield",
-    "tags": [
-      "misc",
-      "sign",
-      "yield"
-    ],
-    "path": "bootstrap_sign_yield.svg",
     "category": "misc",
     "source": "bootstrap-icons@1.13.1",
     "license": "MIT"
@@ -24172,19 +23899,6 @@
     "license": "MIT"
   },
   {
-    "id": "fluent_image_globe",
-    "name": "Image Globe",
-    "tags": [
-      "av",
-      "globe",
-      "image"
-    ],
-    "path": "fluent_image_globe.svg",
-    "category": "av",
-    "source": "fluentui-svg-icons@1.1.334",
-    "license": "MIT"
-  },
-  {
     "id": "fluent_image_multiple",
     "name": "Image Multiple",
     "tags": [
@@ -33718,19 +33432,6 @@
       "slide"
     ],
     "path": "fluent_slide_content.svg",
-    "category": "misc",
-    "source": "fluentui-svg-icons@1.1.334",
-    "license": "MIT"
-  },
-  {
-    "id": "fluent_slide_eraser",
-    "name": "Slide Eraser",
-    "tags": [
-      "eraser",
-      "misc",
-      "slide"
-    ],
-    "path": "fluent_slide_eraser.svg",
     "category": "misc",
     "source": "fluentui-svg-icons@1.1.334",
     "license": "MIT"
@@ -95995,20 +95696,6 @@
     "license": "MIT"
   },
   {
-    "id": "tabler_arrow_big_left_line",
-    "name": "Arrow Big Left Line",
-    "tags": [
-      "arrow",
-      "big",
-      "left",
-      "line"
-    ],
-    "path": "tabler_arrow_big_left_line.svg",
-    "category": "arrow",
-    "source": "tabler-icons@3.46.0",
-    "license": "MIT"
-  },
-  {
     "id": "tabler_arrow_big_left_lines",
     "name": "Arrow Big Left Lines",
     "tags": [
@@ -101343,19 +101030,6 @@
     "license": "MIT"
   },
   {
-    "id": "tabler_escalator_up",
-    "name": "Escalator Up",
-    "tags": [
-      "escalator",
-      "misc",
-      "up"
-    ],
-    "path": "tabler_escalator_up.svg",
-    "category": "misc",
-    "source": "tabler-icons@3.46.0",
-    "license": "MIT"
-  },
-  {
     "id": "tabler_exchange",
     "name": "Exchange",
     "tags": [
@@ -106291,18 +105965,6 @@
     "license": "MIT"
   },
   {
-    "id": "tabler_sitemap",
-    "name": "Sitemap",
-    "tags": [
-      "misc",
-      "sitemap"
-    ],
-    "path": "tabler_sitemap.svg",
-    "category": "misc",
-    "source": "tabler-icons@3.46.0",
-    "license": "MIT"
-  },
-  {
     "id": "tabler_sort_ascending_2",
     "name": "Sort Ascending 2",
     "tags": [
@@ -108250,18 +107912,6 @@
       "sunglasses"
     ],
     "path": "tabler_sunglasses.svg",
-    "category": "misc",
-    "source": "tabler-icons@3.46.0",
-    "license": "MIT"
-  },
-  {
-    "id": "tabler_sunrise",
-    "name": "Sunrise",
-    "tags": [
-      "misc",
-      "sunrise"
-    ],
-    "path": "tabler_sunrise.svg",
     "category": "misc",
     "source": "tabler-icons@3.46.0",
     "license": "MIT"

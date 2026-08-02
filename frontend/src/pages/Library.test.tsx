@@ -3,14 +3,16 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Library } from "./Library";
 import { renderWithProviders } from "../test/utils";
-import symbolsFixture from "../test/fixtures/symbols.json";
+import { trimmedSymbolsFixture } from "../test/msw/handlers";
 
-// Read off the fixture rather than hardcoded (the fixture grew from 858 to
-// 8362 entries between commits e62516b and 566655d) -- this page's own
-// count-line assertion just proves the browse grid is mounted at all
-// (see the comment below), so the exact number is incidental to what this
-// test verifies.
-const ALL_COUNT_TEXT = `${symbolsFixture.length} symbols`;
+// Read off the trimmed slice (H9, docs/code-review-2026-08.md) -- the same
+// slice test/msw/handlers.ts's default symbolsHandler actually serves --
+// rather than hardcoded, since this page's own count-line assertion just
+// proves the browse grid is mounted at all (see the comment below), so the
+// exact number is incidental to what this test verifies. (This page has no
+// need for the full 8362-entry catalog: SymbolBrowser.test.tsx already
+// covers behavior at that scale.)
+const ALL_COUNT_TEXT = `${trimmedSymbolsFixture.length} symbol${trimmedSymbolsFixture.length === 1 ? "" : "s"}`;
 
 describe("Library page", () => {
   it("renders the Symbols tab by default, with the browse grid from the symbols fixture", async () => {
