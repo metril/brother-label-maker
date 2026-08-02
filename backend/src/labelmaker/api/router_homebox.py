@@ -21,10 +21,11 @@ the base URL embedded in label QR codes -- following HomeBox's own URL
 scheme (base/item/{uuid}, base/a/{assetId}) but NEVER HomeBox's own
 fragile base-URL resolution chain (research doc: Hostname setting ->
 X-Forwarded-Host -> Referer -> fallback, easily wrong behind a proxy).
-When unset it falls back to config.homebox_url, which is right whenever
-the app reaches HomeBox by its public URL; deployments that reach HomeBox
-by an internal address set this to the public one so printed QR codes
-still resolve for phones.
+When unset it falls back to the settings overlay's EFFECTIVE homebox_url
+(task 4.5: env value, or a DB override set from the Settings page), which
+is right whenever the app reaches HomeBox by its public URL; deployments
+that reach HomeBox by an internal address set this to the public one so
+printed QR codes still resolve for phones.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from collections.abc import Awaitable
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from labelmaker.api.deps import AppConfigDep, DbDep, HomeBoxDep
+from labelmaker.api.deps import DbDep, HomeBoxDep, SettingsDep
 from labelmaker.homebox import (
     Entity,
     EntityPage,
@@ -77,15 +78,20 @@ async def _proxy[T](call: Awaitable[T]) -> T:
 
 
 @router.get("/homebox/status")
-async def homebox_status(config: AppConfigDep) -> dict:
+async def homebox_status(settings: SettingsDep) -> dict:
     """Always 200 -- the frontend's show-or-hide signal for HomeBox UI.
 
     Beyond reachability this also runs the client's generation probe, so a
     pre-v0.26 HomeBox reports as reachable-but-unhealthy with the upgrade
     instructions in `error` (plan risk #4) instead of looking healthy here
     and then 502ing on every browse call.
+
+    Reads the settings overlay's EFFECTIVE homebox_url/homebox_api_key
+    (task 4.5), not AppConfig directly, so a DB-stored override is
+    reflected here immediately, same as `app.state.homebox` itself.
     """
-    if not (config.homebox_url and config.homebox_api_key):
+    effective = settings.effective()
+    if not (effective.homebox_url and effective.homebox_api_key):
         return {"configured": False, "reachable": None, "healthy": None, "version": None,
                 "error": None}
     from labelmaker.homebox import HomeBoxClient  # narrow import for monkeypatching in tests
@@ -94,7 +100,7 @@ async def homebox_status(config: AppConfigDep) -> dict:
     try:
         # A fresh short-timeout client rather than app.state's: a hung
         # HomeBox shouldn't hold this endpoint for the full default timeout.
-        probe_client = HomeBoxClient(config.homebox_url, config.homebox_api_key, timeout=5.0)
+        probe_client = HomeBoxClient(effective.homebox_url, effective.homebox_api_key, timeout=5.0)
         try:
             status = await probe_client.status()
             version = status.build.version or None
@@ -192,9 +198,14 @@ class HomeBoxSettingsUpdate(BaseModel):
         return value
 
 
-async def _settings_response(db: DbDep, config: AppConfigDep) -> HomeBoxSettings:
+async def _settings_response(db: DbDep, settings: SettingsDep) -> HomeBoxSettings:
     stored = await db.get_setting(QR_BASE_URL_KEY)
-    fallback = config.homebox_url.rstrip("/") if config.homebox_url else None
+    # task 4.5: falls back to the settings overlay's EFFECTIVE homebox_url
+    # (override or env), not AppConfig directly -- an operator who
+    # overrides homebox_url from the Settings page gets a matching QR
+    # fallback without also having to set qr_base_url.
+    effective = settings.effective()
+    fallback = effective.homebox_url.rstrip("/") if effective.homebox_url else None
     return HomeBoxSettings(
         qr_base_url=stored,
         effective_qr_base_url=stored or fallback,
@@ -202,13 +213,13 @@ async def _settings_response(db: DbDep, config: AppConfigDep) -> HomeBoxSettings
 
 
 @router.get("/homebox/settings")
-async def get_homebox_settings(db: DbDep, config: AppConfigDep) -> HomeBoxSettings:
-    return await _settings_response(db, config)
+async def get_homebox_settings(db: DbDep, settings: SettingsDep) -> HomeBoxSettings:
+    return await _settings_response(db, settings)
 
 
 @router.put("/homebox/settings")
 async def put_homebox_settings(
-    body: HomeBoxSettingsUpdate, db: DbDep, config: AppConfigDep
+    body: HomeBoxSettingsUpdate, db: DbDep, settings: SettingsDep
 ) -> HomeBoxSettings:
     await db.set_setting(QR_BASE_URL_KEY, body.qr_base_url)
-    return await _settings_response(db, config)
+    return await _settings_response(db, settings)

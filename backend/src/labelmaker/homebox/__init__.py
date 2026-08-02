@@ -17,6 +17,7 @@ from labelmaker.homebox.client import (
     PathSegment,
     TagSummary,
     TreeItem,
+    build_client,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "PathSegment",
     "TagSummary",
     "TreeItem",
+    "build_client",
 ]

@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import type { SettingRow, SettingsResponse, SettingsSource } from "../../api/types";
 import fontsFixture from "../fixtures/fonts.json";
 import labelTypesFixture from "../fixtures/label-types.json";
 import symbolsFixture from "../fixtures/symbols.json";
@@ -408,25 +409,62 @@ export const authLogoutHandler = http.post(
   () => new HttpResponse(null, { status: 204 }),
 );
 
-// -- task 4.2: GET /api/settings/runtime (Settings page's read-only config
-// panel) -- an "everything off/default" shape mirroring AppConfig's own
-// class defaults (config.py; note printer_flip_pins defaults TRUE there
-// since the 2026-07-28 hardware verification -- the backend test
-// conftest deliberately pins it false for golden stability, so don't
-// expect parity with that file).
+// -- task 4.5: GET/PUT /api/settings (the DB-backed settings overlay) --
+// A realistic "everything at its class default, nothing overridden yet"
+// shape mirroring backend/settings_overlay.py's own row contract (note
+// printer_flip_pins defaults TRUE here since the 2026-07-28 hardware
+// verification -- the backend test conftest deliberately pins it false for
+// golden stability, so don't expect parity with that file).
 
-export const runtimeSettingsHandler = http.get("/api/settings/runtime", () =>
-  HttpResponse.json({
-    printer_mode: "mock",
-    printer_init_strategy: "classic",
-    printer_bit_order: "msb_first",
-    printer_flip_pins: true,
-    els_enabled: false,
-    els_tape_mm: 24.0,
-    auth_mode: "none",
-    homebox_configured: false,
-  }),
-);
+function settingsRow(
+  key: string,
+  value: string | number | boolean | string[] | null,
+  source: SettingsSource = "default",
+  editable = true,
+): SettingRow {
+  return { key, value, source, editable };
+}
+
+export const defaultSettingsBody: SettingsResponse = {
+  settings: [
+    settingsRow("printer_mode", "mock"),
+    settingsRow("printer_init_strategy", "classic"),
+    settingsRow("printer_bit_order", "msb_first"),
+    settingsRow("printer_flip_pins", true),
+    settingsRow("els_tape_mm", 24.0),
+    settingsRow("homebox_url", null),
+    { key: "homebox_api_key", set: false, source: "default", editable: true },
+    settingsRow("keep_printer_awake", false),
+    settingsRow("keep_awake_interval_min", 5),
+    settingsRow("auth_mode", "none", "default", false),
+    settingsRow("els_enabled", false, "default", false),
+    settingsRow("data_dir", "./data", "default", false),
+    settingsRow("cors_origins", ["http://localhost:5173"], "default", false),
+  ],
+};
+
+export const getSettingsHandler = http.get("/api/settings", () => HttpResponse.json(defaultSettingsBody));
+
+/** A default that just echoes each posted field back into the canned GET
+ * body's own rows, marking it `source: "db"` (or reverting to `"default"`
+ * when the posted value is `null`) -- close enough to the real overlay's
+ * behavior for tests that don't care about exact provenance transitions;
+ * pages/Settings.test.tsx overrides with server.use(...) for the scenarios
+ * it actually asserts on (captured request body, a 422, a specific
+ * provenance readout). */
+export const putSettingsHandler = http.put("/api/settings", async ({ request }) => {
+  const body = (await request.json()) as Record<string, string | number | boolean | null>;
+  const rows: SettingRow[] = defaultSettingsBody.settings.map((row) => {
+    if (!(row.key in body)) return row;
+    const posted = body[row.key]!;
+    const source: SettingsSource = posted === null ? "default" : "db";
+    if (row.key === "homebox_api_key") {
+      return { key: row.key, set: posted !== null, source, editable: true };
+    }
+    return { ...row, value: posted, source };
+  });
+  return HttpResponse.json({ settings: rows });
+});
 
 /** Sane defaults for the app's own initial queries (health/label-types/
  * fonts/tapes/symbols/printer-status) plus preview/estimate/print/presets/
@@ -466,5 +504,6 @@ export const defaultHandlers = [
   putHomeboxSettingsHandler,
   authMeNoneHandler,
   authLogoutHandler,
-  runtimeSettingsHandler,
+  getSettingsHandler,
+  putSettingsHandler,
 ];

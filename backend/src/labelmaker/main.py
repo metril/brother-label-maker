@@ -34,9 +34,10 @@ from labelmaker.api import (
 from labelmaker.api.auth_gate import AuthGateMiddleware
 from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
-from labelmaker.homebox import HomeBoxClient
+from labelmaker.homebox import build_client
 from labelmaker.jobs.events import EventBus
 from labelmaker.jobs.worker import run_worker
+from labelmaker.settings_overlay import SettingsOverlay
 
 # The session cookie's own name -- distinct from Starlette's generic
 # "session" default so it reads unambiguously in browser devtools/a proxy
@@ -122,18 +123,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         db = await Database.open(cfg.data_dir / "labelmaker.db")
         bus = EventBus()
         queue: asyncio.Queue[str] = asyncio.Queue()
+        # task 4.5: the DB-backed settings overlay -- loads any stored
+        # overrides from `db` immediately, so the very first request after
+        # a restart already reflects them (see settings_overlay.py's own
+        # docstring for the full contract).
+        settings = await SettingsOverlay.create(cfg, db)
 
         app.state.config = cfg
         app.state.db = db
         app.state.bus = bus
         app.state.queue = queue
+        app.state.settings = settings
         # None when unconfigured -- deps.get_homebox turns that into a 503
-        # with a setup hint instead of a crash at startup.
-        app.state.homebox = (
-            HomeBoxClient(cfg.homebox_url, cfg.homebox_api_key)
-            if cfg.homebox_url and cfg.homebox_api_key
-            else None
-        )
+        # with a setup hint instead of a crash at startup. Built from the
+        # settings overlay's EFFECTIVE url/key, not `cfg` directly, so a
+        # DB-stored override (api/router_settings.py's PUT handler) is
+        # honored from the very first request after a restart too.
+        effective = settings.effective()
+        app.state.homebox = build_client(effective.homebox_url, effective.homebox_api_key)
 
         worker_task = asyncio.create_task(run_worker(app.state))
         try:

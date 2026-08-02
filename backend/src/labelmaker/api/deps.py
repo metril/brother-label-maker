@@ -15,6 +15,7 @@ from labelmaker.config import AppConfig
 from labelmaker.db.database import Database
 from labelmaker.homebox import HomeBoxClient
 from labelmaker.jobs.events import EventBus
+from labelmaker.settings_overlay import SettingsOverlay
 
 
 def get_app_config(request: Request) -> AppConfig:
@@ -31,6 +32,10 @@ def get_bus(request: Request) -> EventBus:
 
 def get_queue(request: Request) -> asyncio.Queue[str]:
     return request.app.state.queue
+
+
+def get_settings_overlay(request: Request) -> SettingsOverlay:
+    return request.app.state.settings
 
 
 def get_homebox(request: Request) -> HomeBoxClient:
@@ -56,6 +61,7 @@ DbDep = Annotated[Database, Depends(get_db)]
 BusDep = Annotated[EventBus, Depends(get_bus)]
 QueueDep = Annotated["asyncio.Queue[str]", Depends(get_queue)]
 HomeBoxDep = Annotated[HomeBoxClient, Depends(get_homebox)]
+SettingsDep = Annotated[SettingsOverlay, Depends(get_settings_overlay)]
 
 
 def error_message(exc: Exception) -> str:

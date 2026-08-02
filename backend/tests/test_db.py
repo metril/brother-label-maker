@@ -80,6 +80,24 @@ async def test_settings_roundtrip_default_and_upsert():
         await db.close()
 
 
+async def test_delete_setting_removes_the_row_not_just_its_value():
+    db = await Database.open(":memory:")
+    try:
+        await db.set_setting("k", "v")
+        await db.delete_setting("k")
+        # A deleted key falls back to the DEFAULT arg, same as one that was
+        # never set -- distinct from a stored JSON `null` (get_setting would
+        # return None either way, so `all_settings` is what actually proves
+        # the row is gone, not just set to null).
+        assert await db.get_setting("k", default="fallback") == "fallback"
+        assert await db.all_settings() == {}
+
+        # Deleting an already-absent key is a harmless no-op, not an error.
+        await db.delete_setting("never-set")
+    finally:
+        await db.close()
+
+
 # --- 3. Presets ---
 
 

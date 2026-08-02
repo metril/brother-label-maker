@@ -649,23 +649,44 @@ export interface AuthMe {
   user: AuthUser | null;
 }
 
-// --- Runtime settings (task 4.2) -------------------------------------------
-// Mirrors backend/api/router_settings.py's RuntimeSettings -- an ALLOWLIST
-// of non-secret, env-derived config fields the Settings page's read-only
-// panel renders. Never homebox_url/homebox_api_key/oidc_client_secret/
-// session_secret -- see that module's own docstring for why.
+// --- Settings (task 4.5) ----------------------------------------------------
+// Mirrors backend/api/router_settings.py + backend/settings_overlay.py: a
+// DB-backed overlay over AppConfig an operator can edit from the Settings
+// page, with no restart. GET/PUT /api/settings both return the SAME
+// `{settings: SettingRow[]}` shape -- an ALLOWLIST, not a config dump, so a
+// server-side field addition later is a conscious, reviewed change on
+// BOTH ends, not a silent drift. Never oidc_*/session_*/the raw
+// homebox_api_key value -- see that module's own docstring for why.
 
-/** GET /api/settings/runtime's response -- every field is env-configured
- * (see backend/config.py's AppConfig); the Settings page notes, next to
- * each row, that changing it means editing the environment and restarting,
- * not anything in this UI. */
-export interface RuntimeSettings {
-  printer_mode: "mock" | "usb";
-  printer_init_strategy: "classic" | "e310bt";
-  printer_bit_order: "msb_first" | "lsb_first";
-  printer_flip_pins: boolean;
-  els_enabled: boolean;
-  els_tape_mm: number;
-  auth_mode: "none" | "oidc";
-  homebox_configured: boolean;
+export type SettingsSource = "db" | "env" | "default";
+
+/** One row. `editable: true` rows are settings_overlay.SettingsOverrides'
+ * own fields -- every one of them carries `value` EXCEPT `homebox_api_key`,
+ * which carries `set: boolean` instead and NEVER `value` (the secret is
+ * never echoed back to the browser, in any provenance state).
+ * `editable: false` rows are read-only, informational AppConfig fields
+ * (auth_mode/els_enabled/data_dir/cors_origins) -- always `value`, no
+ * `set`. `source` is `"db"` when a stored override is active, `"env"` when
+ * AppConfig itself resolved the field from an explicitly-set env var,
+ * `"default"` otherwise. */
+export interface SettingRow {
+  key: string;
+  value?: string | number | boolean | string[] | null;
+  set?: boolean;
+  source: SettingsSource;
+  editable: boolean;
 }
+
+/** GET/PUT /api/settings' response shape. */
+export interface SettingsResponse {
+  settings: SettingRow[];
+}
+
+/** PUT /api/settings' request body: a partial map of `{field: value |
+ * null}` -- an omitted field is left untouched server-side; `null` reverts
+ * that field to its env/default value (clears the DB override). Every key
+ * must be one of SettingsOverrides' own fields (backend/settings_overlay.py)
+ * -- an unknown key, or a value outside that field's own bounds/Literal
+ * choices, 422s (parsed the same readable way as every other route, see
+ * extractErrorDetail in client.ts). */
+export type SettingsUpdate = Record<string, string | number | boolean | null>;

@@ -137,6 +137,13 @@ async def _process_job(state, job_id: str) -> None:
     db = state.db
     bus = state.bus
     config = state.config
+    # task 4.5: a snapshot of the DB-backed settings overlay, taken HERE on
+    # the event loop -- before anything below reaches `anyio.to_thread.
+    # run_sync` -- so a PUT /api/settings racing this job can only affect
+    # the NEXT job, never this one mid-print (see settings_overlay.py's
+    # own "Thread safety" docstring section). `config.data_dir` (not
+    # overridable) still comes from `config` directly, unchanged.
+    effective = state.settings.effective()
 
     job = await db.get_job(job_id)
     if job is None or job["status"] != "queued":
@@ -156,14 +163,14 @@ async def _process_job(state, job_id: str) -> None:
             _expand_and_render, definition, config.data_dir
         )
 
-        strategy = get_strategy(config.printer_init_strategy)
+        strategy = get_strategy(effective.printer_init_strategy)
         job_options = JobOptions(
             chain_mode=ChainMode(options.get("chain_mode", ChainMode.CUT_EACH.value)),
             auto_cut=options.get("auto_cut", True),
             margin_mm=options.get("margin_mm", 2.0),
             raster_config=RasterConfig(
-                bit_order=BitOrder(config.printer_bit_order),
-                flip_pins=config.printer_flip_pins,
+                bit_order=BitOrder(effective.printer_bit_order),
+                flip_pins=effective.printer_flip_pins,
             ),
         )
 
@@ -191,7 +198,7 @@ async def _process_job(state, job_id: str) -> None:
         # that function's docstring).
         result = await anyio.to_thread.run_sync(
             _open_print_close,
-            config.printer_mode,
+            effective.printer_mode,
             images,
             strategy,
             job_options,

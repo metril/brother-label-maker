@@ -31,7 +31,8 @@ import type {
   PrintRequest,
   PrinterStatusResponse,
   ReprintResponse,
-  RuntimeSettings,
+  SettingsResponse,
+  SettingsUpdate,
   SymbolInfo,
   TapeInfo,
   ValidationIssue,
@@ -479,11 +480,21 @@ export function postAuthLogout(): Promise<void> {
   return request<void>("/auth/logout", { method: "POST" });
 }
 
-// --- Runtime settings (task 4.2) ----------------------------------------
+// --- Settings (task 4.5) -------------------------------------------------
 
-/** GET /api/settings/runtime -- the Settings page's read-only config panel:
- * an allowlist of non-secret, env-derived fields (see api/router_settings.py's
- * own docstring for exactly which, and why nothing else). */
-export function getRuntimeSettings(): Promise<RuntimeSettings> {
-  return request<RuntimeSettings>("/settings/runtime");
+/** GET /api/settings -- every editable (DB-overlay) row plus a handful of
+ * read-only, informational ones (see api/types.ts's SettingRow doc for the
+ * exact shape). */
+export function getSettings(): Promise<SettingsResponse> {
+  return request<SettingsResponse>("/settings");
+}
+
+/** PUT /api/settings -- a true partial update (an omitted field is left
+ * untouched server-side; `null` reverts that field to its env/default
+ * value). Returns the SAME shape GET does, already reflecting the change
+ * (including any homebox client rebuild server-side) -- callers should
+ * write the response straight into the ["settings"] query cache rather
+ * than refetching. */
+export function putSettings(partial: SettingsUpdate): Promise<SettingsResponse> {
+  return request<SettingsResponse>("/settings", { method: "PUT", body: JSON.stringify(partial) });
 }

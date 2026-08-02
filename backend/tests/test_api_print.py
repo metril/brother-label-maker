@@ -243,6 +243,77 @@ async def test_print_stream_honors_non_default_strategy_bit_order_and_flip_pins(
     assert stream_resp.content == expected.data
 
 
+# --- 2c. task 4.5: worker honors a DB settings-overlay override too --------
+
+
+async def test_print_stream_honors_settings_overlay_override_over_app_config_default(
+    app_and_client,
+):
+    """task 4.5: PUT /api/settings can override printer_init_strategy/
+    printer_bit_order/printer_flip_pins WITHOUT restarting the app -- the
+    worker (jobs/worker.py's _process_job) must read the settings overlay's
+    EFFECTIVE snapshot, not `app.state.config` directly. Byte-parity
+    against an in-test build_job call using the OVERRIDDEN values (not
+    app_config's own plain classic/msb_first/False defaults) proves the
+    override actually reached the print pipeline -- mirrors
+    test_print_stream_honors_non_default_strategy_bit_order_and_flip_pins
+    above, but via the DB overlay instead of AppConfig construction."""
+    app, client = app_and_client
+    config = app.state.config
+    assert (config.printer_init_strategy, config.printer_bit_order, config.printer_flip_pins) == (
+        "classic",
+        "msb_first",
+        False,
+    )
+
+    put_resp = await client.put(
+        "/api/settings",
+        json={
+            "printer_init_strategy": "e310bt",
+            "printer_bit_order": "lsb_first",
+            "printer_flip_pins": True,
+        },
+    )
+    assert put_resp.status_code == 200
+
+    resp = await client.post(
+        "/api/print",
+        json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
+    )
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    job = await _wait_for_terminal_job(client, job_id)
+    assert job["status"] == "done", job["error"]
+
+    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    assert stream_resp.status_code == 200
+
+    defn = LabelDefinition.model_validate(_text_label("HELLO"))
+    image = rasterize(render_definition(defn))
+    expected = build_job(
+        [image],
+        _TAPE_24MM_TZE,
+        get_strategy("e310bt"),
+        JobOptions(
+            chain_mode=ChainMode.CUT_EACH,
+            margin_mm=2.0,
+            auto_cut=True,
+            raster_config=RasterConfig(bit_order=BitOrder("lsb_first"), flip_pins=True),
+        ),
+    )
+    assert stream_resp.content == expected.data
+
+    # app.state.config itself is untouched by the override -- only the
+    # settings overlay changed; AppConfig stays the env-derived source of
+    # truth the overlay layers on top of.
+    assert (config.printer_init_strategy, config.printer_bit_order, config.printer_flip_pins) == (
+        "classic",
+        "msb_first",
+        False,
+    )
+
+
 # --- 3. Cancel lifecycle + worker skip-if-not-queued ---
 
 

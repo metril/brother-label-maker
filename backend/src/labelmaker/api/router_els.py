@@ -180,7 +180,7 @@ import anyio
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
-from labelmaker.api.deps import AppConfigDep, error_message
+from labelmaker.api.deps import AppConfigDep, SettingsDep, error_message
 from labelmaker.config import AppConfig
 from labelmaker.render import LabelDefinition, Tape, preview_png, rasterize, render_definition
 from labelmaker.render.types.homebox_location import HomeboxLocationParams
@@ -210,6 +210,7 @@ def _secondary_text(description_text: str, additional_information: str | None) -
 @router.get("/els/label")
 async def get_els_label(
     config: AppConfigDep,
+    settings: SettingsDep,
     # -- Fields this endpoint actually renders (see module docstring's
     # "-- Render mapping --") -- TitleText/URL are the two fields every one
     # of HomeBox's three callers always sends non-empty, so both are
@@ -245,9 +246,13 @@ async def get_els_label(
             path=_secondary_text(description_text, additional_information),
             qr_data=url,
         )
+        # task 4.5: els_tape_mm from the settings overlay's EFFECTIVE value
+        # (env, or a DB override set from the Settings page) -- not
+        # AppConfig directly.
+        els_tape_mm = settings.effective().els_tape_mm
         definition = LabelDefinition(
             type="homebox_location",
-            tape=Tape(width_mm=config.els_tape_mm, family="tze"),
+            tape=Tape(width_mm=els_tape_mm, family="tze"),
             params=params.model_dump(mode="json"),
         )
         # Off-loop like every other render route (router_labels/router_

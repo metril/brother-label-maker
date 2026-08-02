@@ -182,6 +182,15 @@ class Database:
             (key, json.dumps(value)),
         )
 
+    async def delete_setting(self, key: str) -> None:
+        """Removes the row entirely (task 4.5's settings overlay: a `None`
+        PUT means "revert to env/default", which requires the row's
+        ABSENCE, not a stored JSON `null` -- `get_setting`/`all_settings`
+        can't tell "explicitly set to null" apart from "never set" once a
+        `null` is actually persisted, so a clearing write must delete
+        instead)."""
+        await self._conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
     async def all_settings(self) -> dict[str, Any]:
         cur = await self._conn.execute("SELECT key, value FROM settings")
         rows = await cur.fetchall()

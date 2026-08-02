@@ -159,6 +159,19 @@ EntitySummary.model_rebuild()
 TreeItem.model_rebuild()
 
 
+def build_client(
+    url: str | None, api_key: str | None, *, timeout: float = 10.0
+) -> HomeBoxClient | None:
+    """`None` when either half is unset -- the ONE "is HomeBox configured"
+    predicate, shared by main.py's lifespan (building the FIRST
+    `app.state.homebox`) and api/router_settings.py's PUT handler
+    (rebuilding it after `homebox_url`/`homebox_api_key` is overridden).
+    Both call sites pass EFFECTIVE settings-overlay values, never
+    `AppConfig` fields directly, so a DB-stored override takes effect
+    immediately."""
+    return HomeBoxClient(url, api_key, timeout=timeout) if url and api_key else None
+
+
 class HomeBoxClient:
     """One instance per app, holding one connection pool; close() on app
     shutdown. `base_url` is the instance root (e.g.
