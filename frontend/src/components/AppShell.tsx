@@ -171,7 +171,7 @@ export function AppShell({ children }: AppShellProps) {
           </span>
         </div>
 
-        <nav aria-label="Sections" className="flex items-center gap-1">
+        <nav aria-label="Sections" className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {homeboxEnabled ? (
             <NavLink to="/homebox" className={navLinkClass}>
               HomeBox

@@ -5,7 +5,12 @@
 
 export const eyebrow = "font-condensed uppercase tracking-[0.12em] text-[11px] text-deck-400";
 
-export const panel = "rounded-xl border border-deck-800 bg-deck-900/60 p-5";
+/** `shadow-[var(--shadow-panel)]`: dark theme's own `--shadow-panel` is
+ * `none` (borders-first, no glow shadow), light theme's is a real subtle
+ * drop shadow (index.css's own doc on this token has the full rationale) --
+ * ONE themed token behind the class, not a per-component light/dark
+ * conditional. */
+export const panel = "rounded-xl border border-deck-800 bg-deck-900/60 p-5 shadow-[var(--shadow-panel)]";
 export const panelHeading = `${eyebrow} mb-4`;
 
 /** The active label type's own name (e.g. "Text", "Barcode") -- the single

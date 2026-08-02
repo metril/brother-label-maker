@@ -20,6 +20,13 @@ interface TrayState {
   items: TrayItem[];
   chainMode: ChainMode;
   autoCut: boolean;
+  /** The id of whichever item `addItem` most recently appended, for exactly
+   * `LAST_ADDED_MS` -- purely decorative "add feedback" (TrayItemRow's own
+   * brief highlight, GlobalTrayDrawer's "Tray · N" count tick), not part of
+   * the tray's real data. Cleared back to `null` by addItem's own timer
+   * (see below) -- never read by anything that affects what actually gets
+   * printed. */
+  lastAddedId: string | null;
 
   /** Appends a new item built from a snapshot (own id assigned here). */
   addItem: (item: Omit<TrayItem, "id">) => void;
@@ -31,6 +38,24 @@ interface TrayState {
   setChainMode: (mode: ChainMode) => void;
   setAutoCut: (autoCut: boolean) => void;
 }
+
+/** How long an `addItem`-triggered highlight/tick stays lit before fading
+ * back out (a CSS transition on color/background-color, never a
+ * `@keyframes` animation -- see index.css's own "Quality floor" comment on
+ * why transitions are the house style here). Matches Designer.tsx's own
+ * `HIGHLIGHT_MS` (the warning-chip-click row highlight) so every "briefly
+ * highlight a row" affordance in this app holds for the same duration. */
+const LAST_ADDED_MS = 2000;
+
+/** Not persisted (component state would work too, but this is a GLOBAL
+ * store read from both components/JobTray.tsx's sidebar/sheet and
+ * components/GlobalTrayDrawer.tsx's slide-over -- either, both, or neither
+ * can be mounted at a moment `addItem` fires, so the timer belongs to the
+ * store itself, not to whichever component happens to be mounted when it's
+ * started). A plain module-scoped variable, not `useRef` -- there is
+ * exactly one tray store for the whole app (no per-instance state to keep
+ * separate). */
+let lastAddedTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** The subset of TrayState actually written to localStorage (persist's own
  * `partialize`) -- every field except the action functions themselves
@@ -65,8 +90,26 @@ export const useTrayStore = create<TrayState>()(
       items: [],
       chainMode: "cut_each",
       autoCut: true,
+      lastAddedId: null,
 
-      addItem: (item) => set((state) => ({ items: [...state.items, { ...item, id: nextTrayItemId() }] })),
+      addItem: (item) =>
+        set((state) => {
+          const id = nextTrayItemId();
+          // Re-triggering on rapid successive adds (e.g. mashing "+ Add to
+          // tray") must restart the SAME 2s window on the newest item, not
+          // stack timers -- an earlier add's timer firing after a newer one
+          // would otherwise clear the new item's still-active highlight.
+          if (lastAddedTimer) clearTimeout(lastAddedTimer);
+          lastAddedTimer = setTimeout(() => {
+            // Functional form + the id check: a `clear()`/`removeItem` in
+            // between must not resurrect `lastAddedId` for an item that's
+            // already gone, and a still-newer `addItem` must not have its
+            // own highlight clipped by this now-stale timer (belt-and-
+            // braces alongside the clearTimeout above).
+            set((s) => (s.lastAddedId === id ? { lastAddedId: null } : {}));
+          }, LAST_ADDED_MS);
+          return { items: [...state.items, { ...item, id }], lastAddedId: id };
+        }),
 
       removeItem: (id) => set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
 

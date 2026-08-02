@@ -29,6 +29,7 @@ export function GlobalTrayDrawer() {
   const items = useTrayStore((s) => s.items);
   const chainMode = useTrayStore((s) => s.chainMode);
   const autoCut = useTrayStore((s) => s.autoCut);
+  const lastAddedId = useTrayStore((s) => s.lastAddedId);
   const dialog = useDialogController();
 
   // Mirrors TrayPanel's own (simpler, current-less) body derivation purely
@@ -46,7 +47,7 @@ export function GlobalTrayDrawer() {
   // last, after them, not before.
   if (items.length === 0) return null;
 
-  const label = `Tray · ${items.length}${estimate ? `, ${estimate.total_mm.toFixed(1)} mm` : ""}`;
+  const suffix = estimate ? `, ${estimate.total_mm.toFixed(1)} mm` : "";
 
   return (
     <>
@@ -56,7 +57,15 @@ export function GlobalTrayDrawer() {
         aria-haspopup="dialog"
         className="rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 font-mono text-[12px] text-deck-200 transition-colors hover:border-deck-400"
       >
-        {label}
+        {/* Brief "tick" on the count itself (stores/tray.ts's own
+            `lastAddedId`, cleared 2s after an `addItem`) -- a plain
+            transition-colors class swap fading amber -> deck-200, same
+            mechanism/duration as TrayItemRow's own just-added highlight, so
+            a user who adds from Homebox (this button is the only tray
+            affordance on that route) sees the count itself acknowledge the
+            add even before opening the drawer. */}
+        <span className={`transition-colors ${lastAddedId !== null ? "text-amber-300" : ""}`}>Tray · {items.length}</span>
+        {suffix}
       </button>
 
       {dialog.isOpen && <div aria-hidden onClick={dialog.close} className="fixed inset-0 z-40 bg-scrim/70" />}

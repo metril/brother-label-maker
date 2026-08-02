@@ -95,6 +95,7 @@ export function TrayPanel({ current, onAddToTray }: TrayPanelProps) {
   const items = useTrayStore((s) => s.items);
   const chainMode = useTrayStore((s) => s.chainMode);
   const autoCut = useTrayStore((s) => s.autoCut);
+  const lastAddedId = useTrayStore((s) => s.lastAddedId);
   const setChainMode = useTrayStore((s) => s.setChainMode);
   const setAutoCut = useTrayStore((s) => s.setAutoCut);
   const removeItem = useTrayStore((s) => s.removeItem);
@@ -191,6 +192,7 @@ export function TrayPanel({ current, onAddToTray }: TrayPanelProps) {
               onDuplicate={() => duplicateItem(item.id)}
               onRemove={() => removeItem(item.id)}
               hydratedPreview={previews.get(item.id)}
+              justAdded={item.id === lastAddedId}
             />
           ))}
         </ul>

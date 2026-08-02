@@ -26,7 +26,7 @@ export function Dialog({ open, onClose, label, children, className }: DialogProp
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        className={`relative z-10 w-full max-w-sm rounded-xl border border-deck-700 bg-deck-900 p-5 shadow-lg ${className ?? ""}`}
+        className={`relative z-10 w-full max-w-sm rounded-xl border border-deck-700 bg-deck-900 p-5 shadow-[var(--shadow-panel)] ${className ?? ""}`}
       >
         {children}
       </div>

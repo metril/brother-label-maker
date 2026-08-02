@@ -17,6 +17,14 @@ interface TrayItemRowProps {
    * preview already being present, or on a fetch failure (the blank swatch/
    * "···" length fallback below covers all three the same way). */
   hydratedPreview?: TrayPreview;
+  /** True for exactly `LAST_ADDED_MS` (stores/tray.ts) right after this row
+   * was appended by `addItem` -- a brief amber tint fading back to the
+   * normal row color via the same CSS-transition mechanism as
+   * schema/ArrayOfObjects.tsx's own `useHighlighted` row (a plain
+   * transition-colors class swap, never a `@keyframes` animation), so a
+   * user who added this from elsewhere (Designer's own tray, Homebox's "Add
+   * to tray") and then glances at the tray sees which row just showed up. */
+  justAdded?: boolean;
 }
 
 /** One queued label in the Job tray: a small thumbnail (the exact preview
@@ -42,12 +50,17 @@ export function TrayItemRow({
   onDuplicate,
   onRemove,
   hydratedPreview,
+  justAdded,
 }: TrayItemRowProps) {
   const png = item.png ?? hydratedPreview?.png ?? null;
   const lengthMm = item.lengthMm ?? hydratedPreview?.lengthMm ?? null;
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-deck-700 bg-deck-800/40 p-2">
+    <li
+      className={`flex flex-col gap-2 rounded-lg border p-2 transition-colors ${
+        justAdded ? "border-amber-500 bg-amber-500/10" : "border-deck-700 bg-deck-800/40"
+      }`}
+    >
       <div className="flex items-center gap-2">
         <span className={indexBadge}>{index + 1}</span>
         <div

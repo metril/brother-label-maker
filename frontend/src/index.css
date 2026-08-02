@@ -78,6 +78,18 @@
      theme only needs to override this one (see the theme blocks below). */
   --color-icon-well: #dfe3e8;
 
+  /* Panel/dialog elevation (2026-08-02 polish round): dark theme stays
+     borders-first -- a drop shadow reads as a muddy grey glow against a
+     near-black background and adds nothing a border doesn't already say, so
+     `none` here. Light theme (see the theme blocks below) gets a real,
+     subtle shadow instead: white-on-paper-grey cards need actual elevation
+     to separate from the page, since a hairline border alone reads much
+     fainter in light mode than the same border does in dark mode. Consumed
+     by ui/styles.ts's `panel` fragment and ui/Dialog.tsx via
+     `shadow-[var(--shadow-panel)]` -- ONE token, not a per-component
+     one-off, so every panel/card/dialog stays in sync automatically. */
+  --shadow-panel: none;
+
   /* The Select chevron (ui/inputs.tsx) is a plain CSS background-image, not
      a Tailwind utility -- background-image data-URIs can't reference
      `currentColor` the way inline SVG can, so the two pre-rendered chevrons
@@ -111,6 +123,7 @@
   --color-sage-400: #74a878;
   --color-icon-well: #dfe3e8;
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238b95a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --shadow-panel: none;
 }
 
 /* Explicit light theme (`localStorage["lm-theme"] === "light"`) -- paper
@@ -130,6 +143,11 @@
   --color-sage-400: #3e7d46;
   --color-icon-well: #ffffff;
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%235f6b7d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* Real, subtle elevation (see the `@theme` block's own doc on this
+     token) -- close to Tailwind's own default `shadow` value, tuned
+     slightly softer so it reads as "paper lifted off the page", not a
+     heavy drop shadow. */
+  --shadow-panel: 0 1px 2px 0 rgba(25, 29, 36, 0.05), 0 1px 3px 0 rgba(25, 29, 36, 0.08);
 }
 
 /* "System" mode (no `data-theme` attribute at all -- the user picked
@@ -154,6 +172,7 @@
     --color-sage-400: #3e7d46;
     --color-icon-well: #ffffff;
     --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%235f6b7d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    --shadow-panel: 0 1px 2px 0 rgba(25, 29, 36, 0.05), 0 1px 3px 0 rgba(25, 29, 36, 0.08);
   }
 }
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTrayStore } from "./tray";
 import type { LabelDefinition } from "../api/types";
 
@@ -81,6 +81,34 @@ describe("useTrayStore", () => {
 
     expect(useTrayStore.getState().chainMode).toBe("strip_marks");
     expect(useTrayStore.getState().autoCut).toBe(false);
+  });
+
+  // Task B's "tray add feedback" (2026-08-02 polish round): lastAddedId
+  // drives TrayItemRow's brief highlight and GlobalTrayDrawer's count tick,
+  // purely decorative and never persisted (see PersistedTrayState, which
+  // never picks it up).
+  it("addItem sets lastAddedId to the item just appended, moves it on a second add, and clears it after the highlight window", () => {
+    vi.useFakeTimers();
+    try {
+      useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "A" });
+      const idA = useTrayStore.getState().items[0]!.id;
+      expect(useTrayStore.getState().lastAddedId).toBe(idA);
+
+      useTrayStore.getState().addItem({ definition: def("B"), png: null, lengthMm: 10, label: "B" });
+      const idB = useTrayStore.getState().items[1]!.id;
+      // The highlight follows the NEWEST add -- item A's row is no longer
+      // considered "just added" once B lands, even though A's own timer
+      // hasn't fired yet.
+      expect(useTrayStore.getState().lastAddedId).toBe(idB);
+
+      // stores/tray.ts's own LAST_ADDED_MS (module-private -- kept in sync
+      // with this literal by inspection, same convention as
+      // pages/Designer.tsx's own untested HIGHLIGHT_MS timer).
+      vi.advanceTimersByTime(2000);
+      expect(useTrayStore.getState().lastAddedId).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
