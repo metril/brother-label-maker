@@ -139,6 +139,34 @@ export interface ImageUploadResponse {
   height: number;
 }
 
+// --- Uploads library (task D2a) ------------------------------------------
+// Mirrors backend/api/router_images.py's `GET /api/images` list endpoint.
+// Uploads have no DB table (unlike History/Presets below) -- this scans
+// `data_dir/uploads/*.png` directly, so `ImageListItem` carries filesystem
+// facts (`size_bytes`/`mtime`) rather than DB-row provenance.
+
+/** One `GET /api/images` list item. `width`/`height` come from a
+ * header-only PIL probe (cheap -- never a full pixel decode just to list).
+ * `mtime` is the file's own modification time, same ISO-8601-with-'Z'
+ * textual shape as every other timestamp in this API (e.g. `HistoryItem`'s
+ * `created_at`) even though it's filesystem-, not DB-, sourced. */
+export interface ImageListItem {
+  image_id: string;
+  width: number;
+  height: number;
+  size_bytes: number;
+  mtime: string;
+}
+
+/** `GET /api/images`' response -- same page/page_size/total pagination
+ * shape as `HistoryListResponse`. */
+export interface ImageListResponse {
+  items: ImageListItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 export type WarningSeverity = "info" | "warning";
 
 /** Mirrors backend/render/document.py's RenderWarning. Match on `code`,

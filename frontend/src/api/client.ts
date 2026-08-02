@@ -17,6 +17,7 @@ import type {
   HomeboxSettingsUpdate,
   HomeboxStatus,
   HomeboxTreeItem,
+  ImageListResponse,
   ImageUploadResponse,
   LabelTypeInfo,
   Preset,
@@ -230,6 +231,22 @@ export async function postImage(file: File): Promise<ImageUploadResponse> {
  * convention as symbolSvgUrl above. */
 export function imagePngUrl(imageId: string): string {
   return `${API_BASE}/images/${imageId}`;
+}
+
+/** GET /api/images (task D2a's Uploads library) -- every previously
+ * uploaded image, newest first, server-paginated (same page/page_size/
+ * total shape as getHistory below; router_images.py's own list_images
+ * bounds page>=1/1<=page_size<=100 the same way router_history.py's
+ * list_history does). */
+export function getImages(page = 1, pageSize = 20): Promise<ImageListResponse> {
+  const search = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  return request<ImageListResponse>(`/images?${search.toString()}`);
+}
+
+/** DELETE /api/images/{id} (task D2a) -- 204/no body, same convention as
+ * deletePreset/deleteHistoryJob below. */
+export function deleteImage(imageId: string): Promise<void> {
+  return request<void>(`/images/${imageId}`, { method: "DELETE" });
 }
 
 export function postPreview(body: PreviewRequest): Promise<PreviewResponse> {

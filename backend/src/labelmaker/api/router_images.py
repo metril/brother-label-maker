@@ -1,5 +1,5 @@
-"""POST /api/images (upload), GET /api/images/{id} (serve), DELETE
-/api/images/{id} (task 2.7).
+"""POST /api/images (upload), GET /api/images (list, task D2a), GET
+/api/images/{id} (serve), DELETE /api/images/{id} (task 2.7).
 
 Uploaded images (logos, photos for a text label's `icon.kind="image"`
 threshold/dither art -- see render/types/text_label.py and render/images.py)
@@ -44,7 +44,9 @@ codebase uses 413).
 from __future__ import annotations
 
 import io
+import logging
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
@@ -52,8 +54,10 @@ from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel
 
-from labelmaker.api.deps import AppConfigDep
+from labelmaker.api.deps import AppConfigDep, error_message
 from labelmaker.render.images import IMAGE_ID_RE, image_path, uploads_dir
+
+_LOG = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -200,6 +204,101 @@ async def upload_image(
     img.save(image_path(image_id, config.data_dir), format="PNG")
 
     return ImageUploadResponse(image_id=image_id, width=img.width, height=img.height)
+
+
+def _iso_mtime(epoch_seconds: float) -> str:
+    """Same textual shape as db/database.py's `_utcnow()` -- ISO-8601 UTC
+    with a literal 'Z' suffix and fixed-width (six-digit) microseconds --
+    so GET /api/images' `mtime` field reads the same way every OTHER
+    timestamp in this API (`created_at`, etc.) already does, even though
+    this one comes from a filesystem `st_mtime` rather than a DB row."""
+    return datetime.fromtimestamp(epoch_seconds, UTC).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+
+
+def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
+    """Backing implementation for `GET /api/images` (task D2a): scans
+    `uploads_dir` directly rather than any DB table -- uploads have never
+    had a DB row (see this module's own docstring) -- and pairs each
+    surviving `*.png` entry with its width/height (a cheap, header-only
+    `Image.open()` -- no `.load()`/`.convert()`, so this never decodes a
+    full pixel buffer just to answer a LIST request) and its `stat()`
+    size/mtime.
+
+    `page`/`page_size` validation mirrors router_history.py's `list_jobs`
+    bounds exactly (page>=1, 1<=page_size<=100) -- raises `ValueError`,
+    422-mappable by the route handler below, same convention.
+
+    Directory-listing hardening: `target_dir.iterdir()` is only ever used
+    to enumerate CANDIDATE filenames -- never trusted as a source of real
+    paths. Every candidate's stem is re-validated against `IMAGE_ID_RE` and
+    then re-resolved through `image_path()` (the same containment-checked
+    choke point GET/DELETE /api/images/{id} already use), so a filename
+    that doesn't fit the shape `POST /api/images` ever mints, OR a
+    regex-valid name whose resolved path escapes `uploads_dir` (e.g. a
+    symlink planted inside it), is silently dropped -- logged at DEBUG,
+    never surfaced as a 500 and never included in the listing. A file that
+    passes both checks but still fails to open as an image (corrupt/
+    truncated) is dropped the same way.
+    """
+    if page < 1:
+        raise ValueError(f"page must be >= 1, got {page}")
+    if not (1 <= page_size <= 100):
+        raise ValueError(f"page_size must be between 1 and 100, got {page_size}")
+
+    target_dir = uploads_dir(data_dir)
+    records: list[tuple[float, dict]] = []
+    if target_dir.is_dir():
+        for entry in target_dir.iterdir():
+            if entry.suffix != ".png":
+                continue
+            image_id = entry.stem
+            if not IMAGE_ID_RE.match(image_id):
+                _LOG.debug(
+                    "GET /api/images: skipping non-conforming upload filename %r", entry.name
+                )
+                continue
+            try:
+                # Re-resolves + re-asserts containment -- see docstring;
+                # never trust the iterdir() entry's own path directly.
+                path = image_path(image_id, data_dir)
+            except ValueError:
+                _LOG.debug(
+                    "GET /api/images: skipping upload %r that fails path containment", entry.name
+                )
+                continue
+            try:
+                file_stat = path.stat()
+                with Image.open(path) as probe:  # header-only -- no .load()
+                    width, height = probe.size
+            except Exception as exc:  # noqa: BLE001 -- any per-file failure just drops that one entry
+                _LOG.debug("GET /api/images: skipping unreadable upload %r: %s", entry.name, exc)
+                continue
+            records.append(
+                (
+                    file_stat.st_mtime,
+                    {
+                        "image_id": image_id,
+                        "width": width,
+                        "height": height,
+                        "size_bytes": file_stat.st_size,
+                        "mtime": _iso_mtime(file_stat.st_mtime),
+                    },
+                )
+            )
+
+    records.sort(key=lambda record: record[0], reverse=True)
+    total = len(records)
+    offset = (page - 1) * page_size
+    page_items = [item for _, item in records[offset : offset + page_size]]
+    return {"items": page_items, "page": page, "page_size": page_size, "total": total}
+
+
+@router.get("")
+async def list_images(config: AppConfigDep, page: int = 1, page_size: int = 20) -> dict:
+    try:
+        return _list_uploaded_images(config.data_dir, page, page_size)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
 
 
 @router.get("/{image_id}")

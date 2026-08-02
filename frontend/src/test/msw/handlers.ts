@@ -42,6 +42,18 @@ export const uploadImageHandler = http.post("/api/images", () =>
   HttpResponse.json({ image_id: "img-1", width: 64, height: 64 }, { status: 201 }),
 );
 
+/** task D2a: GET/DELETE /api/images (the Uploads library) -- an empty
+ * default so every existing suite that happens to mount UploadsGallery (or
+ * anything that queries ["images", ...]) stays green without needing to
+ * know about it; UploadsGallery.test.tsx overrides both with server.use(...)
+ * for the scenarios it actually asserts on, same convention as everywhere
+ * else in this file. */
+export const imagesListHandler = http.get("/api/images", () =>
+  HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 }),
+);
+
+export const deleteImageHandler = http.delete("/api/images/:id", () => new HttpResponse(null, { status: 204 }));
+
 /** commit 6: the keep-awake poller's own status block, additive on GET
  * /api/printer/status -- "never enabled, never attempted" is the realistic
  * default for most tests (this fixture's own printer_mode is "mock", where
@@ -495,6 +507,8 @@ export const defaultHandlers = [
   symbolsHandler,
   symbolSvgHandler,
   uploadImageHandler,
+  imagesListHandler,
+  deleteImageHandler,
   printerStatusConnectedHandler,
   previewHandler,
   printEstimateHandler,

@@ -11,6 +11,8 @@ this file only exercises the upload/serve/delete HTTP surface.
 from __future__ import annotations
 
 import io
+import os
+import re
 import struct
 import uuid
 import zlib
@@ -329,3 +331,164 @@ async def test_upload_unsupported_format_bmp_rejected(client):
     )
     assert resp.status_code == 422
     assert "BMP" in resp.json()["detail"]
+
+
+# --- 8. GET /api/images (list, task D2a) -------------------------------------
+
+_ISO_MTIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
+
+
+async def test_list_images_empty_when_uploads_dir_missing(client):
+    # A fresh data_dir has never had an upload -- uploads/ doesn't exist yet
+    # at all. Must be an empty result, never a 500/404.
+    resp = await client.get("/api/images")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "page": 1, "page_size": 20, "total": 0}
+
+
+async def test_list_images_returns_uploaded_metadata(client):
+    upload = await client.post(
+        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes(30, 15)), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    resp = await client.get("/api/images")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["page"] == 1
+    assert body["page_size"] == 20
+    assert len(body["items"]) == 1
+
+    item = body["items"][0]
+    assert item["image_id"] == image_id
+    assert item["width"] == 30
+    assert item["height"] == 15
+    assert item["size_bytes"] > 0
+    assert _ISO_MTIME_RE.match(item["mtime"])
+
+
+async def test_list_images_sorted_newest_first(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+
+    first = await client.post(
+        "/api/images", files={"file": ("a.png", io.BytesIO(_png_bytes()), "image/png")}
+    )
+    second = await client.post(
+        "/api/images", files={"file": ("b.png", io.BytesIO(_png_bytes()), "image/png")}
+    )
+    first_id = first.json()["image_id"]
+    second_id = second.json()["image_id"]
+
+    # Force distinct, known mtimes -- some filesystems/CI runners don't have
+    # fine enough timestamp resolution to trust upload ORDER alone to
+    # produce distinct st_mtime values for two uploads microseconds apart.
+    os.utime(uploads / f"{first_id}.png", (1_700_000_000, 1_700_000_000))
+    os.utime(uploads / f"{second_id}.png", (1_700_000_100, 1_700_000_100))
+
+    resp = await client.get("/api/images")
+    assert resp.status_code == 200
+    ids = [item["image_id"] for item in resp.json()["items"]]
+    assert ids == [second_id, first_id]  # newest (later mtime) first
+
+
+async def test_list_images_pagination_math(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+
+    ids = []
+    for i in range(3):
+        resp = await client.post(
+            "/api/images", files={"file": (f"{i}.png", io.BytesIO(_png_bytes()), "image/png")}
+        )
+        ids.append(resp.json()["image_id"])
+    for i, image_id in enumerate(ids):
+        os.utime(uploads / f"{image_id}.png", (1_700_000_000 + i, 1_700_000_000 + i))
+    # ids[2] has the latest mtime, ids[0] the earliest -- newest-first order
+    # is [ids[2], ids[1], ids[0]].
+
+    page1 = await client.get("/api/images", params={"page": 1, "page_size": 2})
+    assert page1.status_code == 200
+    body1 = page1.json()
+    assert body1["total"] == 3
+    assert body1["page"] == 1
+    assert body1["page_size"] == 2
+    assert [item["image_id"] for item in body1["items"]] == [ids[2], ids[1]]
+
+    page2 = await client.get("/api/images", params={"page": 2, "page_size": 2})
+    assert page2.status_code == 200
+    body2 = page2.json()
+    assert body2["total"] == 3
+    assert body2["page"] == 2
+    assert [item["image_id"] for item in body2["items"]] == [ids[0]]
+
+    page3 = await client.get("/api/images", params={"page": 3, "page_size": 2})
+    assert page3.status_code == 200
+    assert page3.json()["items"] == []
+    assert page3.json()["total"] == 3
+
+
+async def test_list_images_invalid_page_returns_422(client):
+    resp = await client.get("/api/images", params={"page": 0})
+    assert resp.status_code == 422
+
+
+async def test_list_images_invalid_page_size_returns_422(client):
+    resp = await client.get("/api/images", params={"page_size": 101})
+    assert resp.status_code == 422
+
+    resp = await client.get("/api/images", params={"page_size": 0})
+    assert resp.status_code == 422
+
+
+async def test_list_images_skips_hostile_filename_silently(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    (uploads / "not-a-valid-id.png").write_bytes(_png_bytes())  # fails IMAGE_ID_RE
+
+    resp = await client.get("/api/images")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+
+
+async def test_list_images_ignores_non_png_files(app_and_client):
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    (uploads / f"{uuid.uuid4().hex}.txt").write_text("not a png")
+
+    resp = await client.get("/api/images")
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []
+
+
+async def test_list_images_skips_symlinked_but_well_formed_id_not_500(app_and_client):
+    # Same containment-escape shape as the GET/DELETE 3b tests above, but
+    # for the LIST endpoint: a regex-valid filename whose resolved path
+    # escapes uploads_dir/ (a symlink) must be silently dropped, never a 500
+    # and never included in the listing.
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    outside = data_dir.parent / "outside-uploads-list"
+    outside.mkdir(parents=True, exist_ok=True)
+    secret = outside / "secret.png"
+    secret.write_bytes(_png_bytes())
+
+    image_id = uuid.uuid4().hex
+    (uploads / f"{image_id}.png").symlink_to(secret)
+
+    resp = await client.get("/api/images")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["items"] == []
+    assert body["total"] == 0
