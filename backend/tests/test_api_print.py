@@ -90,6 +90,32 @@ class _RecordingSocket:
         self.events.append(data)
 
 
+async def _wait_for_event(
+    recorder: _RecordingSocket,
+    event: str,
+    job_id: str,
+    max_polls: int = 250,
+    interval: float = 0.02,
+) -> dict:
+    """H8 (docs/code-review-2026-08.md): bounded poll on `recorder.events`
+    for `event`/`job_id`, same discipline as `_wait_for_terminal_job` above
+    -- worker.py's failure handler is two SEQUENTIAL awaits, `db.update_job`
+    (itself several more aiosqlite round trips via the get_job() it ends
+    with) THEN `bus.broadcast`, so `_wait_for_terminal_job` reading the
+    already-committed terminal row is no guarantee the broadcast has
+    happened yet. Callers that assert on `recorder.events` must wait on the
+    event directly, not infer it from the job's DB status."""
+    for _ in range(max_polls):
+        for e in recorder.events:
+            if e.get("event") == event and e.get("job_id") == job_id:
+                return e
+        await anyio.sleep(interval)
+    pytest.fail(
+        f"event {event!r} for job {job_id} was not broadcast within {max_polls * interval}s "
+        f"(recorder.events={recorder.events!r})"
+    )
+
+
 # --- 1. Walking-skeleton e2e: POST -> worker -> done -> stream byte-parity ---
 
 
@@ -378,6 +404,13 @@ async def test_print_failure_marks_job_failed_and_broadcasts_job_failed(
     job = await _wait_for_terminal_job(client, job_id)
     assert job["status"] == "failed"
     assert "printer caught fire" in job["error"]
+
+    # H8 (docs/code-review-2026-08.md): the DB status write and the
+    # job.failed broadcast are two sequential awaits in worker.py's failure
+    # handler -- _wait_for_terminal_job above can observe the committed
+    # "failed" row before the broadcast has actually happened, so wait on
+    # the event itself (bounded) rather than assuming it's already there.
+    await _wait_for_event(recorder, "job.failed", job_id)
 
     failed_events = [e for e in recorder.events if e.get("event") == "job.failed"]
     assert len(failed_events) == 1

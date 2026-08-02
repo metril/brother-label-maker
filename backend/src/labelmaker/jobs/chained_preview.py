@@ -7,7 +7,9 @@ codebase goes through: see render/__init__.py's module docstring), then
 stitches the resulting per-label PIL mode "1" images into ONE composite
 strip that shows what the physical tape will actually look like under the
 request's chain_mode -- gaps, cut marks, and all. api/router_print.py's
-POST /print/preview is the only caller.
+POST /print/preview is the only caller, via build_chained_preview_from_rendered
+(see the M2 fix-up note below for why it's that entry point, not
+build_chained_preview itself).
 
 jobs/ legally imports both labelmaker.render and labelmaker.driver (see
 jobs/worker.py's own module docstring) -- this module does too, but ONLY
@@ -19,6 +21,23 @@ Tape-usage totals (total_mm/content_mm/feed_overhead_mm/per_label_mm/notes)
 come from render.estimate.estimate() -- the ONE authoritative model for "how
 much tape does this job use" (task 2.9). This module NEVER re-derives them;
 it only turns the SAME numbers into pixels for the composite image.
+
+Review fix-up (M2, docs/code-review-2026-08.md): api/router_print.py's
+preview_print_job used to call this module's build_chained_preview() AFTER
+already running an equivalent render_definition() pass of its own (for
+pre-flight validation + tape-usage estimation, api/router_print.py's
+_validate_and_render) -- rendering every label twice. build_chained_preview
+still exists and still does its own render_definition/expand_definition
+pass, for direct callers (tests, or any future non-API caller) that don't
+already have RenderedLabel objects lying around. But the API's own path now
+calls build_chained_preview_from_rendered() with the RenderedLabel list
+_validate_and_render already produced -- rasterize+composite only, no
+second render_definition call. Both entry points share the same
+rasterize->estimate->composite tail (_finish below) so there is exactly one
+copy of that logic either way. composite_dimensions() computes the
+composite's pre-rasterize pixel footprint from that SAME RenderedLabel list
+alone (no PIL object involved) so router_print.py's pixel-budget guard (H1)
+can reject an oversized composite before this module ever calls Image.new().
 """
 
 from __future__ import annotations
@@ -31,7 +50,7 @@ from PIL import Image
 from labelmaker.driver.geometry import MIN_FEED_MM, dots_to_mm, mm_to_dots
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.render import rasterize, render_definition
-from labelmaker.render.document import LabelDefinition, RenderWarning
+from labelmaker.render.document import LabelDefinition, RenderedLabel, RenderWarning
 from labelmaker.render.estimate import TapeEstimate, estimate
 from labelmaker.render.serialize import Sequence, expand_definition
 
@@ -87,8 +106,9 @@ def _expand_and_render(
     """
     if serialization is not None:
         # task 2.4-style re-expansion: `labels` holds exactly ONE template
-        # (router_print.py's _validate_and_measure enforces that before this
-        # is ever called) -- expand it into the real per-label definitions.
+        # (router_print.py's _validate_and_measure/_validate_and_render both
+        # enforce that before either ever calls into this module) -- expand
+        # it into the real per-label definitions.
         bound = expand_definition(labels[0].model_dump(mode="json"), serialization)
         definitions = [LabelDefinition.model_validate(raw) for raw in bound]
     else:
@@ -187,6 +207,83 @@ def _composite(
     return composite, segments
 
 
+def _finish(
+    images: list[Image.Image],
+    label_warnings: list[list[RenderWarning]],
+    chain_mode: ChainMode,
+    margin_mm: float,
+) -> ChainedPreview:
+    """Shared tail of build_chained_preview and
+    build_chained_preview_from_rendered, once every label is already a
+    rasterized mode "1" image: derive lengths from those SAME images (never
+    re-measured a different way), get the ONE authoritative tape-usage
+    estimate, then composite. The one place this logic exists, regardless of
+    which entry point produced `images`."""
+    lengths_mm = [dots_to_mm(img.width) for img in images]
+    tape_estimate = estimate(lengths_mm, chain_mode=chain_mode.value, margin_mm=margin_mm)
+
+    composite, segments = _composite(images, chain_mode)
+
+    return ChainedPreview(
+        image=composite,
+        estimate=tape_estimate,
+        segments=segments,
+        label_warnings=label_warnings,
+    )
+
+
+def composite_dimensions(rendered: list[RenderedLabel], chain_mode: ChainMode) -> tuple[int, int]:
+    """(width_dots, height_dots) the composite _composite() would build for
+    `rendered` + `chain_mode`, computed WITHOUT building it -- pure
+    arithmetic over already-known RenderedLabel.width_px/height_px, using
+    the exact same block_dots-per-chain_mode rule _composite itself uses
+    (kept in lockstep because both read the same
+    _CUT_MARK_GAP_DOTS/_CUT_MARK_WIDTH_DOTS/MIN_FEED_MM constants -- there is
+    no third copy of this arithmetic to drift).
+
+    Exists so router_print.py's pixel-budget guard (H1, docs/
+    code-review-2026-08.md) can reject an oversized composite BEFORE any
+    Image.new()/paste()/rasterize() call ever runs -- `rendered` here comes
+    from a cheap render_definition() pass (no resvg call yet), so this
+    function's own cost is negligible even for a large `rendered` list.
+    """
+    n = len(rendered)
+    height = rendered[0].height_px
+    if chain_mode is ChainMode.CUT_EACH:
+        block_dots = mm_to_dots(MIN_FEED_MM)
+    elif chain_mode is ChainMode.STRIP_MARKS:
+        block_dots = 2 * _CUT_MARK_GAP_DOTS + _CUT_MARK_WIDTH_DOTS
+    else:  # CHAIN_FF
+        block_dots = 0
+    width = sum(r.width_px for r in rendered) + block_dots * max(n - 1, 0)
+    return width, height
+
+
+def build_chained_preview_from_rendered(
+    rendered: list[RenderedLabel], chain_mode: ChainMode, margin_mm: float
+) -> ChainedPreview:
+    """Same result as build_chained_preview, given `rendered` -- a list of
+    already-produced RenderedLabel objects (e.g. router_print.py's
+    _validate_and_render pre-flight) -- instead of raw LabelDefinitions plus
+    a Sequence to expand. Skips render_definition/expand_definition
+    entirely: only rasterizes (once each, exactly like
+    build_chained_preview) and composites. Positional-only args for the same
+    `anyio.to_thread.run_sync(build_chained_preview_from_rendered, ...)`
+    reason build_chained_preview documents.
+
+    Does NOT repeat build_chained_preview's own single-shared-tape check:
+    RenderedLabel carries no Tape (that's the whole point -- it's already
+    past the point where tape mattered), and the router's own
+    _validate_and_render already enforces one-tape-per-job over the same
+    labels before rendering them. A caller with pre-rendered labels that
+    skipped that check is responsible for having made the same guarantee
+    itself.
+    """
+    images = [rasterize(r) for r in rendered]
+    label_warnings = [list(r.warnings) for r in rendered]
+    return _finish(images, label_warnings, chain_mode, margin_mm)
+
+
 def build_chained_preview(
     labels: list[LabelDefinition],
     serialization: Sequence | None,
@@ -207,10 +304,13 @@ def build_chained_preview(
     callers should catch these the same way router_print.py's other
     validation helpers do (KeyError/ValueError -> 422). Also raises
     ValueError if `labels` resolve to more than one distinct tape --
-    belt-and-suspenders: api/router_print.py's _validate_and_measure already
+    belt-and-suspenders: api/router_print.py's _validate_and_render already
     rejects this (same message) BEFORE this function is ever called from the
-    API, so this branch should be unreachable via POST /print/preview, but
-    keeps this function safe to call directly (e.g. from tests) too.
+    API (which in fact now calls build_chained_preview_from_rendered
+    instead, precisely to avoid re-running this function's render pass --
+    see M2, docs/code-review-2026-08.md), so this branch should be
+    unreachable via POST /print/preview, but keeps this function safe to
+    call directly (e.g. from tests) too.
     """
     images, definitions, label_warnings = _expand_and_render(labels, serialization, data_dir)
 
@@ -218,14 +318,4 @@ def build_chained_preview(
     if len(tapes) > 1:
         raise ValueError("all labels in a print job must share the same tape")
 
-    lengths_mm = [dots_to_mm(img.width) for img in images]
-    tape_estimate = estimate(lengths_mm, chain_mode=chain_mode.value, margin_mm=margin_mm)
-
-    composite, segments = _composite(images, chain_mode)
-
-    return ChainedPreview(
-        image=composite,
-        estimate=tape_estimate,
-        segments=segments,
-        label_warnings=label_warnings,
-    )
+    return _finish(images, label_warnings, chain_mode, margin_mm)

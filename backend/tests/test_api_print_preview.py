@@ -306,6 +306,81 @@ async def test_preview_segments_monotonic_and_last_end_matches_composite_length(
     assert segments[-1]["end_mm"] == pytest.approx(dots_to_mm(expected_total_width_px))
 
 
+# --- (h) H1: pixel-budget guard -- a legal-but-huge request 422s instead --
+# of building the composite -- docs/code-review-2026-08.md.
+
+
+async def test_preview_rejects_legal_but_huge_serialized_request_with_422_budget_cap(client):
+    """Every individual figure here is within its own documented cap --
+    length_mm=1000 is exactly tape.max_length_mm for 24mm TZe
+    (driver/geometry.py), scale=8 is the field's own `le=8` ceiling, and 2
+    serialized labels is far under both the 100-label direct cap and the
+    1000-label serialized cap -- but the composite they'd multiply out to
+    (2 x 7086 dots wide x 128 dots tall, upscaled 8x) is ~117.5 MP, well
+    past MAX_PREVIEW_PIXELS (40 MP). This must 422 BEFORE any rasterize/
+    Image.new() call, not exhaust memory or hang building an unusable PNG.
+    """
+    template = {
+        "type": "text",
+        "tape": {"width_mm": 24, "family": "tze"},
+        "params": {"lines": ["Port {seq}"], "length_mm": 1000.0},
+    }
+    body = {
+        "labels": [template],
+        "serialization": {"kind": "list", "values": ["A", "B"]},
+        "options": {"chain_mode": "cut_each"},
+        "scale": 8,
+    }
+
+    resp = await client.post("/api/print/preview", json=body)
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "exceeding" in detail
+    assert "40,000,000" in detail  # MAX_PREVIEW_PIXELS, formatted
+    assert "scale=8" in detail
+
+
+async def test_preview_pixel_budget_uses_post_scale_dimensions(client):
+    """A request whose PRE-scale composite is comfortably under the budget
+    but whose scale pushes it over must still 422 -- the guard checks
+    width_dots*scale x height_dots*scale, not the unscaled figure."""
+    label = _text_label("BUDGET", length_mm=900.0)  # ~6380 dots x 128 -> ~0.82 MP pre-scale
+
+    small_scale_resp = await client.post(
+        "/api/print/preview", json={"labels": [label], "scale": 1}
+    )
+    assert small_scale_resp.status_code == 200  # ~0.82 MP: nowhere near the cap
+
+    large_scale_resp = await client.post(
+        "/api/print/preview", json={"labels": [label], "scale": 8}
+    )
+    # ~0.82 MP x 64 (scale=8 squared) =~ 52.3 MP: over the 40 MP cap.
+    assert large_scale_resp.status_code == 422
+    assert "40,000,000" in large_scale_resp.json()["detail"]
+
+
+# --- (i) H1: MemoryError from the render/composite/encode calls maps to ----
+# 507, never a raw 500 -- docs/code-review-2026-08.md.
+
+
+async def test_preview_memory_error_during_composite_maps_to_507_not_500(client, monkeypatch):
+    """A backstop for whatever the pixel-budget check above doesn't catch:
+    if the actual rasterize/composite/encode work raises MemoryError, the
+    endpoint must still respond with a clean error, not an unhandled 500."""
+
+    def _out_of_memory(*args, **kwargs):
+        raise MemoryError("simulated OOM")
+
+    monkeypatch.setattr(
+        "labelmaker.api.router_print.build_chained_preview_from_rendered", _out_of_memory
+    )
+
+    label = _text_label("SOLO", length_mm=20.0)
+    resp = await client.post("/api/print/preview", json={"labels": [label], "scale": 1})
+    assert resp.status_code == 507
+    assert "memory" in resp.json()["detail"].lower()
+
+
 # --- Regression: no full-suite run, but a spot check that /print itself ----
 # still behaves -- run separately via `uv run pytest tests/test_api_print.py -q`
 # per this track's own instructions, not duplicated here.

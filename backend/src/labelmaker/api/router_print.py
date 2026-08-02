@@ -23,13 +23,39 @@ from pydantic import BaseModel, Field
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
 from labelmaker.driver.geometry import dots_to_mm
 from labelmaker.driver.protocol import ChainMode
-from labelmaker.jobs.chained_preview import build_chained_preview
+from labelmaker.jobs.chained_preview import (
+    build_chained_preview_from_rendered,
+    composite_dimensions,
+)
 from labelmaker.render import preview_png, render_definition
-from labelmaker.render.document import LabelDefinition
+from labelmaker.render.document import LabelDefinition, RenderedLabel
 from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition, ordered_values
 
 router = APIRouter(prefix="/print", tags=["print"])
+
+# H1 (docs/code-review-2026-08.md): POST /print/preview composites every
+# label into one PIL strip and then upscales it by `scale` (1..8) -- nothing
+# previously bounded the product, and the request's own legal caps multiply
+# out to tens of gigabytes (100 labels x 1000mm each x scale=8) or, even at
+# the shipped UI's own hardcoded scale=2, hundreds of megapixels for a
+# maximum-size 1000-label serialized run. MAX_PREVIEW_PIXELS bounds the
+# FINAL (post-scale) composite pixel count -- width_dots*scale *
+# height_dots*scale -- the same quantity `preview_png` would actually
+# allocate a PIL buffer for.
+#
+# 40,000,000 (40 MP) is chosen from the geometry, not the legal maximum: a
+# full-width (24mm/128-dot) 1000-label cut_each run at typical few-cm label
+# lengths, or a few hundred labels at the UI's own scale=2, both clear it
+# comfortably (a realistic single preview is at most tens of megapixels
+# pre-scale); the reproduced abuse cases (100 labels x 1000mm, or 1000
+# labels through the UI's default scale=2 alone) do not. It also sits well
+# inside both known hard ceilings so a request that DOES clear this cap can
+# never hit either of them: Pillow's own decompression-bomb default
+# (`Image.MAX_IMAGE_PIXELS`, ~178.9 MP) and the point real Chrome stops
+# decoding the resulting PNG at all (reproduced in the review between
+# ~23.7 MP, which decodes, and ~259 MP, which shows the broken-image glyph).
+MAX_PREVIEW_PIXELS = 40_000_000
 
 
 class PrintOptions(BaseModel):
@@ -51,29 +77,31 @@ class PrintRequest(BaseModel):
     serialization: Sequence | None = None
 
 
-def _validate_render_side(labels: list[LabelDefinition], data_dir: Path) -> list[float]:
+def _validate_render_side(labels: list[LabelDefinition], data_dir: Path) -> list[RenderedLabel]:
     """Cheap per-label validation: resolve each label's tape and validate its
     params against the target type's own Params model (render_definition
     does both, plus building the SVG -- still no resvg call). The expensive
-    step, rasterize(), is deliberately deferred to the worker so a batch of
+    step, rasterize(), is deliberately deferred to the worker (or, for POST
+    /print/preview, to build_chained_preview_from_rendered) so a batch of
     100 labels doesn't rasterize before the client even gets a job id back.
     `data_dir` (task 2.7) is threaded through so a "text" label's
     `icon.kind="image"` param resolves against the same uploads/ directory
     the worker will use -- an unknown image_id fails HERE, at POST time,
     not after the job is already queued.
 
-    Returns each label's rendered length in mm (dots_to_mm of its
-    RenderedLabel.width_px) -- task 2.9 reuses this SAME render pass (no
-    second render_definition call) to feed render.estimate.estimate(), so
-    computing a tape-usage estimate at POST time costs nothing beyond the
-    validation this function was already doing.
+    Returns each label's RenderedLabel (task 2.9 reuses this SAME render
+    pass -- no second render_definition call -- to feed
+    render.estimate.estimate() via dots_to_mm(width_px); review fix-up M2
+    reuses it a second time, to feed POST /print/preview's own composite
+    build without re-running render_definition yet again -- see
+    _validate_and_render below).
     """
-    return [dots_to_mm(render_definition(defn, data_dir=data_dir).width_px) for defn in labels]
+    return [render_definition(defn, data_dir=data_dir) for defn in labels]
 
 
 def _validate_serialized_print(
     template: LabelDefinition, serialization: Sequence, data_dir: Path
-) -> tuple[list[dict], list[float]]:
+) -> tuple[list[dict], list[RenderedLabel]]:
     """task 2.4's serialized-print pre-flight: expand `template` now (still
     no resvg call) so an ALPHA run stepping below 'A'/beyond 'ZZZ' or an
     unknown {csv.<col>} in the template comes back as an immediate 422,
@@ -94,34 +122,48 @@ def _validate_serialized_print(
     caller can go straight to the offending row/value instead of
     bisecting a 1000-label run by hand.
 
-    Returns (bound, lengths_mm) -- lengths_mm mirrors _validate_render_side's
-    own addition (task 2.9): one rendered length per expanded label, in the
-    same order as `bound`, for render.estimate.estimate() to consume without
-    a second render pass.
+    Returns (bound, rendered) -- rendered mirrors _validate_render_side's
+    own return (task 2.9's addition, extended by M2): one RenderedLabel per
+    expanded label, in the same order as `bound`, for
+    render.estimate.estimate() AND (for POST /print/preview specifically)
+    build_chained_preview_from_rendered to both consume without a second
+    render pass.
     """
     bound = expand_definition(template.model_dump(mode="json"), serialization)
     values = ordered_values(serialization)
-    lengths_mm: list[float] = []
+    rendered: list[RenderedLabel] = []
     for i, (raw, value) in enumerate(zip(bound, values, strict=True)):
         try:
-            rendered = render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
+            r = render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
         except (KeyError, ValueError) as exc:
             raise ValueError(
                 f"label {i} (sequence value {value!r}): {error_message(exc)}"
             ) from exc
-        lengths_mm.append(dots_to_mm(rendered.width_px))
-    return bound, lengths_mm
+        rendered.append(r)
+    return bound, rendered
 
 
-async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int, list[float]]:
+async def _validate_and_render(
+    body: PrintRequest, data_dir: Path
+) -> tuple[int, list[RenderedLabel]]:
     """Shared pre-flight: the SAME cheap validation (serialization shape,
     per-label render/params validation, single-shared-tape check) POST
     /api/print has always done at 202-time, now also returning each label's
-    rendered length in mm -- shared by create_print_job (which goes on to
-    create+enqueue the job) and estimate_print_job (task 2.9's POST
-    /api/print/estimate, which does neither). Returns (label_count,
-    label_lengths_mm), in the same order build_job will eventually receive
-    the images in.
+    RenderedLabel -- the render_definition() output, still no resvg call.
+    Returns (label_count, rendered), `rendered` index-aligned with whatever
+    build_chained_preview_from_rendered would eventually rasterize (the
+    expanded per-label list for a serialized job, `body.labels` itself
+    otherwise) -- in the same order build_job will eventually receive the
+    images in.
+
+    Review fix-up (M2, docs/code-review-2026-08.md): split out of
+    _validate_and_measure (below, now a thin wrapper over this) so POST
+    /api/print/preview -- the one caller that goes on to actually
+    rasterize+composite -- can reuse these SAME RenderedLabel objects
+    instead of paying for a second render_definition pass per label.
+    create_print_job/estimate_print_job/router_history.py's reprint
+    preflight only ever need the lengths in mm, via _validate_and_measure,
+    and never see `rendered` at all.
     """
     if body.serialization is not None:
         if len(body.labels) != 1:
@@ -133,7 +175,7 @@ async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int
                 ),
             )
         try:
-            bound, lengths_mm = await anyio.to_thread.run_sync(
+            bound, rendered = await anyio.to_thread.run_sync(
                 _validate_serialized_print, body.labels[0], body.serialization, data_dir
             )
         except (KeyError, ValueError) as exc:
@@ -141,7 +183,7 @@ async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int
         label_count = len(bound)
     else:
         try:
-            lengths_mm = await anyio.to_thread.run_sync(
+            rendered = await anyio.to_thread.run_sync(
                 _validate_render_side, body.labels, data_dir
             )
         except (KeyError, ValueError) as exc:
@@ -154,6 +196,19 @@ async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int
             status_code=422, detail="all labels in a print job must share the same tape"
         )
 
+    return label_count, rendered
+
+
+async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int, list[float]]:
+    """Thin wrapper over _validate_and_render for the callers that only ever
+    needed each label's rendered length in mm, not the RenderedLabel objects
+    themselves -- create_print_job (which goes on to create+enqueue the
+    job), estimate_print_job (task 2.9's POST /api/print/estimate, which
+    does neither), and router_history.py's reprint preflight. Returns
+    (label_count, label_lengths_mm), unchanged from before the M2 split.
+    """
+    label_count, rendered = await _validate_and_render(body, data_dir)
+    lengths_mm = [dots_to_mm(r.width_px) for r in rendered]
     return label_count, lengths_mm
 
 
@@ -238,7 +293,7 @@ class ChainedPreviewResponse(BaseModel):
     """POST /api/print/preview's response: a single composited PNG showing
     the whole chained job as it will physically lay out on tape (butted for
     chain_ff, blank gaps for cut_each, cut-mark dashes for strip_marks --
-    see jobs/chained_preview.build_chained_preview), plus the SAME
+    see jobs/chained_preview.build_chained_preview_from_rendered), plus the SAME
     TapeEstimate fields POST /api/print/estimate returns (never re-derived
     here -- render.estimate.estimate() is the one authoritative source for
     all of total_mm/content_mm/feed_overhead_mm/per_label_mm/notes).
@@ -270,30 +325,68 @@ async def preview_print_job(
     body: PrintPreviewRequest, config: AppConfigDep
 ) -> ChainedPreviewResponse:
     """A single composited preview of the whole chained job. Validated
-    exactly like POST /api/print and POST /api/print/estimate -- via
-    _validate_and_measure, reused as-is here for parity (serialization
-    expansion, serialization-vs-multi-label shape, per-label param/tape
-    validation, single-shared-tape check) -- before jobs/chained_preview.
-    build_chained_preview does the actual per-label render + composite, off
-    the event-loop thread like every other render/rasterize call in this
-    codebase. No job is created; nothing is enqueued or persisted (same as
-    POST /api/print/estimate).
+    exactly like POST /api/print and POST /api/print/estimate --
+    _validate_and_render (below) does the SAME checks _validate_and_measure
+    does for parity (serialization expansion, serialization-vs-multi-label
+    shape, per-label param/tape validation, single-shared-tape check) --
+    before jobs/chained_preview.build_chained_preview_from_rendered does the
+    actual per-label rasterize + composite, off the event-loop thread like
+    every other render/rasterize call in this codebase. No job is created;
+    nothing is enqueued or persisted (same as POST /api/print/estimate).
+
+    Review fix-up M2 (docs/code-review-2026-08.md): this used to call
+    _validate_and_measure for validation ALONE, discarding its render pass,
+    then have build_chained_preview render every label again from scratch --
+    every label rendered twice. _validate_and_render instead hands the SAME
+    RenderedLabel objects straight to build_chained_preview_from_rendered,
+    so each label is rendered exactly once total.
+
+    Review fix-up H1 (docs/code-review-2026-08.md): the composite's pixel
+    footprint (post-`scale`) is computed from those SAME RenderedLabel
+    objects -- via composite_dimensions(), pure arithmetic, no PIL object
+    involved -- and checked against MAX_PREVIEW_PIXELS BEFORE any
+    rasterize()/Image.new() call, so an oversized request 422s instead of
+    exhausting memory or producing a PNG neither Pillow nor a browser can
+    decode. A MemoryError from the render/composite/encode calls themselves
+    (a backstop for whatever the budget check doesn't catch) maps to 507,
+    never a raw 500.
     """
-    await _validate_and_measure(body, config.data_dir)
+    _, rendered = await _validate_and_render(body, config.data_dir)
+
+    width_dots, height_dots = composite_dimensions(rendered, body.options.chain_mode)
+    scaled_width = width_dots * body.scale
+    scaled_height = height_dots * body.scale
+    composite_pixels = scaled_width * scaled_height
+    if composite_pixels > MAX_PREVIEW_PIXELS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"chained preview would be {scaled_width}x{scaled_height} px "
+                f"({composite_pixels:,} px total) at scale={body.scale}, exceeding the "
+                f"{MAX_PREVIEW_PIXELS:,}px cap -- reduce the number of labels, their "
+                "length, or `scale`"
+            ),
+        )
 
     try:
         preview = await anyio.to_thread.run_sync(
-            build_chained_preview,
-            body.labels,
-            body.serialization,
-            config.data_dir,
+            build_chained_preview_from_rendered,
+            rendered,
             body.options.chain_mode,
             body.options.margin_mm,
         )
+        png_bytes = await anyio.to_thread.run_sync(preview_png, preview.image, body.scale)
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=error_message(exc)) from exc
-
-    png_bytes = await anyio.to_thread.run_sync(preview_png, preview.image, body.scale)
+    except MemoryError as exc:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                "ran out of memory building the chained preview composite "
+                f"(requested {scaled_width}x{scaled_height} px) -- try a smaller "
+                "`scale` or fewer/shorter labels"
+            ),
+        ) from exc
 
     warnings = [
         f"label {i}: {warning.message}"
