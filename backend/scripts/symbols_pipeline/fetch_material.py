@@ -24,7 +24,6 @@ material_ids.txt and re-running cleans up anything removed from the list.
 
 from __future__ import annotations
 
-import re
 import tarfile
 import tempfile
 import urllib.request
@@ -39,39 +38,12 @@ LICENSE = "Apache-2.0"
 
 IDS_FILE = Path(__file__).resolve().parent / "material_ids.txt"
 
-_CATEGORY_HEADER_RE = re.compile(r"^#\s*category:\s*(\w+)\s*$", re.I)
-
 # Material's own coordinate system (viewBox="0 -960 960 960") -> this
 # project's 24x24 square: 24/960 == 0.025, and translating y by +960 first
 # (transform lists apply right-to-left to a point) shifts [-960,0] to
 # [0,960] before the scale brings it down to [0,24]. Identical to the
 # recipe documented for the original 60 in assets/symbols/LICENSES.md.
 TRANSFORM = "scale(0.025) translate(0,960)"
-
-
-def parse_curated_ids(text: str) -> list[tuple[str, str]]:
-    """Returns [(category, material_icon_id), ...] in file order, honoring
-    '# category: X' section headers (case-insensitive); '#'-prefixed lines
-    are comments (including '##' human-only sub-headings), blank lines are
-    skipped.
-    """
-    out: list[tuple[str, str]] = []
-    category: str | None = None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            m = _CATEGORY_HEADER_RE.match(line)
-            if m:
-                category = m.group(1).lower()
-            continue
-        if category is None:
-            raise ValueError(
-                f"{IDS_FILE.name}: id {line!r} appears before any '# category:' header"
-            )
-        out.append((category, line))
-    return out
 
 
 def download_and_extract(url: str, dest: Path) -> Path:
@@ -84,7 +56,7 @@ def download_and_extract(url: str, dest: Path) -> Path:
 
 
 def main() -> None:
-    curated = parse_curated_ids(IDS_FILE.read_text())
+    curated = common.parse_curated_ids_with_category(IDS_FILE.read_text(), IDS_FILE.name)
     print(f"{len(curated)} curated ids in {IDS_FILE.name}")
 
     with tempfile.TemporaryDirectory(prefix="material-symbols-") as tmp:

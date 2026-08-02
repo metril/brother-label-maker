@@ -22,6 +22,16 @@ backend/.venv
 backend/.pytest_cache
 backend/.ruff_cache
 
+# Dev-only tooling (symbols_pipeline/'s fetch_*.py + regen_goldens.py):
+# downloads/regenerates backend/assets/symbols/ and golden fixtures at dev
+# time only. Nothing under backend/src/labelmaker/ imports it and no
+# Dockerfile stage invokes it (grep docker/Dockerfile for "scripts" -- the
+# only match is the frontend's unrelated scripts/copy-fonts.mjs, which lives
+# under frontend/, not here), so it's pure dead weight in the shipped image.
+# Distinct from backend/assets/, which the header note above already
+# protects and which this pattern (anchored under backend/) can't touch.
+backend/scripts
+
 # Repo-local tooling, docs, and secrets that never belong in the image.
 /.superpowers
 /data

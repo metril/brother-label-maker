@@ -17,6 +17,16 @@
 # variants, android-status-bar-specific glyphs, brand-only icons, near-dupes of
 # already-selected ids). Trims are intentional curation, not omissions -- add
 # more ids here (one per line, correct section) to expand the catalog later.
+#
+# Also intentionally excluded: 38 ids that would collide with an existing
+# legacy (bare-id) icon of the same name -- e.g. "bolt", "lock", "wifi" --
+# because the original 60 (task 2.7) were themselves hand-curated from an
+# earlier Material Symbols snapshot, so `material_bolt` would just be a
+# near-identical second glyph for a concept the legacy id already covers.
+# Computed programmatically (every legacy id for which `material_<id>` would
+# also appear in index.json) rather than eyeballed; see review fixup commit
+# for the exact list. The legacy id keeps resolving on its own -- nothing
+# here removes or touches the original 60.
 
 # category: electrical
 ## -- electrical --
@@ -32,7 +42,6 @@ battery_share
 battery_status_good
 battery_unknown
 battery_very_low
-bolt
 bolt_boost
 delivery_truck_bolt
 detector_battery
@@ -44,23 +53,17 @@ electric_meter
 electric_moped
 electric_rickshaw
 electric_scooter
-electrical_services
 energy
 energy_program_saving
 energy_program_time_used
 energy_savings_leaf
 ev_station
 flash_auto
-flash_off
-flash_on
 gas_meter
 headphones_battery
 no_flash
-outlet
 plug_connect
-power
 power_input
-power_off
 power_settings_new
 settings_power
 smart_outlet
@@ -88,10 +91,6 @@ cell_wifi
 chromecast_device
 cloud_done
 cloud_sync
-device_hub
-dns
-hub
-lan
 media_bluetooth_off
 media_bluetooth_on
 mobile_cast
@@ -101,7 +100,6 @@ nest_wifi_pro
 nest_wifi_pro_2
 nest_wifi_router
 network_cell
-network_check
 network_intel_node
 network_intelligence
 network_intelligence_history
@@ -119,13 +117,11 @@ on_hub_device
 perm_scan_wifi
 phone_bluetooth_speaker
 portable_wifi_off
-router
 router_off
 rss_feed
 satellite
 satellite_alt
 settings_bluetooth
-settings_ethernet
 signal_cellular_alt
 signal_wifi_bad
 signal_wifi_off
@@ -133,7 +129,6 @@ signal_wifi_statusbar_not_connected
 signal_wifi_statusbar_null
 sim_card
 sim_card_download
-wifi
 wifi_add
 wifi_calling
 wifi_channel
@@ -142,7 +137,6 @@ wifi_find
 wifi_home
 wifi_lock
 wifi_notification
-wifi_off
 wifi_password
 wifi_protected_setup
 wifi_proxy
@@ -175,7 +169,6 @@ flip_camera_android
 flip_camera_ios
 frame_person_mic
 graphic_eq
-headset_mic
 headset_off
 hearing
 hearing_aid
@@ -185,13 +178,11 @@ home_speaker
 library_music
 linked_camera
 live_tv
-mic
 mic_alert
 mic_double
 mic_external_off
 mic_external_on
 mic_gear
-mic_off
 mobile_camera
 mobile_camera_front
 mobile_camera_rear
@@ -231,7 +222,6 @@ settings_video_camera
 spatial_audio
 spatial_audio_off
 spatial_speaker
-speaker
 speaker_2
 speaker_group
 speaker_notes
@@ -246,7 +236,6 @@ surround_sound
 switch_camera
 tablet_camera
 theaters
-tv
 tv_displays
 tv_gen
 tv_guide
@@ -265,18 +254,15 @@ video_camera_front_off
 video_file
 video_library
 video_settings
-videocam
 videocam_alert
 videocam_off
 volume_down
 volume_mute
 volume_off
-volume_up
 
 # category: arrow
 ## -- arrow --
 arrow_and_edge
-arrow_back
 arrow_back_2
 arrow_back_ios
 arrow_back_ios_new
@@ -285,12 +271,10 @@ arrow_circle_left
 arrow_circle_right
 arrow_circle_up
 arrow_cool_down
-arrow_downward
 arrow_downward_alt
 arrow_drop_down
 arrow_drop_down_circle
 arrow_drop_up
-arrow_forward
 arrow_forward_ios
 arrow_insert
 arrow_left
@@ -311,7 +295,6 @@ arrow_top_left
 arrow_top_right
 arrow_upload_progress
 arrow_upload_ready
-arrow_upward
 arrow_upward_alt
 arrow_warm_up
 call_made
@@ -363,7 +346,6 @@ unfold_more_double
 # category: general
 ## -- general -- tools --
 architecture
-build
 build_circle
 carpenter
 construction
@@ -404,7 +386,6 @@ fingerprint_off
 gpp_bad
 gpp_maybe
 house_with_shield
-key
 key_off
 key_vertical
 key_visualizer
@@ -413,9 +394,7 @@ keyboard_control_key
 keyboard_lock
 keyboard_lock_off
 keyboard_option_key
-lock
 lock_clock
-lock_open
 lock_open_circle
 lock_open_right
 lock_person
@@ -456,7 +435,6 @@ sync_lock
 verified_user
 visibility_lock
 visibility_off
-vpn_key
 vpn_key_alert
 vpn_key_off
 vpn_lock
@@ -540,7 +518,6 @@ adf_scanner
 aod_tablet
 barcode_scanner
 bike_dock
-cable
 desktop_mac
 desktop_windows
 developer_board
@@ -590,21 +567,17 @@ monitor_weight_gain
 monitor_weight_loss
 mouse
 point_of_sale
-print
 qr_code_scanner
-save
 scanner
 screenshot_keyboard
 screenshot_monitor
 screenshot_tablet
 sd_card
-storage
 tablet
 tablet_android
 tablet_mac
 touchpad_mouse
 touchpad_mouse_off
-usb
 
 ## -- general -- transport --
 agriculture
@@ -778,7 +751,6 @@ folder_zip
 format_paint
 import_contacts
 inventory
-inventory_2
 library_books
 menu_book
 move_to_inbox

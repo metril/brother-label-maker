@@ -58,6 +58,8 @@ _LEGACY_KEYS = {"id", "name", "tags", "path"}
 _PATH_TAG_RE = re.compile(r"<path\b", re.S)
 _PATH_D_RE = re.compile(r'<path\b[^>]*\bd="([^"]*)"', re.S)
 _SVG_INNER_RE = re.compile(r"<svg\b[^>]*>(.*)</svg>\s*\Z", re.S)
+_CATEGORY_HEADER_RE = re.compile(r"^#\s*category:\s*(\w+)\s*$", re.I)
+_ID_CHARSET_RE = re.compile(r"[a-z0-9_]+")
 
 # Existing-60 entries were curated (task 2.7) from Material Symbols at this
 # exact commit -- see assets/symbols/LICENSES.md's "Material Symbols" section.
@@ -125,6 +127,41 @@ def humanize_id(base_id: str) -> str:
     }
     words = [acronyms.get(w, w.capitalize()) for w in base_id.split("_")]
     return " ".join(words)
+
+
+def parse_curated_ids_with_category(text: str, ids_filename: str) -> list[tuple[str, str]]:
+    """Returns [(category, icon_id), ...] in file order, honoring
+    '# category: <bucket>' section headers (case-insensitive) -- the format
+    both material_ids.txt and phosphor_ids.txt document in their own header
+    comments. Other '#'-prefixed lines are comments (including '##'
+    human-only sub-headings), blank lines are skipped. `ids_filename` is
+    used only to name the offending file in the error raised when an id line
+    appears before any '# category:' header has been seen.
+
+    Shared by fetch_material.py and fetch_phosphor.py so the '# category:'
+    directive has exactly one implementation -- each fetch_*.py is still
+    responsible for validating the returned category against
+    VALID_CATEGORIES (raising on an unknown bucket) since that's the point
+    at which "unknown category" is actually an error rather than a parse
+    concern.
+    """
+    out: list[tuple[str, str]] = []
+    category: str | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            m = _CATEGORY_HEADER_RE.match(line)
+            if m:
+                category = m.group(1).lower()
+            continue
+        if category is None:
+            raise ValueError(
+                f"{ids_filename}: id {line!r} appears before any '# category:' header"
+            )
+        out.append((category, line))
+    return out
 
 
 def extract_single_path_d(svg_text: str) -> str | None:
@@ -274,6 +311,13 @@ def emit_source(*, prefix: str, candidates: list[Candidate]) -> SourceReport:
 
     report = SourceReport(prefix=prefix, accepted=[], skipped=[])
     for cand in candidates:
+        if not _ID_CHARSET_RE.fullmatch(cand.base_id):
+            raise ValueError(
+                f"{prefix}_{cand.base_id}: base_id {cand.base_id!r} must match "
+                f"{_ID_CHARSET_RE.pattern!r} (lowercase ascii, digits, underscore only) -- "
+                "a curated id list produced something outside this charset, fix the "
+                "source id list rather than the generated id"
+            )
         full_id = f"{prefix}_{cand.base_id}"
         filename = f"{full_id}.svg"
         try:
@@ -296,5 +340,13 @@ def emit_source(*, prefix: str, candidates: list[Candidate]) -> SourceReport:
         })
         report.accepted.append(full_id)
 
+    # Sorted by id rather than left in per-source append order: index.json's
+    # on-disk order would otherwise encode which fetch_*.py happened to run
+    # last (this source's entries always land at the end of the list right
+    # before this point), making a semantically-identical catalog produce a
+    # different diff depending on invocation order. Sorting makes the
+    # committed file byte-identical regardless of which script ran when --
+    # see README.md's "reproducible ... given the pinned versions" claim.
+    entries.sort(key=lambda e: e["id"])
     save_index(entries)
     return report

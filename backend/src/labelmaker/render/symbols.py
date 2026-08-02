@@ -126,8 +126,12 @@ _list_cache: tuple[tuple[str, int], list[SymbolInfo]] | None = None
 def list_symbols() -> list[SymbolInfo]:
     """The full catalog (1000+ entries as of commit 7's symbols pipeline),
     cached by `_cache_key()` -- see the module docstring's "Caching" section.
-    Returns a fresh list each call (a shallow copy of the cached one) so a
-    caller mutating the returned list can't corrupt the cache.
+    Returns a fresh list of deep-copied `SymbolInfo` instances each call, so
+    a caller mutating either the returned list OR a field on one of its
+    entries (e.g. appending to `.tags`, a mutable list) can't corrupt the
+    cached instances -- a plain `list(...)` shallow copy would still share
+    the same `SymbolInfo` objects (and their mutable `tags` lists) with the
+    cache, which is not enough.
     """
     global _list_cache
     index_path = _current_index_path()
@@ -136,7 +140,7 @@ def list_symbols() -> list[SymbolInfo]:
         raw = json.loads(index_path.read_text())
         infos = [SymbolInfo.model_validate(entry) for entry in raw]
         _list_cache = (key, infos)
-    return list(_list_cache[1])
+    return [info.model_copy(deep=True) for info in _list_cache[1]]
 
 
 _info_cache: tuple[tuple[str, int], dict[str, SymbolInfo]] | None = None
@@ -144,7 +148,12 @@ _info_cache: tuple[tuple[str, int], dict[str, SymbolInfo]] | None = None
 
 def get_symbol_info(symbol_id: str) -> SymbolInfo:
     """O(1) id lookup via a cached `{id: SymbolInfo}` dict, same cache key
-    convention as list_symbols() (see module docstring)."""
+    convention as list_symbols() (see module docstring). Returns a
+    deep-copied `SymbolInfo`, never the cached instance itself, for the same
+    reason list_symbols() returns deep copies: a caller mutating the
+    returned object's fields (e.g. `.tags.append(...)`) must not be able to
+    reach the cached instance shared by every future call.
+    """
     global _info_cache
     index_path = _current_index_path()
     key = _cache_key(index_path)
@@ -152,7 +161,7 @@ def get_symbol_info(symbol_id: str) -> SymbolInfo:
         _info_cache = (key, {info.id: info for info in list_symbols()})
     by_id = _info_cache[1]
     if symbol_id in by_id:
-        return by_id[symbol_id]
+        return by_id[symbol_id].model_copy(deep=True)
     valid = sorted(by_id)
     raise ValueError(
         f"unknown symbol id {symbol_id!r}; {len(valid)} valid id(s), see GET /api/symbols "

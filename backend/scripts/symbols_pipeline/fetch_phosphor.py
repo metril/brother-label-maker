@@ -9,7 +9,11 @@ Usage (from backend/):
 
 Downloads @phosphor-icons/core@<PINNED_VERSION> from its npm registry
 tarball to a temp dir, reads assets/fill/<id>-fill.svg for every id in
-phosphor_ids.txt, keeps only the ones with exactly one <path> (~1504 of
+phosphor_ids.txt (parsed via common.parse_curated_ids_with_category, the
+same '# category: <bucket>' directive fetch_material.py's list uses -- every
+id currently sits under a single "# category: general" header, but the
+mechanism is real and enforced: an unknown bucket raises, same as
+fetch_material.py), keeps only the ones with exactly one <path> (~1504 of
 Phosphor's 1512 fill icons are single-path; the rest are skipped and
 logged), and normalizes each survivor's verbatim `d` into this project's
 viewBox="0 0 24 24" convention.
@@ -31,11 +35,6 @@ PINNED_VERSION = "2.1.1"
 TARBALL_URL = f"https://registry.npmjs.org/@phosphor-icons/core/-/core-{PINNED_VERSION}.tgz"
 SOURCE = f"phosphor@{PINNED_VERSION}"
 LICENSE = "MIT"
-# Every curated Phosphor id is a Material-gap-filler object glyph (animals,
-# clothing, tools, ...) -- none of them are electrical/network/av/arrow
-# concepts, so they all land in the "general" bucket (see phosphor_ids.txt's
-# header comment for the curation rationale).
-CATEGORY = "general"
 
 IDS_FILE = Path(__file__).resolve().parent / "phosphor_ids.txt"
 
@@ -43,16 +42,6 @@ IDS_FILE = Path(__file__).resolve().parent / "phosphor_ids.txt"
 # 0,0 -- unlike Material's 0,-960) -> this project's 24x24 square.
 # 24 / 256 == 0.09375; no translate needed.
 TRANSFORM = "scale(0.09375)"
-
-
-def parse_curated_ids(text: str) -> list[str]:
-    out = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        out.append(line)
-    return out
 
 
 def download_and_extract(url: str, dest: Path) -> Path:
@@ -65,7 +54,7 @@ def download_and_extract(url: str, dest: Path) -> Path:
 
 
 def main() -> None:
-    curated = parse_curated_ids(IDS_FILE.read_text())
+    curated = common.parse_curated_ids_with_category(IDS_FILE.read_text(), IDS_FILE.name)
     print(f"{len(curated)} curated ids in {IDS_FILE.name}")
 
     with tempfile.TemporaryDirectory(prefix="phosphor-core-") as tmp:
@@ -75,7 +64,9 @@ def main() -> None:
         candidates: list[common.Candidate] = []
         missing = 0
         multi_path_skips = 0
-        for icon_id in curated:
+        for category, icon_id in curated:
+            if category not in common.VALID_CATEGORIES:
+                raise ValueError(f"{icon_id}: unknown category {category!r} in {IDS_FILE.name}")
             src_path = fill_dir / f"{icon_id}-fill.svg"
             if not src_path.is_file():
                 print(f"  skip {icon_id}: not found in package at assets/fill/{icon_id}-fill.svg")
@@ -87,12 +78,12 @@ def main() -> None:
                 multi_path_skips += 1
                 continue
             base_id = icon_id.replace("-", "_")
-            tags = sorted({CATEGORY, *base_id.split("_")})
+            tags = sorted({category, *base_id.split("_")})
             candidates.append(common.Candidate(
                 base_id=base_id,
                 name=common.humanize_id(base_id),
                 tags=tags,
-                category=CATEGORY,
+                category=category,
                 source=SOURCE,
                 license=LICENSE,
                 svg_text=common.build_svg_document(d, TRANSFORM),

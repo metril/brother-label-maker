@@ -58,23 +58,32 @@ def test_ensure_symbols_dir_raises_when_missing(monkeypatch, tmp_path):
 
 
 def test_list_symbols_meets_floor_and_every_source_contributes():
-    # >= 1000 is the pipeline's *target* (see backend/scripts/symbols_pipeline/
-    # README.md), not a hard requirement here -- a source's curated list could
-    # legitimately shrink on any given run. What must always hold: the
-    # pre-pipeline floor of 60 (the original hand-curated set), and every one
-    # of the three id groups (legacy/material/phosphor) contributing at least
-    # one icon -- i.e. the pipeline actually ran and merged, not just "didn't
-    # shrink below 60 by accident".
+    # Floors near committed reality, not just "greater than zero" -- tight
+    # enough that a source silently dropping most of its entries (a bad
+    # curated-id-list edit, a pipeline regression) fails this test, loose
+    # enough that adding MORE ids to either *_ids.txt and re-running the
+    # fetch script never breaks it. legacy is pinned exactly at 60: it's the
+    # original hand-curated set (task 2.7) and nothing ever adds to or
+    # removes from it (see fetch_*.py's "Backward compatibility" -- neither
+    # script's stale-file glob ever touches a bare id). material_'s floor
+    # (>= 700) reflects material_ids.txt post-dedup (see the pipeline README's
+    # dedup note: 38 ids were dropped because a legacy bare id already covers
+    # the same concept) -- currently 743. phosphor_'s floor (>= 50) reflects
+    # phosphor_ids.txt's currently-curated 55.
     infos = list_symbols()
     assert all(isinstance(i, SymbolInfo) for i in infos)
-    assert len(infos) >= 60, f"expected >= 60 symbols total, found {len(infos)}"
 
     by_group: dict[str, list[SymbolInfo]] = {}
     for info in infos:
         by_group.setdefault(_source_group(info.id), []).append(info)
-    for group in ("legacy", *_SOURCE_PREFIXES):
+
+    legacy_count = len(by_group.get("legacy", []))
+    assert legacy_count == 60, f"legacy group must stay exactly 60, found {legacy_count}"
+
+    floors = {"material_": 700, "phosphor_": 50}
+    for group, floor in floors.items():
         count = len(by_group.get(group, []))
-        assert count >= 1, f"source group {group!r} contributed 0 symbols (total={len(infos)})"
+        assert count >= floor, f"source group {group!r} has {count} symbols, expected >= {floor}"
 
 
 def test_list_symbols_ids_are_unique():
@@ -151,18 +160,34 @@ def test_list_symbols_and_get_symbol_info_invalidate_on_index_mtime_change(monke
 
 def test_list_symbols_returns_a_copy_callers_cant_use_to_corrupt_the_cache(monkeypatch, tmp_path):
     entry = {
-        "id": "a", "name": "A", "tags": [], "path": "a.svg",
+        "id": "a", "name": "A", "tags": ["x"], "path": "a.svg",
         "category": "misc", "source": "test", "license": "test",
     }
     _write_index(tmp_path, [entry])
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 
+    # 1. Appending to the returned LIST must not affect a later call.
     infos = list_symbols()
     extra = SymbolInfo(
         id="z", name="Z", tags=[], path="z.svg", category="misc", source="t", license="t"
     )
     infos.append(extra)
     assert [i.id for i in list_symbols()] == ["a"]
+
+    # 2. Mutating a returned SymbolInfo's `.tags` (a mutable list field) must
+    # not reach the cached instance either -- a `list(cached)` shallow copy
+    # would pass check 1 above but still share the SAME SymbolInfo objects
+    # (and their tags lists) with the cache, so this needs a real deep copy.
+    infos = list_symbols()
+    infos[0].tags.append("mutated-via-list-entry")
+    assert list_symbols()[0].tags == ["x"], "list_symbols() leaked a mutable cached tags list"
+
+    # 3. Same requirement for get_symbol_info(): it must never return the
+    # cached instance itself.
+    info = get_symbol_info("a")
+    info.tags.append("mutated-via-get-symbol-info")
+    assert get_symbol_info("a").tags == ["x"], "get_symbol_info() returned the cached instance"
+    assert list_symbols()[0].tags == ["x"], "get_symbol_info() mutation leaked into list_symbols()"
 
 
 # --- 3. Asset integrity: every listed file exists, is valid, 24x24 ---------

@@ -50,8 +50,11 @@ Each script prints a summary (accepted / skipped-with-reason counts) and is
 the current `*_ids.txt` + the pinned upstream version. So:
 
 - Editing an id list and re-running cleans up anything removed from it.
-- Running both (in either order) is safe and reproducible given the pinned
-  versions -- nothing here depends on run order between sources.
+- Running both (in either order) is safe and byte-reproducible given the
+  pinned versions: `emit_source()` sorts `index.json` by id before writing
+  it, so nothing here depends on run order between sources -- material-then-
+  phosphor and phosphor-then-material produce an identical committed file,
+  not just an equivalent one.
 - Re-running one script does NOT touch the other source's entries, or the
   original 60's bare-id entries (see "Backward compatibility" below).
 
