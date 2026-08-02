@@ -5,6 +5,14 @@ import { http, HttpResponse } from "msw";
 import { AppShell } from "./AppShell";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { useTrayStore } from "../stores/tray";
+import type { LabelDefinition } from "../api/types";
+
+const INITIAL_TRAY_STATE = useTrayStore.getState();
+
+function def(text: string): LabelDefinition {
+  return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
+}
 
 /** task 4.1: AppShell's own auth gating on top of GET /api/auth/me --
  * every OTHER AppShell/App test in the suite exercises the "none" mode
@@ -81,5 +89,92 @@ describe("AppShell auth gating (task 4.1)", () => {
 
     await waitFor(() => expect(logoutCalled).toBe(true));
     await waitFor(() => expect(reloadSpy).toHaveBeenCalled());
+  });
+});
+
+/** The TYPES rail (components/TypeRail.tsx) only drives Designer's own
+ * useDesignerStore.selectedType -- scoped to the "/" route here rather than
+ * rendered (uselessly) on every page. Its complement, GlobalTrayDrawer, is
+ * scoped the opposite way: every route EXCEPT "/", since JobTray.tsx
+ * already gives the Designer page its own always-visible tray. */
+describe("AppShell -- Design-route scoping (type rail + global tray drawer)", () => {
+  afterEach(() => {
+    useTrayStore.setState(INITIAL_TRAY_STATE, true);
+  });
+
+  it("renders the type rail on the Design route, not on other routes", async () => {
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    expect(await screen.findByRole("navigation", { name: "Label types" })).toBeInTheDocument();
+  });
+
+  it("does not render the type rail away from the Design route", async () => {
+    renderWithProviders(
+      <AppShell>
+        <div>history content</div>
+      </AppShell>,
+      { route: "/history" },
+    );
+    await screen.findByText("history content");
+    expect(screen.queryByRole("navigation", { name: "Label types" })).not.toBeInTheDocument();
+  });
+
+  it("hides the global tray drawer button entirely on the Design route (JobTray already covers it there)", async () => {
+    useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "Text — A" });
+
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+    expect(screen.queryByRole("button", { name: /^Tray ·/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the global tray drawer button when the tray is empty, and shows it once an item is queued", async () => {
+    renderWithProviders(
+      <AppShell>
+        <div>history content</div>
+      </AppShell>,
+      { route: "/history" },
+    );
+    await screen.findByText("history content");
+    expect(screen.queryByRole("button", { name: /^Tray ·/ })).not.toBeInTheDocument();
+
+    // The store is a module-level zustand singleton (not React context) --
+    // GlobalTrayDrawer's own `items` selector reacts to this mutation on its
+    // own, with no manual re-render needed (same convention JobTray.test.tsx
+    // already relies on for its own store-driven assertions).
+    useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "Text — A" });
+
+    expect(await screen.findByRole("button", { name: /^Tray · 1/ })).toBeInTheDocument();
+  });
+
+  it("opens the slide-over panel on click, moves focus to its close button, and restores focus to the trigger on Escape", async () => {
+    useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "Text — A" });
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AppShell>
+        <div>history content</div>
+      </AppShell>,
+      { route: "/history" },
+    );
+
+    const trigger = await screen.findByRole("button", { name: /^Tray · 1/ });
+    await user.click(trigger);
+
+    const panel = await screen.findByRole("dialog", { name: "Print tray" });
+    const closeButton = screen.getByRole("button", { name: "Close print tray" });
+    await waitFor(() => expect(closeButton).toHaveFocus());
+    expect(panel).toHaveTextContent("Text — A");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 });

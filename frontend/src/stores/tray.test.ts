@@ -83,3 +83,51 @@ describe("useTrayStore", () => {
     expect(useTrayStore.getState().autoCut).toBe(false);
   });
 });
+
+/** The tray is persisted (zustand's `persist` middleware, key "lm-tray-v1")
+ * so it survives a reload -- the whole point of accumulating several
+ * designs before printing them together, which a refresh used to silently
+ * wipe. `png` is deliberately nulled on write (a captured preview is
+ * refetchable on demand, see hooks/useTrayPreviews.ts; there's no reason to
+ * grow localStorage with base64 image data). */
+describe("useTrayStore persistence (zustand persist middleware)", () => {
+  it("partialize nulls out every item's own png before writing to localStorage", () => {
+    useTrayStore.getState().addItem({ definition: def("A"), png: "data:image/png;base64,AAAA", lengthMm: 10, label: "A" });
+
+    const raw = localStorage.getItem("lm-tray-v1");
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw!) as { state: { items: { png: string | null; label: string }[] } };
+    expect(persisted.state.items).toHaveLength(1);
+    expect(persisted.state.items[0]!.png).toBeNull();
+    expect(persisted.state.items[0]!.label).toBe("A");
+  });
+
+  it("persists chainMode/autoCut alongside the item list", () => {
+    useTrayStore.getState().setChainMode("chain_ff");
+    useTrayStore.getState().setAutoCut(false);
+
+    const persisted = JSON.parse(localStorage.getItem("lm-tray-v1")!) as {
+      state: { chainMode: string; autoCut: boolean };
+    };
+    expect(persisted.state.chainMode).toBe("chain_ff");
+    expect(persisted.state.autoCut).toBe(false);
+  });
+
+  it("rehydrates items/chainMode/autoCut from a previously persisted snapshot (version 1's own migrate passthrough)", async () => {
+    const restoredItem = { id: "restored-1", definition: def("RESTORED"), png: null, lengthMm: 12, label: "Text — RESTORED" };
+    localStorage.setItem(
+      "lm-tray-v1",
+      JSON.stringify({
+        state: { items: [restoredItem], chainMode: "strip_marks", autoCut: false },
+        version: 1,
+      }),
+    );
+
+    await useTrayStore.persist.rehydrate();
+
+    const state = useTrayStore.getState();
+    expect(state.items).toEqual([restoredItem]);
+    expect(state.chainMode).toBe("strip_marks");
+    expect(state.autoCut).toBe(false);
+  });
+});

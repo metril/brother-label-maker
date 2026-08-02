@@ -45,6 +45,7 @@ export function TypeRail() {
   if (isPending || !types) {
     return (
       <nav aria-label="Label types" className="w-full shrink-0 border-b border-deck-800 p-3 lg:w-56 lg:border-b-0 lg:border-r">
+        <p className={`${eyebrow} hidden lg:block`}>Design</p>
         <Pending />
       </nav>
     );
@@ -72,6 +73,12 @@ export function TypeRail() {
       aria-label="Label types"
       className="flex w-full shrink-0 flex-row gap-4 overflow-x-auto border-b border-deck-800 bg-deck-900/40 p-3 lg:w-56 lg:flex-col lg:gap-5 lg:overflow-x-visible lg:overflow-y-auto lg:border-b-0 lg:border-r"
     >
+      {/* AppShell now mounts this rail ONLY on the Design route ("/") --
+          this eyebrow is the visual cue that reads as "scoped to that
+          route" the brief calls for. `hidden lg:block` mirrors every
+          category label right below it (mobile's horizontal scroller has
+          no room for a standalone header row). */}
+      <p className={`${eyebrow} hidden shrink-0 lg:block`}>Design</p>
       {groups.map(([category, categoryTypes]) => (
         <div key={category} className="flex flex-row items-center gap-2 lg:flex-col lg:items-stretch lg:gap-1">
           <p className={`${eyebrow} hidden shrink-0 lg:block`}>{CATEGORY_LABELS[category] ?? category}</p>

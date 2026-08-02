@@ -93,6 +93,11 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   mockWebSocketInstances.length = 0;
+  // stores/tray.ts persists to localStorage (zustand's persist middleware) --
+  // clear it after every test so one test's tray state can never leak into
+  // the next via a shared jsdom localStorage, independent of whatever a
+  // test itself does with useTrayStore.setState(...).
+  localStorage.clear();
 });
 
 afterAll(() => {

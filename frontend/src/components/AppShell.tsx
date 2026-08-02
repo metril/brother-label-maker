@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { postAuthLogout } from "../api/client";
 import type { AuthUser } from "../api/types";
+import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
 import { PrinterStatusBadge } from "./PrinterStatusBadge";
 import { TypeRail } from "./TypeRail";
 import { eyebrow, helpText, panel, primaryButtonClass, typeHeading } from "./ui/styles";
@@ -101,6 +102,13 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * disabled, non-interactive placeholder pre-3.4 always was: deliberately
  * not a link at all, so it's never a tab stop that goes nowhere.
  *
+ * The TYPES rail only makes sense on the Designer page itself (it drives
+ * useDesignerStore.selectedType, which nothing else reads) -- scoped to
+ * `pathname === "/"` here rather than rendered on every route. Its
+ * complement, GlobalTrayDrawer, is scoped the other way: mounted on every
+ * OTHER route, since JobTray.tsx already gives the Designer page its own
+ * always-visible tray.
+ *
  * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
  * (see that route's own docstring), so this branch is a pure no-op in the
@@ -111,6 +119,8 @@ export function AppShell({ children }: AppShellProps) {
   const { data: homeboxStatus } = useHomeboxStatus();
   const homeboxEnabled = homeboxStatus?.configured === true;
   const { data: auth } = useAuth();
+  const { pathname } = useLocation();
+  const isDesignRoute = pathname === "/";
 
   if (auth?.auth_mode === "oidc" && !auth.authenticated) {
     return <SignInPanel />;
@@ -162,6 +172,11 @@ export function AppShell({ children }: AppShellProps) {
 
         <div className="ml-auto flex items-center gap-4">
           <PrinterStatusBadge />
+          {/* Away from the Designer page, this is the ONLY way to reach the
+              tray -- JobTray.tsx (the sticky sidebar/mobile sheet) only
+              mounts on "/". Hides itself entirely while the tray is empty
+              (see its own doc). */}
+          {!isDesignRoute && <GlobalTrayDrawer />}
           <span
             className="font-mono text-[11px] text-deck-400"
             title="Print job event stream"
@@ -174,7 +189,7 @@ export function AppShell({ children }: AppShellProps) {
       </header>
 
       <div className="flex flex-1 flex-col lg:flex-row lg:items-stretch">
-        <TypeRail />
+        {isDesignRoute && <TypeRail />}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
