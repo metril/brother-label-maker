@@ -380,7 +380,7 @@ def _run_usb_print(args: argparse.Namespace) -> int:
 
         # I4: bridge the decoded media type to a geometry family; fall back to
         # TZe (with a warning) when the media type is unknown/undecoded, e.g.
-        # the still-undecoded 0x14 raw value (HANDOFF.md).
+        # the still-undecoded 0x14 raw value (docs/hardware-probe-notes.md).
         tape, assumed_tze = resolve_tape(status)
         if assumed_tze:
             print(f"media type unknown (0x{status.media_type_raw:02x}) — assuming TZe geometry")

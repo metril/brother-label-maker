@@ -3,7 +3,7 @@ capture) and its pure-PIL test-pattern builders.
 
 No test opens real USB: `_open_transport` is the single seam the CLI uses to
 reach hardware, and every USB-path test monkeypatches it to a CaptureTransport
-(the Task-0.4 reference status block, see HANDOFF.md/test_status.py, or a
+(the Task-0.4 reference status block, see docs/hardware-probe-notes.md/test_status.py, or a
 mutated copy of it). The `--capture`/`capture` file paths never touch a
 transport at all.
 """
@@ -18,10 +18,11 @@ from labelmaker.driver.status import REFERENCE_STATUS_BLOCK, StatusTimeoutError,
 from labelmaker.driver.transport import CaptureTransport, PrinterNotFoundError, TransportError
 
 # C2: request_status() writes this exact flush/init/request sequence, not
-# STATUS_REQUEST alone (matches HANDOFF.md:49-51's confirmed probe sequence).
+# STATUS_REQUEST alone (matches the confirmed probe sequence in
+# hardware-probe-notes.md 'Already built').
 STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
-# REFERENCE_STATUS_BLOCK (real probe data, HANDOFF.md / task-0.4 reference
+# REFERENCE_STATUS_BLOCK (real probe data, docs/hardware-probe-notes.md / task-0.4 reference
 # block: 24mm laminated-family tape, no errors, model 0x81, media_type_raw
 # the still-undecoded 0x14) now lives in status.py itself (Task 1.3a) --
 # single source, imported above instead of redefined here.

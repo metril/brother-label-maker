@@ -89,7 +89,7 @@ def get_status(transport: Transport) -> PrinterStatus:
 def resolve_tape(status: PrinterStatus) -> tuple[TapeSpec | None, bool]:
     """I4: bridge a decoded status's media type to a geometry family and
     TapeSpec, falling back to TZe when the media type is unknown/undecoded
-    (e.g. the still-undecoded 0x14 raw value, HANDOFF.md).
+    (e.g. the still-undecoded 0x14 raw value, docs/hardware-probe-notes.md).
 
     Returns (tape, assumed_tze); tape is None if no TapeSpec matches the
     resolved family/width combination.

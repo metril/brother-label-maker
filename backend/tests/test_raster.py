@@ -2,9 +2,9 @@
 
 All expected byte literals below are hand-computed (see derivation comments), never
 obtained by calling the code under test. Protocol facts (raster line framing,
-PackBits/RAW encoding, the 'Z' all-zero shorthand) come from HANDOFF.md's
+PackBits/RAW encoding, the 'Z' all-zero shorthand) come from docs/hardware-probe-notes.md's
 protocol quick-reference and Brother's family raster manual for the
-PT-E550W/P750W/P710BT (see HANDOFF.md's References section for the download
+PT-E550W/P750W/P710BT (see docs/hardware-probe-notes.md's References section for the download
 link); tape geometry figures come from docs/research/features.md's tape
 geometry tables.
 """

@@ -2,10 +2,10 @@
 modules: status.py's status-request sequence and strategies.py's job
 preambles both start from the same flush/init bytes.
 
-From HANDOFF.md's protocol quick-reference and its confirmed status-probe
-sequence (HANDOFF.md:49-51: flush -> `ESC @` -> `ESC i S`), and Brother's
+From docs/hardware-probe-notes.md's protocol quick-reference and its confirmed status-probe
+sequence (hardware-probe-notes.md 'Already built': flush -> `ESC @` -> `ESC i S`), and Brother's
 family raster manual for the PT-E550W/P750W/P710BT -- not in-repo; see
-HANDOFF.md's References section for the download link.
+docs/hardware-probe-notes.md's References section for the download link.
 """
 
 from enum import StrEnum

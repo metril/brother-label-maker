@@ -2,9 +2,9 @@
 might require. The physical checkpoint A/B-tests these against the real
 device -- each must be byte-perfect against its documented reference.
 
-Protocol tables: HANDOFF.md's protocol quick-reference (flush/`ESC @`/
+Protocol tables: docs/hardware-probe-notes.md's protocol quick-reference (flush/`ESC @`/
 `ESC i a`/`ESC i z`/`ESC i M`/`ESC i d`/`M 02` command bytes) and Brother's
-family raster manual for the PT-E550W/P750W/P710BT (see HANDOFF.md's
+family raster manual for the PT-E550W/P750W/P710BT (see docs/hardware-probe-notes.md's
 References section for the download link). The e310bt `MAGIC` packet and its
 deliberate ordering deviation (K -> z -> magic, not the naive preamble
 reading) come from docs/research/protocol.md's driver-landscape findings on
@@ -34,7 +34,7 @@ MAGIC = b"\x1b\x69\x64\x01\x00\x4d\x00"
 
 _PI_VALIDITY = 0x84  # PI_RECOVER 0x80 | PI_WIDTH 0x04
 # UNVERIFIED: manual may define n9 as 0/1/2 for first/middle/last page --
-# using 0x00 always, per HANDOFF's decoded example.
+# using 0x00 always, per docs/hardware-probe-notes.md's decoded example.
 _ESC_I_Z_N9 = 0x00
 _ESC_I_Z_N10 = 0x00
 
@@ -76,7 +76,8 @@ class InitStrategy(ABC):
 class ClassicStrategy(InitStrategy):
     """FLUSH, ESC @, ESC i a 01, ESC i M, ESC i K, ESC i d, M 02 -- then ESC i z per page.
 
-    # UNVERIFIED: command order -- HANDOFF documents the flow z -> M -> d -> M02
+    # UNVERIFIED: command order -- docs/hardware-probe-notes.md documents the
+    # flow z -> M -> d -> M02
     # for one page; we instead emit job-level M/K/d/M02 in the preamble and z
     # per page (z after M/K/d, not before). Tolerated by firmware per family
     # drivers per research; confirm at the physical checkpoint.

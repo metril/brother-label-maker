@@ -2,8 +2,8 @@
 strategies (classic PackBits vs. e310bt-family RAW/magic). These byte streams
 are what the physical checkpoint A/B-tests against the real printer, so every
 expected literal below is hand-computed (see derivation comments) against
-protocol facts in HANDOFF.md's protocol quick-reference, Brother's family
-raster manual for the PT-E550W/P750W/P710BT (see HANDOFF.md's References
+protocol facts in docs/hardware-probe-notes.md's protocol quick-reference, Brother's family
+raster manual for the PT-E550W/P750W/P710BT (see docs/hardware-probe-notes.md's References
 section for the download link), and docs/research/protocol.md's fork
 findings (the e310bt `MAGIC` packet and its command ordering) -- never
 obtained by calling the code under test. `geometry.py` and `raster.py` are

@@ -1,6 +1,6 @@
 """Tests for labelmaker.driver.status: 32-byte status parser + retry polling.
 
-The reference block below is real probe data (see HANDOFF.md), not a
+The reference block below is real probe data (see docs/hardware-probe-notes.md), not a
 hand-fabricated example. All other blocks in this file are built by mutating
 copies of it, never by calling parse_status() and trusting the result.
 """
@@ -23,10 +23,11 @@ from labelmaker.driver.status import (
 from labelmaker.driver.transport import CaptureTransport
 
 # C2: request_status() now writes this exact flush/init/request sequence
-# (matches HANDOFF.md:49-51's confirmed probe sequence), not STATUS_REQUEST alone.
+# (matches hardware-probe-notes.md's confirmed probe sequence, 'Already
+# built' section), not STATUS_REQUEST alone.
 STATUS_REQUEST_SEQUENCE = FLUSH + ESC_INIT + STATUS_REQUEST
 
-# REFERENCE_STATUS_BLOCK (real probe data, HANDOFF.md: 24mm laminated-family
+# REFERENCE_STATUS_BLOCK (real probe data, docs/hardware-probe-notes.md: 24mm laminated-family
 # tape, no errors, model 0x81) now lives in status.py itself (Task 1.3a) --
 # single source, imported above instead of redefined here.
 

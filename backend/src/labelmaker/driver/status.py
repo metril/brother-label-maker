@@ -1,19 +1,20 @@
 """32-byte printer status parser and retry-driven status request.
 
-Protocol facts (from HANDOFF.md's real probe data, and Brother's family raster
-manual for the PT-E550W/P750W/P710BT -- not in-repo; see HANDOFF.md's
+Protocol facts (from docs/hardware-probe-notes.md's real probe data, and Brother's family raster
+manual for the PT-E550W/P750W/P710BT -- not in-repo; see docs/hardware-probe-notes.md's
 References section for the download link. docs/research/protocol.md is
 driver-landscape research, not a source of field-level byte facts):
 
 - Status request command: ESC i S (`STATUS_REQUEST`). `request_status()`
   actually writes `FLUSH + ESC_INIT + STATUS_REQUEST` -- the flush/`ESC @`
   init prefix matches the only sequence ever confirmed against real hardware
-  (HANDOFF.md:49-51's probe). `FLUSH`/`ESC_INIT`/`STATUS_REQUEST` live in
+  (the probe in hardware-probe-notes.md 'Already built').
+  `FLUSH`/`ESC_INIT`/`STATUS_REQUEST` live in
   protocol.py; `STATUS_REQUEST` is re-exported here for compatibility with
   existing importers of `labelmaker.driver.status.STATUS_REQUEST`.
 - Reply is exactly 32 bytes (`STATUS_LEN`). Header: byte0=0x80 (print-head
   mark), byte1=0x20 (block size 32), byte2=0x42 ('B'). See PrinterStatus for
-  the decoded fields, and HANDOFF.md's real reference block for byte offsets.
+  the decoded fields, and docs/hardware-probe-notes.md's real reference block for byte offsets.
 """
 
 import time
@@ -27,7 +28,7 @@ from labelmaker.driver.transport import Transport
 E720BT_MODEL_CODE = 0x81
 STATUS_LEN = 32
 
-# Real probe data (HANDOFF.md / task-0.4 reference block): 24mm laminated-family
+# Real probe data (docs/hardware-probe-notes.md / task-0.4 reference block): 24mm laminated-family
 # tape, no errors, model 0x81. media_type_raw is the still-undecoded 0x14.
 # Single source of truth (Task 1.3a) -- test_status.py/test_cli.py import this
 # instead of each defining their own copy of the same literal, and
@@ -205,7 +206,7 @@ def parse_status(data: bytes) -> PrinterStatus:
         phase_type=data[19],
         # UNVERIFIED: phase_number endianness (LE assumed) — confirm at physical checkpoint.
         # Multi-byte fields in this protocol family are little-endian (e.g. the
-        # ESC i d feed amount, the ESC i z raster line count -- see HANDOFF.md);
+        # ESC i d feed amount, the ESC i z raster line count -- see docs/hardware-probe-notes.md);
         # the reference block's phase_number is 0x0000, so endianness here is
         # inferred by family convention, not independently confirmed.
         phase_number=int.from_bytes(data[20:22], "little"),
@@ -238,7 +239,7 @@ def request_status(
 
     Writes `FLUSH + ESC_INIT + STATUS_REQUEST` exactly once (C2 -- matches
     the only status-request sequence ever confirmed on real hardware,
-    HANDOFF.md:49-51), then polls transport.read(32) up to `retries` times,
+    hardware-probe-notes.md 'Already built'), then polls transport.read(32) up to `retries` times,
     accumulating partial reads until 32 bytes are collected. Sleeps
     `interval_s` after each empty read. Raises StatusTimeoutError if
     `retries` is exhausted before 32 bytes arrive.
