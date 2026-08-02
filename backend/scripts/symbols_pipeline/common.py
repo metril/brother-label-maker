@@ -38,6 +38,8 @@ if str(SRC_DIR) not in sys.path:
     # though nothing under labelmaker/ ever imports back into this package.
     sys.path.insert(0, str(SRC_DIR))
 
+from PIL import Image  # noqa: E402
+
 from labelmaker.render.document import RenderedLabel, _svg_document  # noqa: E402
 from labelmaker.render.rasterize import rasterize  # noqa: E402
 from labelmaker.render.symbols import SymbolInfo, _validate_symbol_svg  # noqa: E402
@@ -267,16 +269,51 @@ def extract_fill_path(svg_text: str) -> tuple[str, str] | None:
          concatenation across differently-transformed local coordinate
          spaces would silently mangle the shape, so this rejects rather
          than pretending the transforms are identity).
-    3. Otherwise concatenates the survivors' `d` strings (space-joined --
-       each is already a complete, self-contained subpath list starting
-       with its own M/m command, so simple concatenation is a correct
-       multi-subpath `d` for the merged <path>) and returns
-       `(merged_d, fill_rule)`, where `fill_rule` is "evenodd" if ANY
-       surviving path explicitly declares `fill-rule="evenodd"` (the whole
-       merged shape must honor it for that path's hole geometry to survive
-       the merge -- see README.md's "hole-shaped icon" spot-check note),
-       else "nonzero" -- returned explicitly (never left implicit) so
-       callers always emit an explicit `fill-rule` attribute rather than
+    3. Rejects (returns None) if any NON-FIRST surviving path's `d`
+       (lstripped) starts with a lowercase `m`: per the SVG path grammar a
+       relative moveto is only treated as absolute-equivalent when it is
+       the very FIRST command of the whole path. Concatenated after a
+       preceding subpath's final command, it instead resolves against
+       THAT subpath's current point, silently translating (and often
+       displacing) everything that follows -- this shipped 17 visibly
+       corrupted icons before this check existed (docs/code-review-2026-08.md
+       H3; e.g. bootstrap_house's roof ends up as a diagonal slash through
+       the body). Correcting it would require converting the relative `m`
+       to an absolute `M`, which needs the preceding subpath's terminal
+       current point -- i.e. actually interpreting the path, not just
+       string-handling it -- so this function skips the merge rather than
+       guessing.
+    4. Otherwise concatenates the survivors' `d` strings (space-joined)
+       into a candidate `merged_d`, and rejects (returns None) unless
+       rendering `merged_d` as ONE <path> is pixel-EXACT (see
+       `_render_equivalent`/`_RENDER_EQUIVALENCE_MAX_DIFF_PX` -- an
+       empirical sweep of every real multi-path candidate across all four
+       pinned Track D2 sources found no middle ground to build a nonzero
+       tolerance out of: every genuinely safe merge rendered byte-
+       identical, every corrupt one differed by 1+ pixels) to rendering
+       the same survivors as separate sibling <path> elements at the same
+       viewBox. This is necessary because fill-rule is resolved PER
+       `<path>` over ALL of that path's own subpaths TOGETHER: two
+       overlapping same-fill shapes that each paint solid on their own can
+       cancel to a hole once folded into one multi-subpath path even
+       though every subpath is a plain absolute `M` and nothing above
+       rejected it -- this hollowed out shipped icons before this gate
+       existed (docs/code-review-2026-08.md M5/M6; e.g.
+       tabler_arrow_big_left_line's solid arrow rendered as a hollow
+       outline). The check is a REAL render through the same resvg call
+       sequence `rasterize_check`/`symbol_object` use, not a geometric
+       analysis, because that is the only way to actually decide whether a
+       merge changed the winding outcome -- though it is still bounded by
+       the 24x24 raster it renders at: a real divergence thin enough to
+       vanish at that resolution (one M5-named icon, see
+       `_RENDER_EQUIVALENCE_MAX_DIFF_PX`'s comment) isn't something any
+       pixel-comparison gate at this size can catch.
+    5. Returns `(merged_d, fill_rule)`, where `fill_rule` is "evenodd" if
+       ANY surviving path explicitly declares `fill-rule="evenodd"` (the
+       whole merged shape must honor it for that path's hole geometry to
+       survive the merge -- see README.md's "hole-shaped icon" spot-check
+       note), else "nonzero" -- returned explicitly (never left implicit)
+       so callers always emit an explicit `fill-rule` attribute rather than
        silently depending on SVG's default, the same reasoning
        fetch_lucide.py's own `_build_svg_document` already documents.
 
@@ -287,6 +324,8 @@ def extract_fill_path(svg_text: str) -> tuple[str, str] | None:
        silently discarded -- verified in practice against Bootstrap's own
        fill icons, ~70 of which declare fill-rule="evenodd" on a SINGLE
        <path> for ring/hole shapes (e.g. heart-fill.svg's cardioid cusp).
+       A lone survivor never goes through step 4's render-equivalence
+       gate -- there is nothing to merge, so nothing can change.
     """
     if _OTHER_ELEMENT_RE.search(svg_text):
         return None
@@ -307,8 +346,12 @@ def extract_fill_path(svg_text: str) -> tuple[str, str] | None:
         return None
     if any("transform" in a for a in kept):
         return None
+    if any(a["d"].lstrip().startswith("m") for a in kept[1:]):
+        return None
     fill_rule = "evenodd" if any(a.get("fill-rule") == "evenodd" for a in kept) else "nonzero"
     merged_d = " ".join(a["d"] for a in kept)
+    if len(kept) > 1 and not _render_equivalent(kept, merged_d, fill_rule):
+        return None
     return merged_d, fill_rule
 
 
@@ -406,13 +449,91 @@ def validate_shape(symbol_id: str, filename: str, svg_text: str) -> None:
     _validate_symbol_svg(info, svg_text)
 
 
+# extract_fill_path's render-equivalence gate (step 4 of its docstring):
+# how many of the 24x24 = 576 raster pixels are allowed to differ between
+# the merged candidate and the same survivors drawn as separate siblings
+# before the merge is rejected as NOT equivalent. Set to 0 (exact match
+# required), not a hedge value, from an empirical sweep of every real
+# multi-path candidate across all four pinned Track D2 tarballs
+# (docs/code-review-2026-08.md's own four sources): 398 candidates total
+# (229 Tabler, 149 Bootstrap, 0 Remix -- Remix's curated set never has 2+
+# real glyph paths -- 20 Fluent), of which every genuinely safe one
+# (disjoint survivors, or an overlap whose winding direction happens not
+# to matter) rendered BYTE-IDENTICAL (0 differing pixels) between the
+# merged and sibling forms, while every winding/fill-rule corruption
+# case -- including the review's own H3/M5 names -- differed by 1 to 66
+# pixels (tabler_sunrise 1px, bootstrap sign-railroad/rocket-takeoff/
+# sign-dead-end 1px, bootstrap sign-do-not-enter/sign-stop/sign-yield 2px,
+# tabler_sitemap 12px, tabler_escalator_up 61px,
+# tabler_arrow_big_left_line 66px). There is no observed middle ground at
+# this resolution to build a tolerance out of -- a nonzero threshold would
+# only let the smaller real corruptions back through (tabler_sunrise's
+# 1px is the whole reason this is 0 and not e.g. 2). One known gap this
+# still can't see: bootstrap_envelope_open_heart (also named in M5)
+# rendered pixel-IDENTICAL between merged and sibling forms at every
+# raster size checked (24 through 192px, with and without the source's
+# scale(1.5) normalization transform) -- if that icon's divergence is
+# real, it's below what any practical raster can distinguish, so this
+# gate (at any tolerance) can't act on it; it ships unchanged.
+_RENDER_EQUIVALENCE_MAX_DIFF_PX = 0
+
+
+def _rasterize_fragment_24(body: str) -> Image.Image:
+    """Renders an arbitrary sibling-element SVG fragment (no outer <svg>
+    wrapper of its own) at 24x24 through the exact resvg call sequence
+    test_symbols.py's own rasterize test and symbol_object() use
+    (RenderedLabel/_svg_document/rasterize) -- the shared rasterize
+    primitive behind both `rasterize_check` (one candidate, ink+background)
+    and `_render_equivalent` (two candidates, pixel comparison).
+    """
+    label = RenderedLabel(svg=_svg_document(24, 24, f"<g>{body}</g>"), width_px=24, height_px=24)
+    return rasterize(label)
+
+
+def _render_equivalent(kept: list[dict[str, str]], merged_d: str, fill_rule: str) -> bool:
+    """The M5/M6 render-equivalence gate: True if rendering `merged_d` as
+    ONE <path fill-rule=fill_rule> rasterizes the same (within
+    `_RENDER_EQUIVALENCE_MAX_DIFF_PX`) as rendering every entry of `kept`
+    as its OWN separate sibling <path>, each keeping its own individually
+    declared `fill-rule` (defaulting to "nonzero", SVG's own default, when
+    a survivor doesn't declare one) -- the exact semantics those paths had
+    in the original, unmerged source document. Neither render carries the
+    source's `fill` color (irrelevant to ink-vs-background, and
+    build_svg_document never emits one either) or any coordinate
+    `transform` (extract_fill_path already rejects any survivor that has
+    one, and a transform applied identically to both renders can't change
+    whether they agree).
+
+    This is what actually decides every multi-path merge: fill-rule is
+    resolved per-<path> over ALL of that path's own subpaths together, so
+    two overlapping same-fill shapes that stay solid as separate elements
+    can cancel to a hole once concatenated into one path's subpath list --
+    a purely geometric analysis of the `d` strings can't tell safe merges
+    from that failure mode nearly as reliably as just rendering both and
+    comparing pixels.
+    """
+    merged_body = f'<path d="{merged_d}" fill-rule="{fill_rule}"/>'
+    siblings_body = "".join(
+        f'<path d="{a["d"]}" fill-rule="{a.get("fill-rule", "nonzero")}"/>' for a in kept
+    )
+    merged_img = _rasterize_fragment_24(merged_body)
+    siblings_img = _rasterize_fragment_24(siblings_body)
+    diff = sum(
+        1
+        for a, b in zip(merged_img.getdata(), siblings_img.getdata(), strict=True)
+        if a != b
+    )
+    return diff <= _RENDER_EQUIVALENCE_MAX_DIFF_PX
+
+
 def rasterize_check(svg_text: str) -> bool:
     """The pipeline-time exhaustive rasterize gate: renders `svg_text` (a
     complete, already shape-valid 24x24 <svg> document) through the REAL
-    resvg pipeline (RenderedLabel/_svg_document/rasterize -- the identical
-    call sequence test_symbols.py's own rasterize test and symbol_object()
-    itself use) and requires BOTH some ink (extrema[0] == 0) AND some
-    untouched background (extrema[1] == 255).
+    resvg pipeline (the same `_rasterize_fragment_24` primitive
+    `_render_equivalent` uses -- the identical call sequence
+    test_symbols.py's own rasterize test and symbol_object() itself use)
+    and requires BOTH some ink (extrema[0] == 0) AND some untouched
+    background (extrema[1] == 255).
 
     The second half of that requirement is deliberate, not just a
     non-blank check: a normalization bug that accidentally keeps the WRONG
@@ -426,9 +547,7 @@ def rasterize_check(svg_text: str) -> bool:
     inner_match = _SVG_INNER_RE.match(svg_text.strip())
     if inner_match is None:
         return False
-    inner = inner_match.group(1)
-    label = RenderedLabel(svg=_svg_document(24, 24, f"<g>{inner}</g>"), width_px=24, height_px=24)
-    img = rasterize(label)
+    img = _rasterize_fragment_24(inner_match.group(1))
     return img.getextrema() == (0, 255)
 
 

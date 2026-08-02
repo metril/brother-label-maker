@@ -192,7 +192,11 @@ and by rendering every file through the real pipeline (see `test_symbols.py`).
   the invisible bounding-box path (paints nothing regardless) and
   concatenates the survivors' `d` strings into one merged `<path>`,
   preserving an explicit `fill-rule` (`evenodd` if any survivor declared
-  it, else `nonzero`).
+  it, else `nonzero`) -- gated (as of the H3/M5 fix, see "Multi-path
+  merging" below) on the merge being pixel-exact against the survivors
+  rendered as separate siblings; 4 of Tabler's real multi-path candidates
+  (`arrow-big-left-line`, `escalator-up`, `sitemap`, `sunrise`) fail that
+  gate and are skipped+logged rather than shipped mis-merged.
 - Selection: `backend/scripts/symbols_pipeline/tabler_ids.txt` -- unlike
   Material's/Phosphor's hand-trimmed subsets, this is the FULL current set
   of Tabler's `icons/filled/` style (1054 icons). `category` starts from
@@ -272,10 +276,15 @@ and by rendering every file through the real pipeline (see `test_symbols.py`).
   candidates, preserves the `fill-rule="evenodd"` ~70 of Bootstrap's own
   single-path fill icons declare (needed for ring/cusp hole geometry, e.g.
   `heart-fill.svg`'s cardioid notch), and skips+logs `circle-fill.svg`
-  (no `<path>` to extract at all).
+  (no `<path>` to extract at all) -- plus, as of the H3/M5 fix described in
+  "Multi-path merging" below, 21 more multi-path candidates that used to be
+  silently mis-merged (15 relative-`m` ids including `house`/`cup-hot`/
+  `layers`, 6 render-equivalence-gate rejects including `sign-stop`/
+  `rocket-takeoff`).
 - Selection: `backend/scripts/symbols_pipeline/bootstrap_ids.txt` -- unlike
   Material's/Phosphor's hand-trimmed subsets, this is the FULL current set
-  of `-fill.svg` variants (670 icons; 669 actually accepted, see above).
+  of `-fill.svg` variants (670 icons; 648 actually accepted post-H3/M5-fix,
+  see above).
   Bootstrap ships no per-icon category metadata -- categorized via
   `common.classify_by_keyword()` over each icon's own id tokens, plus a
   small hand-picked exception list (mainly Bootstrap's own
@@ -311,12 +320,16 @@ and by rendering every file through the real pipeline (see `test_symbols.py`).
   skipped+logged by that function's differing-fill check rather than
   flattened into a single wrong-colored shape -- the only source among all
   four where that specific guard actually triggers in practice, see
-  `fetch_fluent.py`'s own module docstring.
+  `fetch_fluent.py`'s own module docstring. 2 more (`image_globe`,
+  `slide_eraser`) are skipped+logged as of the H3 fix (see "Multi-path
+  merging" below): a non-first survivor's `d` started with a relative `m`,
+  which naive concatenation used to silently mis-resolve.
 - Selection: `backend/scripts/symbols_pipeline/fluent_ids.txt` -- unlike
   Material's/Phosphor's hand-trimmed subsets, this is the FULL current set
-  of canonical (non-locale) `_24_filled.svg` files (2490 icons; 2486
-  actually accepted, the 4 `flag_pride_*` icons above being the only
-  skips). Fluent ships no per-icon category metadata -- categorized via
+  of canonical (non-locale) `_24_filled.svg` files (2490 icons; 2484
+  actually accepted post-H3-fix -- the 4 `flag_pride_*` icons plus the 2
+  H3 relative-`m` skips above account for all 6). Fluent ships no per-icon
+  category metadata -- categorized via
   `common.classify_by_keyword()` over each icon's own id tokens, plus a
   small hand-picked exception list (Fluent's own "_lightning" suffix is a
   UI badge convention for "quick/AI-powered action" on an otherwise
@@ -344,15 +357,35 @@ fold into a flat `d` concatenation, or a non-`<path>` drawable element
 (`<circle>`/`<rect>`/etc.) it doesn't know how to flatten at all. See that
 function's own docstring in `common.py` for the exact rule.
 
-Every accepted merge was spot-checked by hand, rendering a sample of
-hole-shaped icons (rings/donuts/badges -- e.g. Tabler's `lifebuoy` and
-`chart-donut`, Remix's `record-circle` and `disc`, Bootstrap's `heart-fill`
-and `disc-fill`, Fluent's `record` and `cellular_3g`) through the real resvg
-pipeline: the automated ink+background rasterize gate can catch a fully
-self-cancelled shape (extrema wouldn't show both ink and background) but
-NOT a hole that self-cancels into solid fill while the rest of the icon
-still shows normal ink/background variation -- only an eyeballed render
-catches that. Every sampled icon rendered with its hole intact.
+**Correction (docs/code-review-2026-08.md H3/M5, fixed):** an earlier
+version of this section claimed plain `d`-string concatenation was
+sufficient and that a hand spot-check of hole-shaped icons was the
+defense against a bad merge. Both were wrong in ways that shipped 22
+geometrically corrupt icons across Tabler/Bootstrap/Fluent (Remix's
+curated set never produced a multi-path merge in practice, so it was
+never exposed): a relative `m` on a non-first survivor resolves against
+the PRECEDING subpath's current point once concatenated, not absolutely,
+silently displacing everything after it (17 icons, e.g. `bootstrap_house`,
+`bootstrap_cup_hot`, `fluent_image_globe`); and fill-rule is resolved
+per-`<path>` over ALL of that path's own subpaths together, so folding two
+overlapping same-fill survivors into one path can hollow out a region that
+was solid when they were separate sibling elements (5 more, e.g.
+`tabler_arrow_big_left_line`'s solid arrow rendering as a hollow outline).
+Neither the shape-validation nor the ink+background rasterize gate (nor,
+as it turned out, an eyeballed spot-check of a hand-picked sample) can
+see either failure mode. `extract_fill_path` now rejects (skip+log) a
+non-first survivor whose `d` starts with a relative `m` outright, and
+gates every real multi-path merge on rendering the merged candidate
+PIXEL-EXACT against the same survivors drawn as separate `<path>`
+siblings (an empirical sweep across all four sources' real curated sets
+found no safe middle ground for a nonzero tolerance -- see
+`common._RENDER_EQUIVALENCE_MAX_DIFF_PX`'s comment in `common.py`) --
+mechanical, exhaustive, and run over every candidate, not a sample. One
+of the 22 originally named (`bootstrap_envelope_open_heart`) rendered
+pixel-identical between its merged and sibling forms at every raster size
+checked during that sweep (24 through 192px); if its divergence is real,
+it is below what this (or any practical) rasterize-and-compare gate can
+distinguish, so it still ships unchanged.
 
 ## Adding another source
 

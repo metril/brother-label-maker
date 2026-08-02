@@ -150,10 +150,18 @@ script committed for any of them, see each file's own header).
    merged `d`, dropping any `fill="none"` decoration/hitbox path outright,
    and skipping+logging anything it can't safely reduce this way -- a
    genuinely multi-color icon, a per-path stroke/transform, or a non-`<path>`
-   drawable element). See its own docstring in `common.py`, and
+   drawable element; a non-first survivor whose `d` starts with a relative
+   `m`, which naive concatenation would silently mis-resolve; or a merge
+   whose rendered result isn't pixel-exact against the same survivors drawn
+   as separate siblings, which catches a fill-rule/winding change the
+   `d`-string concatenation itself can't see -- see "The pipeline-time
+   quality gate" below). See its own docstring in `common.py`, and
    LICENSES.md's "Multi-path merging" section for how this played out
    against the four real sources that needed it (Tabler especially: every
-   filled icon ships an extra invisible bounding-box path).
+   filled icon ships an extra invisible bounding-box path, and this is also
+   where the corruption docs/code-review-2026-08.md's H3/M5 findings
+   documented came from, before extract_fill_path gained the two gates
+   above).
    **If your source is stroke-based rather than already-filled** (line
    icons -- multiple `path`/`circle`/`rect`/`line`/`polyline` elements,
    `fill="none" stroke="currentColor"`, the way every icon in `lucide-static`
@@ -238,6 +246,26 @@ rasterize check" -- every file that ends up committed under
 `test_symbols.py`'s own rasterize test, which only re-checks a sampled
 subset by default -- see that file's module docstring for why a subset is
 enough there given the pipeline already swept everything).
+
+Neither of those two checks is geometric -- they can't tell a
+GEOMETRICALLY correct merge from a mangled one, only "renders as one
+opaque <path> shape with both ink and background." `extract_fill_path`
+(used by all four Track D2 sources, see "The multi-path merge" below)
+carries two additional gates of its own, upstream of both checks above,
+specifically for that: a same-fill multi-`<path>` source is rejected
+(skip+log, not hand-patched) if any non-first survivor's `d` starts with
+a relative `m` (naive string concatenation silently mis-resolves it --
+17 shipped icons were corrupted this way before this check existed, see
+docs/code-review-2026-08.md H3), or if rendering the merged single-`<path>`
+candidate isn't PIXEL-EXACT against rendering the same survivors as
+separate sibling `<path>` elements at the same viewBox (fill-rule is
+resolved per-`<path>` over all of that path's own subpaths together, so a
+merge can silently change which regions end up filled even when every
+subpath is a plain absolute `M` -- 5 more shipped icons were hollowed out
+this way before this gate existed, see docs/code-review-2026-08.md M5/M6).
+See `common.extract_fill_path`'s own docstring for the exact mechanics and
+the empirical sweep that set the render-equivalence gate's tolerance to 0
+(exact match, not a hedge value).
 
 ## Backward compatibility
 

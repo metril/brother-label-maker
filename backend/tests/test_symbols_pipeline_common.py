@@ -82,6 +82,77 @@ def test_extract_fill_path_union_evenodd_wins_if_any_path_declares_it():
     assert result == ("M1 1z M2 2z", "evenodd")
 
 
+# --- H3: relative moveto on a non-first survivor ------------------------
+
+
+def test_extract_fill_path_rejects_relative_m_on_non_first_survivor():
+    # Per the SVG path grammar a relative `m` is only absolute-equivalent
+    # as the very first command of the whole path -- concatenated after a
+    # preceding subpath's `z` it resolves against that subpath's current
+    # point instead, silently displacing everything that follows (this is
+    # the exact shape of bootstrap_house's second path in the real source:
+    # docs/code-review-2026-08.md H3). Naive concatenation used to accept
+    # this; it must now be rejected rather than "fixed" by guessing.
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M0 0h10v10h-10z" />'
+        '<path d="m5 5h5v5h-5z" />'
+        "</svg>"
+    )
+    assert common.extract_fill_path(svg) is None
+
+
+def test_extract_fill_path_accepts_relative_m_as_the_first_path():
+    # A relative `m` IS absolute-equivalent when it's the first (here,
+    # only) command in the whole path -- only a NON-FIRST survivor's
+    # relative `m` is unsafe to concatenate.
+    svg = '<svg viewBox="0 0 24 24"><path d="m1 1h2v2h-2z"/></svg>'
+    assert common.extract_fill_path(svg) == ("m1 1h2v2h-2z", "nonzero")
+
+
+# --- M5/M6: render-equivalence gate on multi-path merges -----------------
+
+
+def test_extract_fill_path_render_equivalence_gate_rejects_hollowed_overlap():
+    # Two overlapping same-fill rectangles that are each independently
+    # solid when drawn as separate sibling <path> elements (SVG doesn't
+    # XOR between siblings -- the overlap just gets painted twice) but
+    # fill-rule is resolved PER <path> over ALL of that path's own
+    # subpaths TOGETHER, so folding both rectangles into one evenodd path
+    # makes the overlap region crossed by two boundaries (even count) and
+    # therefore a HOLE -- exactly the mechanism that hollowed out 5 shipped
+    # icons (docs/code-review-2026-08.md M5, e.g.
+    # tabler_arrow_big_left_line's solid arrow rendering hollow). No
+    # relative moveto and no mixed fill-rule declaration is involved here
+    # -- structurally this is exactly the family test_symbols_pipeline_
+    # common.py's older merge tests couldn't distinguish from a safe merge
+    # (M6), which is why this needs a real render, not a `d`-string check.
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path fill-rule="evenodd" d="M2 2H12V12H2Z" />'
+        '<path fill-rule="evenodd" d="M7 7H17V17H7Z" />'
+        "</svg>"
+    )
+    assert common.extract_fill_path(svg) is None
+
+
+def test_extract_fill_path_render_equivalence_gate_passes_disjoint_merge():
+    # Two non-overlapping, non-touching same-fill rectangles: merging them
+    # into one <path> can't change the rendered result (no shared geometry
+    # for a fill-rule to resolve differently over), so the render-
+    # equivalence gate must still let this real, legitimate merge through
+    # -- this is the common case (the large majority of the four sources'
+    # real multi-path merges), not just the toy cases above.
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M1 1H9V9H1Z" />'
+        '<path d="M15 15H23V23H15Z" />'
+        "</svg>"
+    )
+    result = common.extract_fill_path(svg)
+    assert result == ("M1 1H9V9H1Z M15 15H23V23H15Z", "nonzero")
+
+
 def test_extract_fill_path_rejects_zero_paths():
     assert common.extract_fill_path('<svg viewBox="0 0 24 24"></svg>') is None
 

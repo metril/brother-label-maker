@@ -74,12 +74,20 @@ def test_list_symbols_meets_floor_and_every_source_contributes():
     # phosphor_ids.txt's currently-curated 55. The four Track D2 full-set
     # sources' floors sit a little below their currently-committed counts
     # (same margin-for-later-edits reasoning): tabler_ (>= 1000, currently
-    # 1054), remix_ (>= 1500, currently 1539), bootstrap_ (>= 650, currently
-    # 669 curated / 669 accepted -- circle-fill.svg's bare <circle> is the
-    # one curated id that never becomes a file, see bootstrap_ids.txt's
-    # header), fluent_ (>= 2400, currently 2490 curated / 2486 accepted --
-    # the flag_pride_* family's 4 genuinely multi-color icons are the
-    # skips, see fluent_ids.txt's header).
+    # 1050 -- down from 1054 pre-fix: docs/code-review-2026-08.md H3/M5's
+    # extract_fill_path render-equivalence + relative-m gates now skip+log
+    # arrow-big-left-line/escalator-up/sitemap/sunrise rather than shipping
+    # them geometrically corrupt), remix_ (>= 1500, currently 1539 --
+    # unaffected, Remix's curated set never has 2+ real glyph paths),
+    # bootstrap_ (>= 630, LOWERED from 650 by the same H3/M5 fix -- currently
+    # 648 curated / accepted, down from 669: circle-fill.svg's bare <circle>
+    # plus 21 new skips, 15 relative-m house_*/cassette/cup_hot/layers ids
+    # (H3) and 6 render-equivalence-gate rejects, sign-do-not-enter/
+    # sign-stop/sign-yield/rocket-takeoff/sign-dead-end/sign-railroad (M5) --
+    # see bootstrap_ids.txt's header), fluent_ (>= 2400, currently 2490
+    # curated / 2484 accepted -- the flag_pride_* family's 4 genuinely
+    # multi-color icons plus 2 new H3 relative-m skips, image_globe and
+    # slide_eraser, are the skips, see fluent_ids.txt's header).
     infos = list_symbols()
     assert all(isinstance(i, SymbolInfo) for i in infos)
 
@@ -92,7 +100,7 @@ def test_list_symbols_meets_floor_and_every_source_contributes():
 
     floors = {
         "material_": 700, "phosphor_": 50,
-        "tabler_": 1000, "remix_": 1500, "bootstrap_": 650, "fluent_": 2400,
+        "tabler_": 1000, "remix_": 1500, "bootstrap_": 630, "fluent_": 2400,
     }
     for group, floor in floors.items():
         count = len(by_group.get(group, []))
