@@ -288,7 +288,10 @@ describe("AppShell -- dock rail (tray + chain preview panels share one right-han
     const dockRail = trayPanel.parentElement;
     expect(dockRail).not.toBeNull();
     expect(dockRail).toBe(previewPanel.parentElement);
-    expect(dockRail?.className).toBe("flex min-h-0 flex-col");
+    // xl:sticky/top-0/h-screen pin the rail to the viewport so docked
+    // panels stay in view while <main> scrolls (see AppShell.tsx's dock-rail
+    // comment); sticky does NOT establish a fixed-position containing block.
+    expect(dockRail?.className).toBe("flex min-h-0 flex-col xl:sticky xl:top-0 xl:h-screen");
     // No transform/filter of its own -- see AppShell.tsx's own inline
     // comment at this mount point for why that matters to either panel's
     // undocked `position: fixed` overlay.

@@ -274,12 +274,21 @@ export function AppShell({ children }: AppShellProps) {
             GlobalTrayPanel mounts FIRST, ChainPreviewDrawer SECOND, so
             when both are docked they stack tray-above-preview in this one
             column (`flex-col`) instead of each fighting for its own
-            side-by-side column. No `xl:flex-1`/height split lives here on
-            the wrapper itself -- see GlobalTrayDrawer.tsx's own docstring
-            for the `xl:max-h-[50%]` chosen on the TRAY panel's own docked
-            class string instead (letting the preview panel, unedited, take
-            the rest): the wrapper only needs to be a plain flex column, not
-            a sizing authority.
+            side-by-side column. Height split between the two panels lives
+            on the TRAY panel's own docked class string (`xl:max-h-[50%]`,
+            see GlobalTrayDrawer.tsx), not here.
+            The rail itself is viewport-PINNED at xl (`xl:sticky xl:top-0
+            xl:h-screen`): without a definite height it would stretch to the
+            content row's full height (the Designer page is much taller than
+            the viewport), pushing a docked preview below the fold and
+            scrolling the panels away with the page. Sticky + h-screen keeps
+            both docked panels in view while `<main>` scrolls underneath,
+            and gives the tray's `max-h-[50%]` a definite height to resolve
+            against. `position: sticky` does NOT establish a containing
+            block for fixed descendants (only transform/filter/etc. do), so
+            the overlay mode below is unaffected. When nothing is docked the
+            rail has zero width (both panels are fixed or hidden), so the
+            h-screen column is invisible.
             Containing-block check for EITHER panel's undocked (overlay)
             mode `position: fixed`: this wrapper carries no transform/
             filter/backdrop-filter/contain of its own (`flex min-h-0
@@ -294,7 +303,7 @@ export function AppShell({ children }: AppShellProps) {
             -- the JobTray translate trap this project hit before).
             On EVERY route, same as GlobalTrayButton above (no
             `isDesignRoute` gate on either). */}
-        <div className="flex min-h-0 flex-col">
+        <div className="flex min-h-0 flex-col xl:sticky xl:top-0 xl:h-screen">
           <GlobalTrayPanel />
           <ChainPreviewDrawer />
         </div>
