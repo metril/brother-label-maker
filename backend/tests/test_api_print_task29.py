@@ -153,6 +153,52 @@ async def test_estimate_rejects_invalid_label_with_422(client):
     assert resp.status_code == 422
 
 
+# --- L6 (2026-08 review): margin_mm is now bounded to match the driver's --
+# own clamp_margin_mm, instead of being accepted unbounded and silently
+# diverging from what strategies.py actually sends the printer.
+
+
+def test_router_print_margin_bounds_match_geometry_clamp():
+    """Drift guard: PrintOptions.margin_mm's Field(ge=..., le=...) must stay
+    numerically identical to driver/geometry.py's own MARGIN_MIN_MM/
+    MARGIN_MAX_MM -- the whole point of the L6 fix is that the API-edge
+    bound and the wire-path clamp can never silently diverge again."""
+    from labelmaker.api.router_print import PrintOptions
+    from labelmaker.driver.geometry import MARGIN_MAX_MM, MARGIN_MIN_MM
+
+    field_info = PrintOptions.model_fields["margin_mm"]
+    ge_constraint = next(
+        meta.ge for meta in field_info.metadata if getattr(meta, "ge", None) is not None
+    )
+    le_constraint = next(
+        meta.le for meta in field_info.metadata if getattr(meta, "le", None) is not None
+    )
+    assert ge_constraint == MARGIN_MIN_MM
+    assert le_constraint == MARGIN_MAX_MM
+
+
+@pytest.mark.parametrize("margin_mm", [0.0, 1.999, 127.001, 1000.0, -5.0])
+async def test_estimate_rejects_out_of_range_margin_mm_with_422(client, margin_mm):
+    labels = [_text_label("HELLO")]
+    resp = await client.post(
+        "/api/print/estimate",
+        json={"labels": labels, "options": {"margin_mm": margin_mm}},
+    )
+    assert resp.status_code == 422
+
+
+async def test_estimate_accepts_margin_mm_at_the_clamp_bounds(client):
+    from labelmaker.driver.geometry import MARGIN_MAX_MM, MARGIN_MIN_MM
+
+    labels = [_text_label("HELLO")]
+    for margin_mm in (MARGIN_MIN_MM, MARGIN_MAX_MM):
+        resp = await client.post(
+            "/api/print/estimate",
+            json={"labels": labels, "options": {"margin_mm": margin_mm}},
+        )
+        assert resp.status_code == 200, resp.text
+
+
 # =====================================================================
 # 2. tape_used_mm: set at creation, refined after completion
 # =====================================================================

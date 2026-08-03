@@ -227,6 +227,44 @@ async def test_toggling_keep_printer_awake_mid_run_takes_effect_without_restart(
     assert state.keepalive_status["last_result"] == "ok"
 
 
+# -- disabling mid-sleep skips the pending poll (L4, 2026-08 review) --------
+
+
+async def test_disabling_mid_sleep_skips_the_pending_poll(
+    usb_overlay, fast_intervals, monkeypatch
+):
+    """The overlay is re-read AFTER the long `keep_awake_interval_min`
+    sleep, so disabling `keep_printer_awake` WHILE the coroutine is asleep
+    must skip the poll that would otherwise fire right after waking --
+    previously the enabled branch slept the full interval and then polled
+    unconditionally, firing one extra ESC i S request after being
+    disabled (and leaving keepalive_status["enabled"] stale until the
+    next loop top)."""
+    # keep_awake_interval_min=10 * fast_intervals' _SECONDS_PER_MINUTE
+    # (0.02) = a 0.2s sleep -- long enough to reliably disable partway
+    # through it, well before it would wake and poll.
+    await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 10})
+    calls: list[None] = []
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
+    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+
+    task = asyncio.create_task(run_keepalive(state))
+    try:
+        await asyncio.sleep(0.05)
+        assert calls == []  # still mid-sleep -- no poll yet
+        await usb_overlay.set_many({"keep_printer_awake": False})
+
+        # Wait past when the (now-skipped) poll would otherwise have fired.
+        await asyncio.sleep(0.3)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert calls == []
+    assert state.keepalive_status["enabled"] is False
+
+
 # -- cancellation is clean ----------------------------------------------------
 
 

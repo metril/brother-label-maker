@@ -549,15 +549,33 @@ class Database:
         return {"items": items, "page": page, "page_size": page_size, "total": total}
 
     async def delete_job(self, job_id: str) -> bool:
-        """Deletes the print_jobs row only -- its on-disk stream .bin file
-        (data_dir/jobs/{id}.bin, written by jobs/worker.py) is NOT this
-        module's concern (this module never touches the filesystem outside
-        the sqlite file itself); the caller (api/router_history.py's DELETE
-        /api/history/{id}) removes that file separately. The thumbnail has
-        no such separate file -- it's the `preview_png` BLOB column on this
-        same row, so it's gone the instant this DELETE commits."""
-        cur = await self._conn.execute("DELETE FROM print_jobs WHERE id = ?", (job_id,))
-        return cur.rowcount > 0
+        """Atomic compare-and-swap delete (review L2), mirroring
+        `cancel_job_if_queued` above: a single `DELETE ... WHERE id = ? AND
+        status NOT IN ('queued', 'printing')`, returning whether THIS call
+        was the one that removed the row (`rowcount == 1`).
+
+        Deleting a job the worker is currently printing (or has queued to
+        print) would orphan the on-disk stream .bin file jobs/worker.py
+        writes AFTER the print completes (data_dir/jobs/{id}.bin) -- this
+        module never touches the filesystem outside the sqlite file itself,
+        so nothing would ever clean that file up once its row is gone. A
+        plain get_job()-then-delete pair has the same race
+        cancel_job_if_queued's docstring describes (the worker could start
+        printing between the read and the write); folding the status check
+        into the DELETE's WHERE clause makes the whole read-check-write
+        atomic at the database level instead. The caller
+        (api/router_history.py) uses the False case to distinguish "unknown
+        id" (404) from "known but in flight" (409) via a follow-up
+        get_job() -- see that router for the exact mapping.
+
+        On success, the row's `preview_png` thumbnail BLOB is gone the
+        instant this DELETE commits (no separate file); the caller still
+        removes the on-disk stream .bin file separately."""
+        cur = await self._conn.execute(
+            "DELETE FROM print_jobs WHERE id = ? AND status NOT IN ('queued', 'printing')",
+            (job_id,),
+        )
+        return cur.rowcount == 1
 
     @staticmethod
     def _job_row_to_dict(row: aiosqlite.Row) -> dict:

@@ -335,3 +335,25 @@ async def test_delete_history_job_removes_row_and_stream_file(app_and_client):
 
     again = await client.delete(f"/api/history/{job['id']}")
     assert again.status_code == 404
+
+
+async def test_delete_history_job_409s_and_survives_while_printing(app_and_client):
+    """Review L2: deleting a job the worker is currently printing (or has
+    queued) would orphan its on-disk stream .bin file, which worker.py
+    only writes AFTER the print completes -- db.delete_job's status-guarded
+    CAS refuses both, and this router maps the refusal to 409 (with the
+    row left intact), the same way POST .../cancel maps its own CAS miss."""
+    app, client = app_and_client
+    db = app.state.db
+    job = await db.create_print_job(
+        {"labels": [_text_label("HELLO")]}, label_count=1, chain_mode="cut_each"
+    )
+    await db.update_job(job["id"], status="printing")
+
+    resp = await client.delete(f"/api/history/{job['id']}")
+    assert resp.status_code == 409
+    assert "printing" in resp.json()["detail"]
+
+    survived = await db.get_job(job["id"])
+    assert survived is not None
+    assert survived["status"] == "printing"

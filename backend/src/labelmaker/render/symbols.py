@@ -33,8 +33,9 @@ This is deliberately NOT a general SVG-inlining mechanism: it trusts the
 curated file's inner content is already just path data with no `<script>`,
 no external references, no font-family/style declarations of its own (the
 "validate at load" half of the brief's ask) -- `_validate_symbol_svg` below
-checks the shape (single `<path>`, correct viewBox, no `style`/`font-family`
-attributes) every time a symbol is loaded, raising loudly rather than
+checks the shape (single `<path>`, correct viewBox, no `style`/`font-family`,
+no `<script>`, no event-handler (`on*`) attributes, no `href`/`xlink:href` --
+L9, 2026-08 review) every time a symbol is loaded, raising loudly rather than
 silently inlining something this mechanism wasn't designed for. This same
 per-load check is what test_symbols.py's asset-integrity test exercises
 against every bundled file up front, so a curation mistake is caught by the
@@ -83,7 +84,20 @@ SYMBOLS_DIR = Path(__file__).resolve().parents[3] / "assets" / "symbols"
 _SVG_WRAPPER_RE = re.compile(r"<svg\b[^>]*>(.*)</svg>\s*\Z", re.S)
 _PATH_TAG_RE = re.compile(r"<path\b", re.S)
 _VIEWBOX_RE = re.compile(r'viewBox\s*=\s*"0 0 24 24"')
-_FORBIDDEN_ATTR_RE = re.compile(r"\b(style|font-family)\s*=", re.I)
+# L9 (2026-08 review): style/font-family were the original checks (see
+# rasterize.py's font-family guard); `on\w+` (event-handler attributes,
+# e.g. onload/onclick) is new -- symbols are served directly as
+# image/svg+xml (api/router_labels.py's GET /api/symbols/{id}), which is
+# script-executing content when navigated to directly, so this needs to
+# reject the same active-content surface a browser would actually execute.
+_FORBIDDEN_ATTR_RE = re.compile(r"\b(style|font-family|on\w+)\s*=", re.I)
+# <script> siblings and href/xlink:href (an <image>/<use>/<a> pulling in
+# external -- or javascript: -- content) are checked separately from
+# _FORBIDDEN_ATTR_RE above since they're not a bare `name=` attribute
+# shape: a tag name and an attribute name that legitimately appears on
+# many non-hostile SVG constructs this module doesn't otherwise use.
+_SCRIPT_TAG_RE = re.compile(r"<\s*script\b", re.I)
+_HREF_ATTR_RE = re.compile(r"\b(?:xlink:)?href\s*=", re.I)
 
 
 class SymbolInfo(BaseModel):
@@ -259,17 +273,66 @@ def _validate_symbol_svg(info: SymbolInfo, raw: str) -> str:
             f"symbol {info.id!r} file {info.path} must contain exactly one <path>, "
             f"found {path_count}"
         )
+    # L9 (2026-08 review): checked before _FORBIDDEN_ATTR_RE so a hostile
+    # file with BOTH a <script> sibling and an onload= attribute gets the
+    # more specific "must not contain a <script>" message, not a generic
+    # attribute one.
+    if _SCRIPT_TAG_RE.search(raw):
+        raise ValueError(f"symbol {info.id!r} file {info.path} must not contain a <script> element")
+    if _HREF_ATTR_RE.search(raw):
+        raise ValueError(
+            f"symbol {info.id!r} file {info.path} must not carry href/xlink:href attributes"
+        )
     if _FORBIDDEN_ATTR_RE.search(raw):
         raise ValueError(
-            f"symbol {info.id!r} file {info.path} must not carry style/font-family "
+            f"symbol {info.id!r} file {info.path} must not carry style/font-family/event-handler "
             "attributes (see rasterize.py's font-family guard for why this matters)"
         )
     return match.group(1)
 
 
+def resolve_symbol_path(info: SymbolInfo) -> Path:
+    """SYMBOLS_DIR/info.path, resolved and containment-checked (review L9)
+    -- the ONE choke point every SymbolInfo -> filesystem path resolution
+    in this module goes through, shared by `_load_symbol_inner_svg` below
+    and api/router_labels.py's GET /api/symbols/{id} (which serves the raw
+    file directly, so it needs the Path itself for stat()-derived ETag/
+    Last-Modified headers, not just the validated inner content
+    `symbol_object()` wants). Mirrors render/images.py's `image_path()`/
+    `_resolve_contained()` pattern: resolve the candidate, assert it's
+    still under SYMBOLS_DIR's own resolved form, raise ValueError (never
+    return an out-of-bounds path) otherwise.
+
+    index.json's `path` field is committed content, not runtime-untrusted
+    input the way an uploaded image_id is -- this is defense in depth
+    against a future bad manifest entry or a symlink surprise, not a
+    response to a live threat.
+    """
+    base = SYMBOLS_DIR.resolve()
+    candidate = (base / info.path).resolve()
+    if not candidate.is_relative_to(base):
+        raise ValueError(f"symbol {info.id!r} path {info.path!r} escapes SYMBOLS_DIR")
+    return candidate
+
+
+def validate_symbol_svg(info: SymbolInfo, raw: str) -> None:
+    """Public wrapper around this module's own shape/content checks
+    (review L9): api/router_labels.py's GET /api/symbols/{id} calls this
+    before streaming a catalog file back as active `image/svg+xml`
+    content, so a future hostile/malformed manifest entry is rejected the
+    same way a curation mistake already is at render time
+    (`symbol_object()` -> `_load_symbol_inner_svg()` ->
+    `_validate_symbol_svg()`) -- never served verbatim. Raises ValueError
+    for anything `_validate_symbol_svg` would reject; its inner-content
+    return value is irrelevant to a caller that serves the ORIGINAL bytes
+    unchanged, so this discards it.
+    """
+    _validate_symbol_svg(info, raw)
+
+
 def _load_symbol_inner_svg(info: SymbolInfo) -> str:
     ensure_symbols_dir()
-    path = SYMBOLS_DIR / info.path
+    path = resolve_symbol_path(info)
     if not path.is_file():
         raise RuntimeError(
             f"symbol file missing: {path} (listed in index.json as id={info.id!r})"

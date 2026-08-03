@@ -126,4 +126,18 @@ async def run_keepalive(state) -> None:
             continue
 
         await anyio.sleep(effective.keep_awake_interval_min * _SECONDS_PER_MINUTE)
+
+        # L4 (2026-08 review): re-read the overlay AFTER the long sleep --
+        # keep_printer_awake (or printer_mode) may have changed while this
+        # coroutine slept, and without this re-check one more open ->
+        # get_status -> close cycle would fire up to keep_awake_interval_min
+        # minutes after being disabled, contradicting the disabled branch's
+        # own "stay inert -- zero USB traffic" contract above. Updating
+        # keepalive_status["enabled"] here too means /diagnostics reflects
+        # the disable immediately rather than only at the next loop top.
+        effective = state.settings.effective()
+        state.keepalive_status["enabled"] = effective.keep_printer_awake
+        if not effective.keep_printer_awake or effective.printer_mode != "usb":
+            continue
+
         await _poll_once(state)

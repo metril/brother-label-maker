@@ -177,7 +177,7 @@ is an image generator, not a print sink).
 from __future__ import annotations
 
 import anyio
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from labelmaker.api.deps import AppConfigDep, SettingsDep, error_message
@@ -185,7 +185,25 @@ from labelmaker.config import AppConfig
 from labelmaker.render import LabelDefinition, Tape, preview_png, rasterize, render_definition
 from labelmaker.render.types.homebox_location import HomeboxLocationParams
 
-router = APIRouter(tags=["els"])
+
+def _require_els_enabled(settings: SettingsDep) -> None:
+    """Router-level gate (review L1 fix): FastAPI resolves and CALLS every
+    `Depends(...)` in `dependant.dependencies` -- which router-level
+    `dependencies=[...]` become part of -- before it binds/validates the
+    endpoint's own `Query(...)` params (see fastapi.dependencies.utils.
+    solve_dependencies: the `for sub_dependant in dependant.dependencies`
+    loop runs first and an HTTPException raised there propagates
+    immediately). Putting the els_enabled check HERE, instead of as the
+    first two lines of the handler, means a disabled+malformed request
+    (e.g. missing `TitleText`) now 404s before FastAPI ever tries to parse
+    the query string -- previously it 422'd, enumerating the required
+    param names to an unauthenticated caller (`/api/els/` is exempt from
+    AuthGateMiddleware even in oidc mode)."""
+    if not settings.effective().els_enabled:
+        raise HTTPException(status_code=404, detail="not found")
+
+
+router = APIRouter(tags=["els"], dependencies=[Depends(_require_els_enabled)])
 
 
 def _secondary_text(description_text: str, additional_information: str | None) -> str:
@@ -241,12 +259,12 @@ async def get_els_label(
     dynamic_length: bool = Query(False, alias="DynamicLength"),
 ) -> Response:
     # task 4.5 Track A: els_enabled is DB-editable (Settings page) now, so
-    # main.py registers this route UNCONDITIONALLY -- this per-request check
-    # is the only thing left enforcing "disabled -> 404" (never 503; there's
-    # no other gate, auth or otherwise, behind this endpoint at all).
+    # main.py registers this route UNCONDITIONALLY -- the router-level
+    # `_require_els_enabled` dependency (see its own docstring) is the only
+    # thing left enforcing "disabled -> 404" (never 503; there's no other
+    # gate, auth or otherwise, behind this endpoint at all), and it now runs
+    # BEFORE this body -- and before FastAPI even parses the query string.
     effective = settings.effective()
-    if not effective.els_enabled:
-        raise HTTPException(status_code=404, detail="not found")
 
     try:
         params = HomeboxLocationParams(
@@ -254,9 +272,6 @@ async def get_els_label(
             path=_secondary_text(description_text, additional_information),
             qr_data=url,
         )
-        # Same `effective` snapshot as the els_enabled check above, so the
-        # tape width used here can't disagree with the flag that just
-        # passed.
         els_tape_mm = effective.els_tape_mm
         definition = LabelDefinition(
             type="homebox_location",

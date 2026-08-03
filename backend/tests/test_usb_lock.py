@@ -18,6 +18,7 @@ import time
 import anyio
 import pytest
 
+from labelmaker.api import router_printer
 from labelmaker.driver.transport import USB_LOCK
 
 _TEXT_LABEL = {
@@ -40,7 +41,12 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
     again.
     """
     app, client = app_and_client
-    hold_s = 1.0
+    # L21 (2026-08 review): derived from the router's own acquire timeout
+    # (not a hardcoded literal) so this margin survives a change to either
+    # constant -- the assertion below only holds if the worker still holds
+    # USB_LOCK when the status route's own acquire(timeout=...) gives up,
+    # i.e. hold_s must comfortably outlast _LOCK_ACQUIRE_TIMEOUT_S.
+    hold_s = 4 * router_printer._LOCK_ACQUIRE_TIMEOUT_S
 
     def _slow_print(*args, **kwargs):
         time.sleep(hold_s)

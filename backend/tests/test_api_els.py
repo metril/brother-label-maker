@@ -63,6 +63,16 @@ async def test_disabled_by_default_returns_404(client):
     assert resp.status_code == 404
 
 
+async def test_disabled_with_no_query_params_still_returns_404_not_422(client):
+    """Review L1: the els_enabled gate is a router-level dependency (see
+    router_els._require_els_enabled), which FastAPI resolves BEFORE it
+    binds/validates this route's own Query(...) params -- so a disabled
+    request missing every required param (TitleText/URL) must still 404,
+    not 422 enumerating the missing params to an unauthenticated caller."""
+    resp = await client.get("/api/els/label")
+    assert resp.status_code == 404
+
+
 async def test_enabled_via_settings_put_gates_the_route_same_as_app_config(client):
     """els_enabled (task 4.5 Track A) is DB-editable from the Settings page
     -- unlike every other test in this file, which flips it via the

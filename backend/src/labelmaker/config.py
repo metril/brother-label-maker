@@ -52,10 +52,17 @@ class AppConfig(BaseSettings):
     # rendering to a GET endpoint this app exposes. That endpoint is
     # unauthenticated by design (HomeBox sends no credentials -- see
     # backend/pkgs/labelmaker/labelmaker.go's fetchLabelFromURL, verified
-    # 2026-07-28), so it must be OFF unless an operator opts in explicitly:
-    # main.create_app only registers router_els's routes when this is True
-    # (disabled -> a plain 404, not a 503, since the routes don't exist at
-    # all rather than existing-but-refusing).
+    # 2026-07-28), so it must be OFF unless an operator opts in explicitly.
+    # L10 (2026-08 review): this field is now DB-editable from the Settings
+    # page (see settings_overlay.py's OVERRIDABLE_FIELDS) rather than a
+    # startup-only env knob, so main.create_app registers router_els's
+    # routes UNCONDITIONALLY -- the gate is a router-level dependency
+    # (router_els._require_els_enabled) that reads the settings overlay's
+    # EFFECTIVE els_enabled on every request instead, ahead of even this
+    # route's own param binding (see that function's own docstring), and
+    # 404s when it's off (disabled -> a plain 404, not a 503, same "the
+    # route doesn't exist" contract as before -- just enforced per-request
+    # rather than by conditional registration).
     els_enabled: bool = False
     # The tze tape width (mm) ELS labels render at -- HomeBox's own
     # Width/Height/Dpi query params describe ITS internal generator's

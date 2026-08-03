@@ -77,7 +77,18 @@ class LabelSegment:
     """One label's position along the composite strip, in mm -- derived from
     the SAME pixel x-offsets the composite image itself was pasted at
     (dots_to_mm of those offsets), so the image and these numbers can never
-    disagree with each other."""
+    disagree with each other.
+
+    L7 (2026-08 review): in CUT_EACH mode, these mm values are positions
+    along the COMPOSITED PREVIEW IMAGE _composite() builds below, not along
+    any single physical tape strip -- see that function's own "UNIT TRAP"
+    note. cut_each produces n physically separate strips, each starting at
+    0 mm on its own piece of tape; the synthetic MIN_FEED_MM gap this class'
+    start_mm/end_mm are offset by exists only in the preview image, never
+    on real tape. Surfaced verbatim as api/router_print.py's
+    ChainedPreviewSegment -- see that model's own docstring, which is the
+    one an external API consumer actually reads.
+    """
 
     index: int
     start_mm: float

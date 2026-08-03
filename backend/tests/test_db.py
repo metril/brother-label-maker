@@ -435,11 +435,36 @@ async def test_delete_job_removes_row_and_reports_missing():
     db = await Database.open(":memory:")
     try:
         job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        # delete_job is a status-guarded CAS (review L2) -- a freshly
+        # created job is "queued", which it now refuses to delete (see
+        # test_delete_job_refuses_queued_or_printing_job below), so bring
+        # it to a terminal status first.
+        await db.update_job(job["id"], status="done")
 
         assert await db.delete_job(job["id"]) is True
         assert await db.get_job(job["id"]) is None
         assert await db.delete_job(job["id"]) is False
         assert await db.delete_job("nonexistent-id") is False
+    finally:
+        await db.close()
+
+
+async def test_delete_job_refuses_queued_or_printing_job():
+    """Review L2: deleting a job the worker has queued or is currently
+    printing would orphan its on-disk stream .bin file, which worker.py
+    only writes AFTER the print completes -- delete_job's CAS
+    (`WHERE status NOT IN ('queued', 'printing')`) refuses both, leaving
+    the row intact so the caller can classify the failure (404 vs 409)."""
+    db = await Database.open(":memory:")
+    try:
+        queued = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        assert await db.delete_job(queued["id"]) is False
+        assert await db.get_job(queued["id"]) is not None
+
+        printing = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        await db.update_job(printing["id"], status="printing")
+        assert await db.delete_job(printing["id"]) is False
+        assert await db.get_job(printing["id"]) is not None
     finally:
         await db.close()
 

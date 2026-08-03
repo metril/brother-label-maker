@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -161,6 +162,27 @@ def _resolve_existing_image_path(image_id: str, data_dir: Path) -> Path:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="image not found")
     return path
+
+
+def _stat_or_404(path: Path) -> os.stat_result:
+    """Review L3: an explicit, synchronous `stat()` -- distinct from
+    `FileResponse`'s OWN internal one -- so a file that vanished between
+    `_resolve_existing_image_path`'s `is_file()` check and this call (a
+    second app instance sharing `data_dir`, or an operator/cron pruning
+    `data_dir/uploads/`) maps to this module's contracted 404, raised HERE
+    inside the route handler's own execution, before any `Response` object
+    is built. Without this, the equivalent failure inside
+    `FileResponse.__call__` (which runs later, during ASGI response
+    sending, entirely outside FastAPI's exception-to-HTTP mapping) surfaces
+    as an uncaught `RuntimeError` -- a raw 500, not the 404 this module
+    otherwise guarantees. The returned `stat_result` is handed straight to
+    `FileResponse(..., stat_result=...)` so it skips ITS OWN internal stat
+    call instead of re-racing the same file a second time.
+    """
+    try:
+        return path.stat()
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="image not found") from exc
 
 
 def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
@@ -407,11 +429,20 @@ def _generate_thumbnail(source_path: Path, dest_path: Path) -> None:
 @router.get("/{image_id}")
 async def get_image(image_id: str, config: AppConfigDep) -> FileResponse:
     path = _resolve_existing_image_path(image_id, config.data_dir)
+    # Review L3: explicit stat (see _stat_or_404's own docstring) closes
+    # the TOCTOU between the is_file() check above and FileResponse's own
+    # deferred read -- a vanished file now 404s instead of a raw 500.
+    stat_result = _stat_or_404(path)
     # FileResponse (not Response(path.read_bytes())): streams the file off
     # the event loop via the threadpool instead of buffering the whole
     # multi-MB original into memory per request, and computes etag/
     # last-modified from the file's own stat() for free -- see H6.
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": _CACHE_CONTROL})
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": _CACHE_CONTROL},
+        stat_result=stat_result,
+    )
 
 
 @router.get("/{image_id}/thumb")
@@ -432,14 +463,37 @@ async def get_image_thumb(image_id: str, config: AppConfigDep) -> FileResponse:
         # First request for this id pays the PIL resize -- off-loop, same
         # M7 discipline as upload/list (an 8 MP source takes long enough
         # to stall /api/ws and the status poll otherwise).
-        await anyio.to_thread.run_sync(_generate_thumbnail, path, thumb)
-    return FileResponse(thumb, media_type="image/png", headers={"Cache-Control": _CACHE_CONTROL})
+        #
+        # Review L3: the source can still vanish between the is_file()
+        # check above and this call (same TOCTOU window as GET /{id}) --
+        # Image.open() then raises OSError from the worker thread, which
+        # anyio.to_thread.run_sync propagates back into this coroutine, so
+        # it's still catchable here and mapped to the module's contracted
+        # 404 rather than escaping as a raw 500.
+        try:
+            await anyio.to_thread.run_sync(_generate_thumbnail, path, thumb)
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="image not found") from exc
+    stat_result = _stat_or_404(thumb)
+    return FileResponse(
+        thumb,
+        media_type="image/png",
+        headers={"Cache-Control": _CACHE_CONTROL},
+        stat_result=stat_result,
+    )
 
 
 @router.delete("/{image_id}", status_code=204)
 async def delete_image(image_id: str, config: AppConfigDep) -> Response:
     path = _resolve_existing_image_path(image_id, config.data_dir)
-    path.unlink()
+    try:
+        path.unlink()
+    except OSError as exc:
+        # Review L3: the file can vanish between the is_file() check inside
+        # _resolve_existing_image_path and this unlink() (a second app
+        # instance sharing data_dir, or an operator/cron pruning uploads/)
+        # -- map that to the same 404 an unknown id gets, not a raw 500.
+        raise HTTPException(status_code=404, detail="image not found") from exc
     # Best-effort: the thumb may not exist yet (never requested) -- that's
     # not an error, just nothing to clean up. thumb_path() itself can't
     # raise here (image_id already passed IMAGE_ID_RE + containment via

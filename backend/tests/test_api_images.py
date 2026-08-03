@@ -210,6 +210,65 @@ async def test_delete_symlinked_but_well_formed_image_id_returns_404_not_500(app
     assert secret.is_file()
 
 
+# --- 3c. Review L3: TOCTOU between the resolve-time is_file() check and ----
+# the actual read/unlink -- a second app instance sharing data_dir, or an
+# operator/cron pruning uploads/, can remove the file in that window.
+# Simulated by monkeypatching _resolve_existing_image_path to delete the
+# file the instant AFTER it passes the real resolve/existence check (so the
+# route's own subsequent filesystem op is the one that races an empty
+# path), rather than relying on real concurrency.
+
+
+def _vanish_after_resolve(monkeypatch):
+    import labelmaker.api.router_images as router_images_module
+
+    original_resolve = router_images_module._resolve_existing_image_path
+
+    def _resolve_then_delete(image_id, data_dir):
+        path = original_resolve(image_id, data_dir)
+        path.unlink()
+        return path
+
+    monkeypatch.setattr(router_images_module, "_resolve_existing_image_path", _resolve_then_delete)
+
+
+async def test_get_image_404s_not_500s_when_file_vanishes_after_resolve(client, monkeypatch):
+    upload = await client.post(
+        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    _vanish_after_resolve(monkeypatch)
+    resp = await client.get(f"/api/images/{image_id}")
+    assert resp.status_code == 404
+
+
+async def test_get_image_thumb_404s_not_500s_when_source_vanishes_after_resolve(
+    client, monkeypatch
+):
+    upload = await client.post(
+        "/api/images", files={"file": ("logo.png", io.BytesIO(_large_png_bytes()), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    _vanish_after_resolve(monkeypatch)
+    # No thumb cached yet -- this must go through _generate_thumbnail,
+    # which is what actually races the now-deleted source.
+    resp = await client.get(f"/api/images/{image_id}/thumb")
+    assert resp.status_code == 404
+
+
+async def test_delete_image_404s_not_500s_when_file_vanishes_after_resolve(client, monkeypatch):
+    upload = await client.post(
+        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+    )
+    image_id = upload.json()["image_id"]
+
+    _vanish_after_resolve(monkeypatch)
+    resp = await client.delete(f"/api/images/{image_id}")
+    assert resp.status_code == 404
+
+
 # --- 4. PNG normalization: RGBA flattened onto white ------------------------
 
 

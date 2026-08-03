@@ -21,7 +21,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
-from labelmaker.driver.geometry import dots_to_mm
+from labelmaker.driver.geometry import MARGIN_MAX_MM, MARGIN_MIN_MM, dots_to_mm
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.jobs.chained_preview import (
     build_chained_preview_from_rendered,
@@ -60,7 +60,17 @@ MAX_PREVIEW_PIXELS = 40_000_000
 
 class PrintOptions(BaseModel):
     chain_mode: ChainMode = ChainMode.CUT_EACH
-    margin_mm: float = 2.0
+    # L6 (2026-08 review): bounded to match driver/geometry.clamp_margin_mm,
+    # which the wire path (strategies.py) already clamps `margin_mm`
+    # through before it ever reaches the printer -- previously this field
+    # had no ge/le at all, so render.estimate.estimate() (called from this
+    # same PrintOptions on POST /print/estimate, the preview stats row, and
+    # the tape_used_mm persisted onto every job record) could report a
+    # figure the driver would silently clamp away from at print time.
+    # Reusing the SAME constants (not re-typed bounds) is what
+    # test_router_print_margin_bounds_match_geometry_clamp guards against
+    # drifting apart.
+    margin_mm: float = Field(default=2.0, ge=MARGIN_MIN_MM, le=MARGIN_MAX_MM)
     auto_cut: bool = True
 
 
@@ -281,6 +291,20 @@ class ChainedPreviewSegment(BaseModel):
     (render.geometry.dots_to_mm of the composite's pixel x-offsets), never
     pixels -- see ChainedPreviewResponse's own UNIT TRAP note for the
     pixel side of this same contract.
+
+    L7 (2026-08 review): in CUT_EACH mode specifically, these mm values are
+    positions along the COMPOSITED PREVIEW IMAGE, not along any single
+    physical tape strip -- cut_each really means n physically SEPARATE
+    strips, each starting at 0 mm on its own piece of tape (see
+    jobs/chained_preview.py's `_composite`, "UNIT TRAP: this gap is a
+    SCREEN-ONLY convention, not a physical one"). The composite inserts a
+    synthetic `MIN_FEED_MM` blank separator between labels purely so the
+    preview image shows n visually distinct pieces, and start_mm/end_mm
+    are derived from THAT padded image -- so e.g. segments[2] in a 3-label
+    cut_each job is offset by ~2 synthetic gaps' worth of mm that exist on
+    no physical strip. chain_ff and strip_marks have no such fiction:
+    chain_ff really is one continuous strip (zero gap), and strip_marks'
+    gap is real cut-mark tape width, not a synthetic screen-only pad.
     """
 
     index: int

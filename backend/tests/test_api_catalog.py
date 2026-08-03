@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import os
 
-from labelmaker.api import router_labels as router_labels_module
 from labelmaker.driver.geometry import dots_to_mm
 from labelmaker.render import symbols as symbols_module
 from labelmaker.render.symbols import list_symbols
@@ -144,8 +143,12 @@ async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_
     }
     _write_symbols_index(tmp_path, [entry_a])
     (tmp_path / "a.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
+    # L9 (2026-08 review): router_labels.py no longer imports its own
+    # SYMBOLS_DIR name -- GET /api/symbols/{id} resolves the file through
+    # symbols.resolve_symbol_path(), which reads THIS module's SYMBOLS_DIR
+    # live at call time, so patching it here is the only patch needed (the
+    # route-level monkeypatch this test previously also needed is gone).
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
-    monkeypatch.setattr(router_labels_module, "SYMBOLS_DIR", tmp_path)
 
     resp = await client.get("/api/symbols")
     assert resp.status_code == 200
@@ -229,3 +232,83 @@ async def test_symbol_svg_route_returns_304_when_if_none_match_matches(client):
     assert resp2.status_code == 304
     assert resp2.headers["etag"] == etag
     assert resp2.content == b""
+
+
+# --- L9 (2026-08 review): SVGs served as active content -- validation and --
+# path containment on the serve path, not just at render time.
+
+
+async def test_symbol_svg_route_sets_nosniff_header_for_a_normal_symbol(client):
+    resp = await client.get("/api/symbols/bolt")
+    assert resp.status_code == 200
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+async def test_symbol_svg_route_rejects_script_sibling(client, monkeypatch, tmp_path):
+    entries = [{
+        "id": "hostile_script", "name": "Hostile", "tags": [], "path": "hostile.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }]
+    _write_symbols_index(tmp_path, entries)
+    (tmp_path / "hostile.svg").write_text(
+        '<svg viewBox="0 0 24 24"><path d="M0 0"/><script>alert(1)</script></svg>'
+    )
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+
+    resp = await client.get("/api/symbols/hostile_script")
+    assert resp.status_code == 404
+
+
+async def test_symbol_svg_route_rejects_onload_attribute(client, monkeypatch, tmp_path):
+    entries = [{
+        "id": "hostile_onload", "name": "Hostile", "tags": [], "path": "hostile.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }]
+    _write_symbols_index(tmp_path, entries)
+    (tmp_path / "hostile.svg").write_text(
+        '<svg viewBox="0 0 24 24" onload="alert(1)"><path d="M0 0"/></svg>'
+    )
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+
+    resp = await client.get("/api/symbols/hostile_onload")
+    assert resp.status_code == 404
+
+
+async def test_symbol_svg_route_rejects_xlink_href(client, monkeypatch, tmp_path):
+    entries = [{
+        "id": "hostile_xlink", "name": "Hostile", "tags": [], "path": "hostile.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }]
+    _write_symbols_index(tmp_path, entries)
+    (tmp_path / "hostile.svg").write_text(
+        '<svg viewBox="0 0 24 24"><path d="M0 0"/>'
+        '<image xlink:href="https://evil.example/x.png"/></svg>'
+    )
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+
+    resp = await client.get("/api/symbols/hostile_xlink")
+    assert resp.status_code == 404
+
+
+async def test_symbol_svg_route_404s_when_manifest_path_escapes_symbols_dir(
+    client, monkeypatch, tmp_path
+):
+    """resolve_symbol_path() containment-checks the manifest's `path` field
+    the same way render/images.py's image_path() does for uploads -- a bad
+    manifest entry (or a symlink) that resolves outside SYMBOLS_DIR must
+    404, never serve whatever it points at."""
+    outside = tmp_path.parent / "outside-symbols"
+    outside.mkdir(parents=True, exist_ok=True)
+    secret = outside / "secret.svg"
+    secret.write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
+
+    entries = [{
+        "id": "escaping", "name": "Escaping", "tags": [],
+        "path": "../outside-symbols/secret.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }]
+    _write_symbols_index(tmp_path, entries)
+    monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
+
+    resp = await client.get("/api/symbols/escaping")
+    assert resp.status_code == 404

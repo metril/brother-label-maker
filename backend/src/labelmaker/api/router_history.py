@@ -163,10 +163,27 @@ async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Re
     `preview_png` thumbnail -- it's a BLOB column on that same row, not a
     separate file) AND the on-disk stream .bin file jobs/worker.py wrote
     (data_dir/jobs/{id}.bin) -- deleting the row alone would leave that
-    file orphaned forever, since nothing else ever cleans it up."""
+    file orphaned forever, since nothing else ever cleans it up.
+
+    Review L2: db.delete_job is now a status-guarded CAS that refuses to
+    remove a job the worker has queued or is currently printing (deleting
+    it mid-print would orphan the .bin file worker.py writes only AFTER
+    the print completes, since nothing else ever cleans that file up
+    either). A False result is classified the same way
+    router_print.py's cancel_job endpoint classifies its own CAS miss: a
+    follow-up get_job() distinguishes "unknown id" (404) from "known but
+    queued/printing" (409, naming the current status so the client knows
+    to cancel first).
+    """
     deleted = await db.delete_job(job_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="job not found")
+        job = await db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"job is {job['status']!r}; cancel it first",
+        )
 
     stream_path = config.data_dir / "jobs" / f"{job_id}.bin"
     if await anyio.to_thread.run_sync(stream_path.is_file):

@@ -381,6 +381,77 @@ async def test_preview_memory_error_during_composite_maps_to_507_not_500(client,
     assert "memory" in resp.json()["detail"].lower()
 
 
+# --- (j) M13: ChainedPreviewResponse.warnings -- presence + index prefix ---
+# had zero coverage in this file before -- `grep -n warnings` returned zero
+# hits across the whole module.
+
+
+async def test_preview_warnings_are_index_prefixed_and_aligned_with_the_warning_label(client):
+    """Label 0 is roomy (a single short line on a 3.5mm tape -- no
+    warnings); label 1 is the same cramped-text generator
+    test_api_preview.py's own test_preview_warnings_pass_through_on_cramped_text
+    uses (3.5mm tape + 4 lines) to reliably raise `text_cramped`. Both
+    labels must share one tape (chained preview 422s on mixed tapes -- see
+    test (d) above), so label 0 is deliberately ALSO 3.5mm-wide, just with
+    content that doesn't itself hit the auto-fit floor. Pins the field's
+    presence, the exactly-one-entry count, and the 0-based "label {i}: "
+    prefix naming the CORRECT (warning-producing) label -- not label 0.
+    """
+    roomy = {
+        "type": "text",
+        "tape": {"width_mm": 3.5, "family": "tze"},
+        "params": {"lines": ["HI"]},
+    }
+    cramped = {
+        "type": "text",
+        "tape": {"width_mm": 3.5, "family": "tze"},
+        "params": {"lines": ["A", "B", "C", "D"]},
+    }
+
+    resp = await client.post(
+        "/api/print/preview",
+        json={"labels": [roomy, cramped], "options": {"chain_mode": "chain_ff"}},
+    )
+    assert resp.status_code == 200
+    warnings = resp.json()["warnings"]
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("label 1: ")
+    assert "cramped" in warnings[0]
+    assert not any(w.startswith("label 0: ") for w in warnings)
+
+
+# --- (k) L19: scale bounds (422 outside [1, 8]) and the default (2) --------
+
+
+@pytest.mark.parametrize("scale", [0, 9])
+async def test_preview_scale_out_of_range_is_422(client, scale):
+    label = _text_label("SOLO", length_mm=20.0)
+    resp = await client.post(
+        "/api/print/preview", json={"labels": [label], "scale": scale}
+    )
+    assert resp.status_code == 422
+
+
+async def test_preview_omitted_scale_defaults_to_2(client):
+    """PrintPreviewRequest.scale is `Field(default=2, ge=1, le=8)`
+    (router_print.py) -- the frontend's useChainedPreview.ts hardcodes its
+    own PREVIEW_SCALE=2 with a comment saying it mirrors this default, but
+    nothing pinned that on either side before this test."""
+    labels = [_text_label("ONE", length_mm=15.0), _text_label("TWO", length_mm=30.0)]
+    widths_px = [_rendered_width_px(label) for label in labels]
+    expected_width_scale1 = sum(widths_px)  # chain_ff: butted, zero gap
+
+    resp = await client.post(
+        "/api/print/preview",
+        json={"labels": labels, "options": {"chain_mode": "chain_ff"}},  # scale omitted
+    )
+    assert resp.status_code == 200
+    img = _decode_png(resp.json()["png_b64"])
+    assert img.width == expected_width_scale1 * 2
+    assert img.height == _TAPE_24MM_TZE.print_dots * 2
+
+
 # --- Regression: no full-suite run, but a spot check that /print itself ----
 # still behaves -- run separately via `uv run pytest tests/test_api_print.py -q`
 # per this track's own instructions, not duplicated here.
