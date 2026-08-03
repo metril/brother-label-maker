@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -40,6 +41,8 @@ from labelmaker.jobs.events import EventBus
 from labelmaker.jobs.keepalive import initial_keepalive_status, run_keepalive
 from labelmaker.jobs.worker import run_worker
 from labelmaker.settings_overlay import SettingsOverlay
+
+logger = logging.getLogger(__name__)
 
 # The session cookie's own name -- distinct from Starlette's generic
 # "session" default so it reads unambiguously in browser devtools/a proxy
@@ -123,6 +126,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
         (cfg.data_dir / "jobs").mkdir(parents=True, exist_ok=True)
         db = await Database.open(cfg.data_dir / "labelmaker.db")
+        # Review L2 follow-up: the print queue below is a fresh in-memory
+        # asyncio.Queue every boot, so any row still 'queued'/'printing'
+        # from a previous run (container restart or `kill -9` mid-print)
+        # is dead by construction -- no worker will ever pick it up.
+        # Reconciled to 'failed' HERE, before `queue`/the worker task even
+        # exist, so this can never race a legitimately in-flight job (see
+        # Database.fail_orphaned_jobs's own docstring for why that ordering
+        # matters -- it's also what makes delete_job's status-guarded CAS
+        # safe: an interrupted job becomes deletable again on next boot
+        # instead of a permanent dead end).
+        orphaned = await db.fail_orphaned_jobs()
+        if orphaned:
+            logger.info(
+                "main: startup reconciliation marked %d orphaned job(s) as failed", orphaned
+            )
         bus = EventBus()
         queue: asyncio.Queue[str] = asyncio.Queue()
         # task 4.5: the DB-backed settings overlay -- loads any stored

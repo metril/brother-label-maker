@@ -469,6 +469,71 @@ async def test_delete_job_refuses_queued_or_printing_job():
         await db.close()
 
 
+# --- 4c. fail_orphaned_jobs -- startup reconciliation (review L2 follow-up) --
+
+
+async def test_fail_orphaned_jobs_flips_only_queued_and_printing():
+    """Review L2 follow-up: delete_job's CAS (above) permanently refuses a
+    'queued'/'printing' row, and the in-memory job queue never survives a
+    restart -- so fail_orphaned_jobs (called once, at startup, before any
+    of these tests' equivalent of "the worker starts") must repair exactly
+    those two non-terminal statuses, leaving 'done'/'failed'/'canceled'
+    rows (and their existing error text) untouched, and report how many
+    rows it changed."""
+    db = await Database.open(":memory:")
+    try:
+        queued = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+
+        printing = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        await db.update_job(printing["id"], status="printing")
+
+        done = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        await db.update_job(done["id"], status="done")
+
+        failed = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        await db.update_job(failed["id"], status="failed", error="tape jam")
+
+        repaired = await db.fail_orphaned_jobs()
+        assert repaired == 2
+
+        got_queued = await db.get_job(queued["id"])
+        assert got_queued["status"] == "failed"
+        assert got_queued["error"] == "interrupted by restart"
+
+        got_printing = await db.get_job(printing["id"])
+        assert got_printing["status"] == "failed"
+        assert got_printing["error"] == "interrupted by restart"
+
+        # Already-terminal rows are untouched, including their own error text.
+        got_done = await db.get_job(done["id"])
+        assert got_done["status"] == "done"
+        assert got_done["error"] is None
+
+        got_failed = await db.get_job(failed["id"])
+        assert got_failed["status"] == "failed"
+        assert got_failed["error"] == "tape jam"
+
+        # The now-'failed' rows are deletable via delete_job's CAS, which
+        # is the whole point -- they were undeletable dead ends before this
+        # ran (see test_delete_job_refuses_queued_or_printing_job above).
+        assert await db.delete_job(queued["id"]) is True
+        assert await db.delete_job(printing["id"]) is True
+    finally:
+        await db.close()
+
+
+async def test_fail_orphaned_jobs_is_a_noop_when_nothing_is_orphaned():
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        await db.update_job(job["id"], status="done")
+
+        assert await db.fail_orphaned_jobs() == 0
+        assert (await db.get_job(job["id"]))["status"] == "done"
+    finally:
+        await db.close()
+
+
 # --- Invalid status validated even with no matching job ---
 
 

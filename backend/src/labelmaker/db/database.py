@@ -577,6 +577,36 @@ class Database:
         )
         return cur.rowcount == 1
 
+    async def fail_orphaned_jobs(self) -> int:
+        """Startup reconciliation (review L2 follow-up): meant to be called
+        once, from main.py's lifespan, right after the db opens and BEFORE
+        the worker starts.
+
+        The print queue (`asyncio.Queue`, main.py) is created fresh in
+        memory on every boot -- nothing persists it -- so any row still
+        'queued' or 'printing' when this runs is dead by construction: no
+        worker will ever dequeue or finish it, no matter how long the
+        process stays up. Left alone, such a row is worse than merely
+        stuck -- `delete_job`'s CAS above (`WHERE status NOT IN ('queued',
+        'printing')`) permanently refuses to remove it too, so an
+        interrupted job (container restart, `kill -9` mid-print) becomes an
+        undeletable dead end with no path back to a terminal status.
+
+        Marking both statuses 'failed' here makes the row terminal again --
+        deletable via the CAS on the very next request, and honest in
+        `error` about why. Calling this BEFORE the worker task is created
+        (see main.py) guarantees it can never race a legitimately in-flight
+        job: nothing can be 'printing' yet at this point in a fresh boot.
+
+        Returns the number of rows repaired, so the caller can log it.
+        """
+        cur = await self._conn.execute(
+            "UPDATE print_jobs SET status = 'failed', error = ? "
+            "WHERE status IN ('queued', 'printing')",
+            ("interrupted by restart",),
+        )
+        return cur.rowcount
+
     @staticmethod
     def _job_row_to_dict(row: aiosqlite.Row) -> dict:
         d = dict(row)

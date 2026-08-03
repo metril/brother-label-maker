@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
+
+from labelmaker.db.database import Database
 from labelmaker.driver.geometry import MediaFamily, find_tape
+from labelmaker.main import create_app
 
 _TAPE_24MM_TZE = find_tape(24, MediaFamily.TZE)
 assert _TAPE_24MM_TZE is not None
@@ -357,3 +361,72 @@ async def test_delete_history_job_409s_and_survives_while_printing(app_and_clien
     survived = await db.get_job(job["id"])
     assert survived is not None
     assert survived["status"] == "printing"
+
+
+async def test_delete_history_job_409_details_differ_for_queued_vs_printing(app_and_client):
+    """Review L2 follow-up: 'queued' can actually be canceled (POST
+    .../cancel), so that 409 still says "cancel it first". 'printing'
+    cannot -- there is no cancel-a-printing-job endpoint -- so it gets a
+    different, honest message instead of advice the caller can't act on."""
+    app, client = app_and_client
+    db = app.state.db
+
+    queued = await db.create_print_job(
+        {"labels": [_text_label("HELLO")]}, label_count=1, chain_mode="cut_each"
+    )
+    resp = await client.delete(f"/api/history/{queued['id']}")
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "job is 'queued'; cancel it first"
+
+    printing = await db.create_print_job(
+        {"labels": [_text_label("HELLO")]}, label_count=1, chain_mode="cut_each"
+    )
+    await db.update_job(printing["id"], status="printing")
+    resp = await client.delete(f"/api/history/{printing['id']}")
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == (
+        "job is 'printing'; wait for it to finish "
+        "(interrupted jobs are marked failed at restart)"
+    )
+
+
+# --- 6. Startup reconciliation (review L2 follow-up) ------------------------
+
+
+async def test_startup_reconciliation_frees_a_job_stuck_at_printing_across_restart(app_config):
+    """A job left at 'printing' by a simulated crash -- created directly
+    against the db file the app will open, BEFORE create_app/lifespan ever
+    runs, standing in for "process was killed mid-print, container
+    restarts" -- must not survive the restart in a non-terminal status.
+    main.py's lifespan calls db.fail_orphaned_jobs() right after opening
+    the db and before the worker starts, so by the time the app answers
+    its first request the row already reads 'failed', and DELETE (a
+    permanent 409 before this fix -- delete_job's CAS refuses both
+    'queued' and 'printing' with nothing to ever move the row out of
+    either) now succeeds.
+    """
+    app_config.data_dir.mkdir(parents=True, exist_ok=True)
+    seed_db = await Database.open(app_config.data_dir / "labelmaker.db")
+    try:
+        job = await seed_db.create_print_job(
+            {"labels": [_text_label("HELLO")]}, label_count=1, chain_mode="cut_each"
+        )
+        await seed_db.update_job(job["id"], status="printing")
+    finally:
+        await seed_db.close()
+
+    app = create_app(app_config)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/history/{job['id']}")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["status"] == "failed"
+            assert body["error"] == "interrupted by restart"
+
+            delete_resp = await client.delete(f"/api/history/{job['id']}")
+            assert delete_resp.status_code == 204
+
+            missing = await client.get(f"/api/history/{job['id']}")
+            assert missing.status_code == 404

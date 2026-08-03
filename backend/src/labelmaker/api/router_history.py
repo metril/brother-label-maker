@@ -172,18 +172,34 @@ async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Re
     either). A False result is classified the same way
     router_print.py's cancel_job endpoint classifies its own CAS miss: a
     follow-up get_job() distinguishes "unknown id" (404) from "known but
-    queued/printing" (409, naming the current status so the client knows
-    to cancel first).
+    queued/printing" (409).
+
+    Review L2 follow-up: the two non-terminal statuses get DIFFERENT 409
+    details rather than one detail naming an action that isn't always
+    true. 'queued' really can be canceled (POST .../cancel,
+    cancel_job_if_queued's CAS matches 'queued' only), so that detail
+    still says so. 'printing' cannot -- there is no cancel-a-printing-job
+    operation anywhere in this API -- so telling that caller to "cancel it
+    first" would be advice they cannot follow. That status instead gets an
+    honest wait-it-out message, plus a pointer at the startup
+    reconciliation (Database.fail_orphaned_jobs, called from main.py's
+    lifespan) that exists precisely so a job stuck at 'printing' by a
+    crash/restart doesn't stay undeletable forever -- it flips to 'failed'
+    on the next boot and becomes deletable then.
     """
     deleted = await db.delete_job(job_id)
     if not deleted:
         job = await db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        raise HTTPException(
-            status_code=409,
-            detail=f"job is {job['status']!r}; cancel it first",
-        )
+        if job["status"] == "queued":
+            detail = "job is 'queued'; cancel it first"
+        else:
+            detail = (
+                "job is 'printing'; wait for it to finish "
+                "(interrupted jobs are marked failed at restart)"
+            )
+        raise HTTPException(status_code=409, detail=detail)
 
     stream_path = config.data_dir / "jobs" / f"{job_id}.bin"
     if await anyio.to_thread.run_sync(stream_path.is_file):
