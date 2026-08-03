@@ -3,7 +3,6 @@ import { pngDataUrl } from "../api/client";
 import { useChainedPreview } from "../hooks/useChainedPreview";
 import { useTapes } from "../hooks/useTapes";
 import { useChainPreviewStore } from "../stores/chainPreview";
-import { useCurrentDesignStore } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
 import { computeFeedDeckGeometry, DEFAULT_PX_PER_MM } from "../lib/feedDeckGeometry";
@@ -24,6 +23,17 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
   { value: "8", label: "8×" },
 ];
 
+/** The cycler row's previous/next buttons (Part 2: cycling through queued
+ * labels) -- border/bg/text/rounded/transition lifted straight from
+ * ui/styles.ts's own `segmentedButtonClass` (its unselected branch) so
+ * these read as part of the same button family as every SegmentedControl
+ * in this app, plus `iconButtonClass`'s own disabled treatment (these two
+ * are plain actions with an end-of-list disabled state, not a persistent
+ * radiogroup selection, so they stay ordinary buttons rather than becoming
+ * a two-option SegmentedControl). */
+const cyclerButtonClass =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-deck-600 bg-deck-800 text-[13px] font-medium text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40";
+
 /** Track C2 rework: a WIDE right-side slide-over (not a centered modal --
  * see the deleted components/ChainedPreviewDialog.tsx) previewing the WHOLE
  * chained job as a single composited strip, reachable from every route
@@ -42,13 +52,19 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
  * stores/tray.ts -- exactly the same way components/GlobalTrayDrawer.tsx's
  * own header estimate already does -- rather than threaded down as props
  * the way the old dialog's `labels`/`options`/`serialization`/`isRenderable`
- * were. The one exception: the Designer page's "current, unsaved design"
- * lives only in Designer's render state, so pages/Designer.tsx mirrors it
- * into stores/currentDesign.ts (cleared on unmount) and an EMPTY tray falls
- * back to previewing that single design -- the exact fallback TrayPanel's
- * own bodyLabels/bodySerialization give the estimate and Print button,
- * serialization included. Off the Design route the mirror is null and an
- * empty tray shows "Nothing to preview".
+ * were.
+ *
+ * This drawer previews the QUEUED PRINT JOB -- stores/tray.ts's own items,
+ * and NOTHING else. It deliberately has no fallback to the Designer page's
+ * "current, unsaved design" (stores/currentDesign.ts): that design-time
+ * preview is pages/Designer.tsx's own embedded FeedDeck instead, the thing
+ * a user is actively shaping before it's ever added to the tray. (TrayPanel
+ * itself keeps that fallback for its estimate/Print button -- an empty tray
+ * still prints/estimates the current design there -- this drawer alone
+ * stopped consuming it.) An EMPTY tray therefore always shows "Nothing
+ * queued to print." here, on every route, regardless of what the Designer
+ * page's own current design happens to be at the moment -- see the render
+ * below.
  *
  * Open/close is stores/chainPreview.ts's `open` (shared with every
  * TrayPanel instance), not hooks/useDialogController.ts -- that hook owns
@@ -90,15 +106,28 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
  * button still works in every mode; below `xl` a docked panel simply falls
  * back to the same fixed-overlay positioning as undocked (just without the
  * scrim/modality), so docking is never a no-op even on a narrow viewport
- * that can't actually fit an in-flow column. */
+ * that can't actually fit an in-flow column.
+ *
+ * Cycling through queued labels: once a preview with 2+ segments is
+ * loaded, a small previous/next row appears above the strip
+ * (stores/chainPreview.ts's own `selectedIndex`, shared the same way
+ * `open`/`docked` are -- session-only, never persisted) and the currently
+ * selected segment gets an amber highlight overlay on the strip itself,
+ * positioned from the SAME mm-derived left/width math the segment
+ * chips/boundary lines below already use (never the PNG's own pixel
+ * dimensions -- see ChainedPreviewResponse's own UNIT TRAP doc). A single-
+ * segment job renders neither row nor highlight; there's nothing to cycle
+ * through. `selectedIndex` resets to 0 whenever the loaded preview's own
+ * identity changes (a tray edit or mode switch changes the underlying
+ * request, which can change which/how-many segments come back) or the
+ * drawer opens fresh -- see the dedicated effect below. */
 export function ChainPreviewDrawer() {
   const open = useChainPreviewStore((s) => s.open);
   const closeDrawer = useChainPreviewStore((s) => s.closeDrawer);
   const docked = useChainPreviewStore((s) => s.docked);
   const toggleDocked = useChainPreviewStore((s) => s.toggleDocked);
-  // Designer's mirrored "current, unsaved design" -- the empty-tray
-  // fallback (see this file's docstring and stores/currentDesign.ts).
-  const currentDesign = useCurrentDesignStore((s) => s.current);
+  const selectedIndex = useChainPreviewStore((s) => s.selectedIndex);
+  const setSelectedIndex = useChainPreviewStore((s) => s.setSelectedIndex);
 
   const items = useTrayStore((s) => s.items);
   const trayChainMode = useTrayStore((s) => s.chainMode);
@@ -117,6 +146,10 @@ export function ChainPreviewDrawer() {
 
   const triggerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // The strip's own horizontal-scroll container (cycling through queued
+  // labels) -- scrolled to bring the selected segment into view whenever
+  // `selectedIndex` moves, see the dedicated effect below.
+  const stripContainerRef = useRef<HTMLDivElement>(null);
 
   function close() {
     closeDrawer();
@@ -162,26 +195,34 @@ export function ChainPreviewDrawer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, docked]);
 
-  // Same body-composition rule as TrayPanel: a non-empty tray previews the
-  // tray's own items (never silently mixing in the current design); an
-  // empty tray falls back to Designer's mirrored current design when it's
-  // submittable, serialization included. Tray items themselves never carry
-  // a serialization run (a Designer-page, single-design concept).
-  const trayHasItems = items.length > 0;
-  const fallback = !trayHasItems && currentDesign !== null && currentDesign.canSubmit ? currentDesign : null;
-  const labels: LabelDefinition[] = trayHasItems
-    ? items.map((i) => i.definition)
-    : fallback
-      ? [fallback.definition]
-      : [];
-  const serialization = fallback ? fallback.serialization : null;
+  // Labels come ONLY from the tray's own queued items -- this drawer
+  // previews the QUEUED PRINT JOB, never the Designer's in-progress,
+  // unsaved design (see this component's own docstring). Tray items never
+  // carry a serialization run (a Designer-page, single-design concept), so
+  // there's no `serialization` to thread into useChainedPreview at all.
+  const labels: LabelDefinition[] = items.map((i) => i.definition);
   const options: PrintOptions = { chain_mode: mode, margin_mm: 2.0, auto_cut: autoCut };
 
   function isRenderable(ls: LabelDefinition[]): boolean {
     return ls.length > 0;
   }
 
-  const { preview, isFetching, error } = useChainedPreview(labels, options, isRenderable, serialization, open);
+  const { preview, isFetching, error } = useChainedPreview(labels, options, isRenderable, open);
+
+  // Cycling through queued labels: `selectedIndex` always starts back at 0
+  // for a freshly loaded preview -- reset it whenever the thing actually
+  // being previewed changes identity (a tray edit or chain-mode switch
+  // changes `bodyKey`, which changes what comes back) or the drawer opens
+  // fresh (re-opening after leaving a PREVIOUS job on label 3 must not
+  // silently reopen on label 3 of a different job). `preview?.segments
+  // .length` rides along as a belt-and-braces signal alongside `bodyKey`
+  // itself. `setSelectedIndex` is a stable zustand action reference, safe
+  // to omit -- same convention the mode-resync effect above already uses.
+  const bodyKey = JSON.stringify({ labels, options });
+  useEffect(() => {
+    setSelectedIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, bodyKey, preview?.segments.length]);
 
   const pxPerMm = Number(zoom);
   // All labels in a body share one tape (server-validated, see
@@ -216,6 +257,33 @@ export function ChainPreviewDrawer() {
   const stripHeightPx = geo.printableHeightPx;
 
   const renderable = isRenderable(labels);
+
+  // Cycler status text's own name: the tray item's own caption when the
+  // tray maps 1:1 onto the returned segments (the common case), else a
+  // plain positional fallback -- see this component's own docstring on
+  // `selectedIndex` for why a mismatch can happen at all (an in-flight
+  // tray edit can arrive between a request and its response).
+  function segmentName(index: number): string {
+    if (preview && items.length === preview.segments.length) {
+      return items[index]?.label ?? `Label ${index + 1}`;
+    }
+    return `Label ${index + 1}`;
+  }
+
+  // Scrolls the strip's own horizontal-scroll container so the newly
+  // selected segment stays in view -- guarded with optional chaining
+  // (pages/Designer.tsx's own scrollIntoView guard follows the same "not
+  // every test/legacy environment implements this" convention) since jsdom
+  // has no real layout engine and may not expose `scrollTo` at all. Skipped
+  // entirely below 2 segments -- nothing to scroll TO when there's no
+  // cycler in the first place.
+  useEffect(() => {
+    if (!preview || preview.segments.length < 2) return;
+    const seg = preview.segments[selectedIndex];
+    const container = stripContainerRef.current;
+    if (!seg || !container) return;
+    container.scrollTo?.({ left: seg.start_mm * pxPerMm, behavior: "smooth" });
+  }, [selectedIndex, preview, pxPerMm]);
 
   return (
     <>
@@ -295,7 +363,10 @@ export function ChainPreviewDrawer() {
 
         <div>
           {!renderable ? (
-            <p className="text-[13px] text-deck-400">Nothing to preview.</p>
+            <div className="flex flex-col gap-1">
+              <p className="text-[13px] text-deck-400">Nothing queued to print.</p>
+              <p className={helpText}>Add labels to the tray to preview the job.</p>
+            </div>
           ) : error ? (
             <p role="alert" className={errorText}>
               {error}
@@ -306,13 +377,67 @@ export function ChainPreviewDrawer() {
             </div>
           ) : (
             <>
-              <div className="relative overflow-x-auto rounded-xl border border-deck-700 bg-deck-900 px-6 py-8">
+              {/* Cycling through queued labels (Part 2) -- only once there's
+                  something to cycle THROUGH; a single-segment job renders
+                  nothing here, same as the highlight overlay below. Clamped
+                  at both ends via both the disabled attribute AND the
+                  Math.max/min in the click handlers themselves, so neither
+                  a stray click nor a double-fire can walk past either end. */}
+              {preview.segments.length >= 2 && (
+                <div className="flex items-center justify-center gap-3" data-testid="segment-cycler">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIndex(Math.max(0, selectedIndex - 1))}
+                    disabled={selectedIndex === 0}
+                    aria-label="Previous label"
+                    className={cyclerButtonClass}
+                  >
+                    <span aria-hidden="true">‹</span>
+                  </button>
+                  <span className="font-mono text-[12px] text-deck-200" data-testid="segment-cycler-status">
+                    {selectedIndex + 1} of {preview.segments.length} — {segmentName(selectedIndex)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIndex(Math.min(preview.segments.length - 1, selectedIndex + 1))}
+                    disabled={selectedIndex === preview.segments.length - 1}
+                    aria-label="Next label"
+                    className={cyclerButtonClass}
+                  >
+                    <span aria-hidden="true">›</span>
+                  </button>
+                </div>
+              )}
+
+              <div
+                ref={stripContainerRef}
+                className="relative overflow-x-auto rounded-xl border border-deck-700 bg-deck-900 px-6 py-8"
+              >
                 <div className="relative" style={{ width: stripWidthPx, height: stripHeightPx }}>
                   <img
                     src={pngDataUrl(preview.png_b64)}
                     alt="Chained job preview"
                     style={{ width: stripWidthPx, height: stripHeightPx, imageRendering: "pixelated" }}
                   />
+                  {/* Selected-segment highlight -- left/width from the SAME
+                      mm * pxPerMm math the chips/boundary lines below use
+                      (never the PNG's own pixel dimensions, see this
+                      component's own UNIT TRAP note). pointer-events-none:
+                      purely decorative, must never intercept clicks meant
+                      for whatever's underneath it. */}
+                  {preview.segments.length >= 2 && preview.segments[selectedIndex] && (
+                    <span
+                      aria-hidden
+                      data-testid="segment-highlight"
+                      className="pointer-events-none absolute inset-y-0 rounded-sm ring-2 ring-amber-500 bg-amber-500/15"
+                      style={{
+                        left: preview.segments[selectedIndex]!.start_mm * pxPerMm,
+                        width:
+                          (preview.segments[selectedIndex]!.end_mm - preview.segments[selectedIndex]!.start_mm) *
+                          pxPerMm,
+                      }}
+                    />
+                  )}
                   {preview.segments.map((seg) => (
                     <span key={seg.index}>
                       <span

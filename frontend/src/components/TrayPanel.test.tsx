@@ -96,8 +96,20 @@ describe("TrayPanel -- Preview button", () => {
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
   });
 
-  it("is enabled once there's something to print, and opens the shared drawer store without touching the tray's own chainMode", async () => {
+  // ChainPreviewDrawer.tsx dropped its own current-design fallback (task:
+  // "Print preview vs. FeedDeck" split) -- it previews the QUEUED JOB only,
+  // so "Preview" must stay disabled with an empty tray even though a
+  // current design would happily satisfy canEstimate/Print's OWN fallback.
+  it("is disabled with an empty tray even though a current design exists (Preview previews the queue only)", () => {
+    renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
+    // The empty-tray Print/estimate fallback itself is unaffected.
+    expect(screen.getByRole("button", { name: "Print 1 label" })).toBeEnabled();
+  });
+
+  it("is enabled once the tray has items, and opens the shared drawer store without touching the tray's own chainMode", async () => {
     const user = userEvent.setup();
+    seedTrayItems(1);
     renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
     const previewButton = screen.getByRole("button", { name: "Preview" });
     expect(previewButton).toBeEnabled();
@@ -113,6 +125,7 @@ describe("TrayPanel -- Preview button", () => {
   it("calls the optional closeTrayDrawer prop (GlobalTrayDrawer's own dialog.close) before opening the chain-preview drawer", async () => {
     const user = userEvent.setup();
     const closeTrayDrawer = vi.fn();
+    seedTrayItems(1);
     renderWithProviders(
       <TrayPanel current={currentDesign()} onAddToTray={vi.fn()} closeTrayDrawer={closeTrayDrawer} />,
     );

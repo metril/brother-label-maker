@@ -8,10 +8,20 @@ interface ChainPreviewState {
    * overlay -- see this file's own docstring for why this field (unlike
    * `open`) is persisted. */
   docked: boolean;
+  /** Which of the loaded preview's segments ChainPreviewDrawer's own
+   * cycler row is showing/highlighting -- session-only, same category as
+   * `open` (NOT part of PersistedChainPreviewState below): which label
+   * within the CURRENT queued job someone happens to be looking at has no
+   * business surviving a reload. The drawer itself resets this back to 0
+   * whenever the loaded preview's own identity changes (a tray edit/mode
+   * switch changes the underlying bodyKey/segment count) or the drawer
+   * opens fresh -- see ChainPreviewDrawer.tsx's own effect. */
+  selectedIndex: number;
   openDrawer: () => void;
   closeDrawer: () => void;
   toggle: () => void;
   toggleDocked: () => void;
+  setSelectedIndex: (index: number) => void;
 }
 
 /** The subset of ChainPreviewState actually written to localStorage
@@ -53,18 +63,21 @@ type PersistedChainPreviewState = Pick<ChainPreviewState, "docked">;
  * estimate already does, rather than have TrayPanel push a second,
  * driftable copy of the tray body through this store on every render. The
  * Designer page's own "current, unsaved design" (the empty-tray fallback
- * both TrayPanel and ChainPreviewDrawer need) lives in its OWN store now,
- * stores/currentDesign.ts -- this one is pure open/close (+ dock
- * preference) state. */
+ * TrayPanel's own estimate/Print still need -- ChainPreviewDrawer no
+ * longer has one at all, see that component's own docstring) lives in its
+ * OWN store, stores/currentDesign.ts -- this one is pure open/close (+ dock
+ * preference + cycler position) state. */
 export const useChainPreviewStore = create<ChainPreviewState>()(
   persist(
     (set) => ({
       open: false,
       docked: false,
+      selectedIndex: 0,
       openDrawer: () => set({ open: true }),
       closeDrawer: () => set({ open: false }),
       toggle: () => set((state) => ({ open: !state.open })),
       toggleDocked: () => set((state) => ({ docked: !state.docked })),
+      setSelectedIndex: (selectedIndex) => set({ selectedIndex }),
     }),
     {
       name: "lm-chain-preview-v1",

@@ -279,18 +279,23 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
       {/* Track C2: opens components/ChainPreviewDrawer.tsx, a wide
           right-side slide-over composing the WHOLE tray body as one strip
           under any of the three chain modes, independent of the tray's own
-          chainMode above -- disabled under the exact same "nothing
-          (renderable) to act on" gate the estimate panel and Print button
-          both already use. `closeTrayDrawer` (only ever set by
-          GlobalTrayDrawer.tsx) runs FIRST -- see this button's own
-          `closeTrayDrawer` prop doc for why the order matters. */}
+          chainMode above. UNLIKE the estimate panel/Print button below,
+          this button previews the QUEUED JOB ONLY -- ChainPreviewDrawer.tsx
+          dropped its own current-design fallback entirely (see that
+          component's own docstring), so `!trayHasItems` disables this one
+          even while a current design makes `canEstimate` true (the
+          empty-tray Print/estimate fallback itself is untouched). `!canEstimate`
+          stays in the gate too for the ordinary "nothing valid at all"
+          case. `closeTrayDrawer` (only ever set by GlobalTrayDrawer.tsx)
+          runs FIRST -- see this button's own `closeTrayDrawer` prop doc for
+          why the order matters. */}
       <button
         type="button"
         onClick={() => {
           closeTrayDrawer?.();
           openChainPreview();
         }}
-        disabled={!canEstimate}
+        disabled={!trayHasItems || !canEstimate}
         aria-haspopup="dialog"
         className="self-start rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 text-[13px] font-medium text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40"
       >

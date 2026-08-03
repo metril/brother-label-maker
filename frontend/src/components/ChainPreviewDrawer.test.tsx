@@ -5,7 +5,6 @@ import { http, HttpResponse } from "msw";
 import { ChainPreviewDrawer } from "./ChainPreviewDrawer";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
 import { useChainPreviewStore } from "../stores/chainPreview";
-import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { TINY_PNG_B64 } from "../test/msw/handlers";
 import { renderWithProviders } from "../test/utils";
@@ -17,33 +16,17 @@ const INITIAL_CHAIN_PREVIEW_STATE = useChainPreviewStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
-  // Full reset (not just `open`) -- `docked` (dockable-preview feature) is
-  // persisted via zustand's own `persist` middleware, so a test that
-  // toggles it must not leak into the next one via the in-memory store
-  // singleton (test/setup.ts's own `localStorage.clear()` only covers the
-  // localStorage side of that, not this module's already-hydrated state).
+  // Full reset (not just `open`) -- `docked`/`selectedIndex` are shared
+  // module-level state (the latter session-only, the former persisted via
+  // zustand's own `persist` middleware), so a test that touches either must
+  // not leak into the next one via the in-memory store singleton (test/
+  // setup.ts's own `localStorage.clear()` only covers the localStorage side
+  // of `docked`, not this module's already-hydrated state).
   useChainPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
-  useCurrentDesignStore.setState({ current: null });
 });
 
 function def(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
-}
-
-function currentDesign(overrides: Partial<CurrentDesign> = {}): CurrentDesign {
-  return {
-    definition: def("CURRENT"),
-    canSubmit: true,
-    isRenderable: () => true,
-    png: null,
-    lengthMm: 25.4,
-    label: "Text — CURRENT",
-    serializationEnabled: false,
-    serialization: null,
-    totalLabels: null,
-    serializationHasVisibleError: false,
-    ...overrides,
-  };
 }
 
 function seedTrayItems(n: number) {
@@ -177,27 +160,11 @@ describe("ChainPreviewDrawer", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
-  it("shows 'Nothing to preview' when the tray is empty, even though the drawer is open", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<Harness />);
-
-    await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
-    expect(within(drawer).getByText("Nothing to preview.")).toBeInTheDocument();
-  });
-
-  it("empty tray falls back to Designer's mirrored current design, serialization included", async () => {
-    // pages/Designer.tsx mirrors its current design into
-    // stores/currentDesign.ts; the drawer previews it when the tray is
-    // empty -- the same fallback TrayPanel's estimate/Print already have.
-    interface CapturedBody {
-      labels?: unknown[];
-      serialization?: unknown;
-    }
-    let lastBody: CapturedBody | null = null;
+  it("shows 'Nothing queued to print.' when the tray is empty, and fires no preview request at all (the current-design fallback was removed)", async () => {
+    let requestCount = 0;
     server.use(
-      http.post("/api/print/preview", async ({ request }) => {
-        lastBody = (await request.json()) as CapturedBody;
+      http.post("/api/print/preview", () => {
+        requestCount++;
         return HttpResponse.json({
           png_b64: TINY_PNG_B64,
           chain_mode: "cut_each",
@@ -211,24 +178,14 @@ describe("ChainPreviewDrawer", () => {
         });
       }),
     );
-    const serialization = { kind: "numeric", start: 1, end: 3, step: 1, pad: 0, copies_per_value: 1 };
-    useCurrentDesignStore.getState().setCurrent(
-      currentDesign({
-        definition: def("CURRENT-UNSAVED"),
-        serialization: serialization as never,
-        canSubmit: true,
-      }),
-    );
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
     const drawer = await screen.findByRole("dialog", { name: "Print preview" });
-    await within(drawer).findByAltText("Chained job preview");
-    expect(within(drawer).queryByText("Nothing to preview.")).not.toBeInTheDocument();
-    expect(lastBody).not.toBeNull();
-    expect(lastBody!.labels).toHaveLength(1);
-    expect(lastBody!.serialization).toEqual(serialization);
+    expect(within(drawer).getByText("Nothing queued to print.")).toBeInTheDocument();
+    expect(within(drawer).getByText("Add labels to the tray to preview the job.")).toBeInTheDocument();
+    expect(requestCount).toBe(0);
   });
 
   it("editing the tray while the drawer is open triggers a refetch", async () => {
@@ -359,6 +316,235 @@ describe("ChainPreviewDrawer", () => {
     // the chain preview drawer opened, not the (now hidden) "Preview
     // chain" button nested inside the tray drawer's own panel.
     await waitFor(() => expect(trayTrigger).toHaveFocus());
+  });
+});
+
+/** Part 2: cycling through the queued labels inside the preview -- the
+ * default printPreviewHandler fixture (test/msw/handlers.ts) returns a
+ * deterministic 2-segment response, enough for the basic cycler/highlight
+ * assertions; a few tests below override with server.use(...) for a
+ * 3-segment response (mirrors/echoes the posted label count) where the
+ * default's fixed 2 wouldn't exercise the interesting middle-of-the-list
+ * step, or a mismatched tray/segment count to hit the "Label N" fallback. */
+describe("ChainPreviewDrawer -- cycling through queued labels", () => {
+  it("renders a cycler above the strip once segments.length >= 2 (default 2-segment fixture), names from tray items, clamped at both ends", async () => {
+    seedTrayItems(2);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    const status = within(drawer).getByTestId("segment-cycler-status");
+    const previous = within(drawer).getByRole("button", { name: "Previous label" });
+    const next = within(drawer).getByRole("button", { name: "Next label" });
+
+    // Starts at the first segment -- Previous is clamped/disabled already.
+    expect(status).toHaveTextContent("1 of 2 — Text — ITEM-0");
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+
+    await user.click(next);
+    expect(status).toHaveTextContent("2 of 2 — Text — ITEM-1");
+    expect(previous).toBeEnabled();
+    expect(next).toBeDisabled();
+
+    // Clamped at the end -- clicking Next again (were it not disabled)
+    // must not walk past the last segment or wrap back to the first.
+    await user.click(next);
+    expect(status).toHaveTextContent("2 of 2 — Text — ITEM-1");
+  });
+
+  it("moves the selected-segment highlight's inline left/width style along with the cycler", async () => {
+    seedTrayItems(2);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    // Default fixture: segment 0 is [0, 25]mm, segment 1 is [25, 50]mm; the
+    // drawer opens at DEFAULT_PX_PER_MM (4) -- 0/100px, then 100/100px.
+    const highlight = within(drawer).getByTestId("segment-highlight");
+    expect(highlight.style.left).toBe("0px");
+    expect(highlight.style.width).toBe("100px");
+
+    await user.click(within(drawer).getByRole("button", { name: "Next label" }));
+
+    expect(highlight.style.left).toBe("100px");
+    expect(highlight.style.width).toBe("100px");
+  });
+
+  it("renders neither a cycler nor a highlight with exactly 1 segment", async () => {
+    seedTrayItems(1);
+    server.use(
+      http.post("/api/print/preview", () =>
+        HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          chain_mode: "cut_each",
+          total_mm: 30,
+          content_mm: 25,
+          feed_overhead_mm: 5,
+          per_label_mm: 30,
+          notes: [],
+          segments: [{ index: 0, start_mm: 0, end_mm: 25, length_mm: 25 }],
+          warnings: [],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    expect(within(drawer).queryByRole("button", { name: "Previous label" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Next label" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByTestId("segment-cycler")).not.toBeInTheDocument();
+    expect(within(drawer).queryByTestId("segment-highlight")).not.toBeInTheDocument();
+  });
+
+  it("cycles through all three names on a 3-item tray/3-segment response", async () => {
+    seedTrayItems(3);
+    server.use(
+      http.post("/api/print/preview", () =>
+        HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          chain_mode: "cut_each",
+          total_mm: 85,
+          content_mm: 75,
+          feed_overhead_mm: 10,
+          per_label_mm: 25,
+          notes: [],
+          segments: [
+            { index: 0, start_mm: 0, end_mm: 25, length_mm: 25 },
+            { index: 1, start_mm: 25, end_mm: 50, length_mm: 25 },
+            { index: 2, start_mm: 50, end_mm: 75, length_mm: 25 },
+          ],
+          warnings: [],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    const status = within(drawer).getByTestId("segment-cycler-status");
+    const next = within(drawer).getByRole("button", { name: "Next label" });
+
+    expect(status).toHaveTextContent("1 of 3 — Text — ITEM-0");
+    await user.click(next);
+    expect(status).toHaveTextContent("2 of 3 — Text — ITEM-1");
+    await user.click(next);
+    expect(status).toHaveTextContent("3 of 3 — Text — ITEM-2");
+  });
+
+  it("falls back to 'Label N' when the tray's item count doesn't match the returned segment count", async () => {
+    seedTrayItems(2);
+    server.use(
+      http.post("/api/print/preview", () =>
+        HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          chain_mode: "cut_each",
+          total_mm: 85,
+          content_mm: 75,
+          feed_overhead_mm: 10,
+          per_label_mm: 25,
+          notes: [],
+          // 3 segments vs. a 2-item tray -- a mismatch (e.g. a response
+          // that raced a still-in-flight tray edit).
+          segments: [
+            { index: 0, start_mm: 0, end_mm: 25, length_mm: 25 },
+            { index: 1, start_mm: 25, end_mm: 50, length_mm: 25 },
+            { index: 2, start_mm: 50, end_mm: 75, length_mm: 25 },
+          ],
+          warnings: [],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    expect(within(drawer).getByTestId("segment-cycler-status")).toHaveTextContent("1 of 3 — Label 1");
+    await user.click(within(drawer).getByRole("button", { name: "Next label" }));
+    expect(within(drawer).getByTestId("segment-cycler-status")).toHaveTextContent("2 of 3 — Label 2");
+  });
+
+  it("resets selectedIndex to 0 when the tray contents change while open", async () => {
+    seedTrayItems(2);
+    server.use(
+      http.post("/api/print/preview", async ({ request }) => {
+        const body = (await request.json()) as { labels?: unknown[] };
+        const n = body.labels?.length ?? 0;
+        return HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          chain_mode: "cut_each",
+          total_mm: n * 25 + 10,
+          content_mm: n * 25,
+          feed_overhead_mm: 10,
+          per_label_mm: 25,
+          notes: [],
+          segments: Array.from({ length: n }, (_, i) => ({
+            index: i,
+            start_mm: i * 25,
+            end_mm: (i + 1) * 25,
+            length_mm: 25,
+          })),
+          warnings: [],
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    await user.click(within(drawer).getByRole("button", { name: "Next label" }));
+    await waitFor(() => expect(within(drawer).getByTestId("segment-cycler-status")).toHaveTextContent("2 of 2"));
+
+    // Switching to a new (3-label) request means the query key itself
+    // changes -- the preview goes briefly back to `null` (a fresh key, no
+    // cache hit) before the new response lands, which unmounts/remounts
+    // this whole subtree. Re-query inside `waitFor` on every poll rather
+    // than reusing an earlier node reference, which would go stale the
+    // instant that remount happens.
+    useTrayStore.getState().addItem({ definition: def("ITEM-2"), png: null, lengthMm: 20, label: "Text — ITEM-2" });
+
+    await waitFor(() =>
+      expect(within(drawer).getByTestId("segment-cycler-status")).toHaveTextContent("1 of 3 — Text — ITEM-0"),
+    );
+  });
+
+  it("resets selectedIndex to 0 when the drawer is reopened", async () => {
+    seedTrayItems(2);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    let drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+    await user.click(within(drawer).getByRole("button", { name: "Next label" }));
+    await waitFor(() => expect(within(drawer).getByTestId("segment-cycler-status")).toHaveTextContent("2 of 2"));
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Print preview" })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Chained job preview");
+    expect(within(drawer).getByTestId("segment-cycler-status")).toHaveTextContent("1 of 2");
   });
 });
 

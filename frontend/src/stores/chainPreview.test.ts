@@ -33,6 +33,18 @@ describe("useChainPreviewStore", () => {
     useChainPreviewStore.getState().toggleDocked();
     expect(useChainPreviewStore.getState().docked).toBe(false);
   });
+
+  it("setSelectedIndex updates `selectedIndex` only, defaulting to 0", () => {
+    expect(useChainPreviewStore.getState().selectedIndex).toBe(0);
+
+    useChainPreviewStore.getState().setSelectedIndex(2);
+    expect(useChainPreviewStore.getState().selectedIndex).toBe(2);
+    expect(useChainPreviewStore.getState().open).toBe(false);
+    expect(useChainPreviewStore.getState().docked).toBe(false);
+
+    useChainPreviewStore.getState().setSelectedIndex(0);
+    expect(useChainPreviewStore.getState().selectedIndex).toBe(0);
+  });
 });
 
 /** `docked` alone is persisted (zustand's `persist` middleware, key
@@ -69,5 +81,18 @@ describe("useChainPreviewStore persistence (zustand persist middleware)", () => 
     const state = useChainPreviewStore.getState();
     expect(state.docked).toBe(true);
     expect(state.open).toBe(false);
+  });
+
+  // Part 2 (cycling through queued labels): `selectedIndex` is session-only,
+  // same category as `open` -- which label within the CURRENT job someone's
+  // looking at has no business surviving a reload.
+  it("`selectedIndex` never reaches localStorage, even set to a nonzero value", () => {
+    useChainPreviewStore.getState().setSelectedIndex(2);
+    useChainPreviewStore.getState().toggleDocked();
+
+    const raw = localStorage.getItem("lm-chain-preview-v1");
+    const persisted = JSON.parse(raw!) as { state: Record<string, unknown> };
+    expect(persisted.state).toEqual({ docked: true });
+    expect(persisted.state).not.toHaveProperty("selectedIndex");
   });
 });
