@@ -7,11 +7,13 @@ import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
 import { useChainPreviewStore } from "../stores/chainPreview";
 import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
+import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
 import type { LabelDefinition } from "../api/types";
 
 const INITIAL_TRAY_STATE = useTrayStore.getState();
 const INITIAL_CHAIN_PREVIEW_STATE = useChainPreviewStore.getState();
+const INITIAL_TRAY_DRAWER_STATE = useTrayDrawerStore.getState();
 
 function def(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
@@ -248,21 +250,28 @@ describe("AppShell -- compact theme control", () => {
   });
 });
 
-/** Dockable-preview feature: components/ChainPreviewDrawer.tsx's own
- * `xl:static` in-flow-column class contract only produces a real docked
- * column if the panel is an actual flex ITEM of AppShell's content row
- * (the div holding TypeRail + `<main>`) -- a sibling of that row (the old
- * mount point) could never reflow `<main>` beside it no matter what
- * classes the panel itself carried. This proves the DOM shape the move
- * (AppShell.tsx's own docstring at the mount point) is supposed to
- * guarantee, independent of ChainPreviewDrawer's own docked/undocked
- * rendering (covered by ChainPreviewDrawer.test.tsx itself). */
-describe("AppShell -- chain preview drawer mount point (dockable preview)", () => {
+/** Dockable-tray + dockable-preview features: both components/
+ * GlobalTrayDrawer.tsx's own panel and components/ChainPreviewDrawer.tsx's
+ * `xl:static` in-flow-column class contracts only produce a real docked
+ * column if the panel is an actual flex ITEM of a column that is ITSELF a
+ * flex item of AppShell's content row (the div holding TypeRail +
+ * `<main>`) -- a sibling of that row (ChainPreviewDrawer's old mount
+ * point) could never reflow `<main>` beside it no matter what classes the
+ * panel itself carried, and two SEPARATE flex items of the row (rather
+ * than one shared wrapper) could never stack vertically in one column
+ * instead of two side-by-side ones. This proves the DOM shape the dock
+ * rail (AppShell.tsx's own docstring at the mount point) is supposed to
+ * guarantee, independent of either panel's own docked/undocked rendering
+ * (covered by GlobalTrayDrawer.test.tsx/ChainPreviewDrawer.test.tsx
+ * themselves). */
+describe("AppShell -- dock rail (tray + chain preview panels share one right-hand column)", () => {
   afterEach(() => {
+    useTrayStore.setState(INITIAL_TRAY_STATE, true);
     useChainPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
+    useTrayDrawerStore.setState(INITIAL_TRAY_DRAWER_STATE, true);
   });
 
-  it("mounts the chain preview drawer panel as a child of the content row, sharing a parent with <main>", async () => {
+  it("mounts both panels inside one dock-rail wrapper that is itself a child of the content row, sharing a parent with <main>", async () => {
     renderWithProviders(
       <AppShell>
         <div>designer content</div>
@@ -271,11 +280,21 @@ describe("AppShell -- chain preview drawer mount point (dockable preview)", () =
     );
     await screen.findByText("designer content");
 
-    // ChainPreviewDrawer itself returns a Fragment (no wrapping DOM node),
-    // so the panel's real DOM parent is whichever element renders
-    // `<ChainPreviewDrawer />` as JSX -- AppShell's content row.
-    const drawerPanel = screen.getByTestId("chain-preview-drawer-panel");
-    const contentRow = drawerPanel.parentElement;
+    // Both GlobalTrayPanel and ChainPreviewDrawer return a Fragment (no
+    // wrapping DOM node of their own), so each panel's real DOM parent is
+    // whichever element renders it as JSX -- AppShell's own dock-rail div.
+    const trayPanel = screen.getByTestId("global-tray-drawer-panel");
+    const previewPanel = screen.getByTestId("chain-preview-drawer-panel");
+    const dockRail = trayPanel.parentElement;
+    expect(dockRail).not.toBeNull();
+    expect(dockRail).toBe(previewPanel.parentElement);
+    expect(dockRail?.className).toBe("flex min-h-0 flex-col");
+    // No transform/filter of its own -- see AppShell.tsx's own inline
+    // comment at this mount point for why that matters to either panel's
+    // undocked `position: fixed` overlay.
+    expect(dockRail?.className).not.toMatch(/transform|filter/);
+
+    const contentRow = dockRail?.parentElement;
     expect(contentRow).not.toBeNull();
     expect(contentRow?.className).toContain("lg:flex-row");
     expect(contentRow?.className).toContain("items-stretch");
@@ -283,5 +302,67 @@ describe("AppShell -- chain preview drawer mount point (dockable preview)", () =
     const main = screen.getByText("designer content").closest("main");
     expect(main).not.toBeNull();
     expect(main?.parentElement).toBe(contentRow);
+  });
+
+  it("mounts the tray panel BEFORE the chain preview panel, so a both-docked rail stacks tray-on-top", async () => {
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+
+    const trayPanel = screen.getByTestId("global-tray-drawer-panel");
+    const previewPanel = screen.getByTestId("chain-preview-drawer-panel");
+    const dockRail = trayPanel.parentElement!;
+    const children = Array.from(dockRail.children);
+    expect(children.indexOf(trayPanel)).toBeLessThan(children.indexOf(previewPanel));
+  });
+
+  it("when both the tray and the preview are docked and open, the tray panel caps itself to xl:max-h-[50%] so both get usable, independently scrollable space", async () => {
+    useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "Text — A" });
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+
+    await user.click(await screen.findByRole("button", { name: /^Tray · 1/ }));
+    await user.click(screen.getByRole("button", { name: "Dock tray" }));
+    useChainPreviewStore.setState({ docked: true, open: true });
+
+    const trayPanel = await screen.findByRole("complementary", { name: "Print tray" });
+    expect(trayPanel.className).toContain("xl:max-h-[50%]");
+    expect(trayPanel.className).toContain("xl:min-h-0");
+    // ChainPreviewDrawer.tsx itself is untouched -- it already carries its
+    // own unconditional `overflow-y-auto` (see that component's own
+    // docstring), which is what gives it independent scroll for whatever
+    // height it ends up with below the capped tray panel.
+    const previewPanel = screen.getByRole("complementary", { name: "Print preview" });
+    expect(previewPanel.className).toContain("overflow-y-auto");
+  });
+
+  it("a lone docked tray (preview undocked) is NOT capped -- it gets the whole rail", async () => {
+    useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "Text — A" });
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+
+    await user.click(await screen.findByRole("button", { name: /^Tray · 1/ }));
+    await user.click(screen.getByRole("button", { name: "Dock tray" }));
+
+    const trayPanel = await screen.findByRole("complementary", { name: "Print tray" });
+    expect(trayPanel.className).not.toContain("xl:max-h-[50%]");
   });
 });

@@ -4,7 +4,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { postAuthLogout } from "../api/client";
 import type { AuthUser } from "../api/types";
 import { ChainPreviewDrawer } from "./ChainPreviewDrawer";
-import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
+import { GlobalTrayButton, GlobalTrayPanel } from "./GlobalTrayDrawer";
 import { PrinterStatusBadge } from "./PrinterStatusBadge";
 import { TypeRail } from "./TypeRail";
 import { eyebrow, helpText, iconButtonClass, panel, primaryButtonClass, typeHeading } from "./ui/styles";
@@ -142,22 +142,32 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * useDesignerStore.selectedType, which nothing else reads) -- scoped to
  * `pathname === "/"` here rather than rendered on every route.
  *
- * GlobalTrayDrawer, by contrast, mounts unconditionally on EVERY route now,
- * including "/" -- the Designer page's own tray UI (components/JobTray.tsx)
- * was retired in favor of sharing this one drawer everywhere; it reads the
- * Designer page's "current, unsaved design" off stores/currentDesign.ts
- * when present (only ever true on "/") and simply has none elsewhere.
+ * GlobalTrayButton/GlobalTrayPanel (components/GlobalTrayDrawer.tsx), by
+ * contrast, mount unconditionally on EVERY route now, including "/" -- the
+ * Designer page's own tray UI (components/JobTray.tsx) was retired in favor
+ * of sharing this one drawer everywhere; it reads the Designer page's
+ * "current, unsaved design" off stores/currentDesign.ts when present (only
+ * ever true on "/") and simply has none elsewhere.
  *
  * Track C2 rework: components/ChainPreviewDrawer.tsx mounts here too, on
- * EVERY route just like GlobalTrayDrawer now does. It's the one right-side
+ * EVERY route just like GlobalTrayButton now does. It's the one right-side
  * slide-over reachable from components/TrayPanel.tsx's own "Preview"
- * button (the SAME TrayPanel instance GlobalTrayDrawer renders on every
- * route now), and it must be mounted OUTSIDE GlobalTrayDrawer's own
+ * button (the SAME TrayPanel instance GlobalTrayPanel renders on every
+ * route now), and it must be mounted OUTSIDE GlobalTrayPanel's own
  * translated slide-over wrapper -- see that component's own docstring for
  * why a body portal (ui/Dialog.tsx's own approach) isn't used instead.
  * Dockable-preview feature: it's mounted as the LAST child of the content
- * row below (not a sibling of that row the way it used to be) -- see the
- * inline comment at that mount point for why.
+ * row's own dock rail below (not a sibling of that row the way it used to
+ * be) -- see the inline comment at that mount point for why.
+ *
+ * Dockable-tray feature: GlobalTrayPanel mounts alongside it, in the SAME
+ * dock rail, ABOVE it -- a plain wrapper div, the row's own last child, so
+ * that when a user docks BOTH panels at once they stack vertically in one
+ * right-hand column (tray on top, preview below) instead of forming two
+ * separate side-by-side columns each competing for `<main>`'s width. See
+ * the inline comment at that mount point for the exact class contract, and
+ * GlobalTrayDrawer.tsx's own docstring for the `xl:max-h-[50%]` height
+ * split chosen for the both-docked case.
  *
  * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
@@ -230,8 +240,12 @@ export function AppShell({ children }: AppShellProps) {
               the Designer page no longer mounts its own tray UI (see
               pages/Designer.tsx and stores/currentDesign.ts). Hides itself
               entirely when there's nothing to act on (empty tray AND no
-              current design) -- see its own doc. */}
-          <GlobalTrayDrawer />
+              current design) -- see its own doc. Dockable-tray feature:
+              this is now the button HALF of components/GlobalTrayDrawer.tsx
+              only -- the panel half mounts separately, in the dock rail
+              below, so a docked tray can sit in-flow beside `<main>`
+              instead of only ever overlaying it from here. */}
+          <GlobalTrayButton />
           <span
             className="font-mono text-[11px] text-deck-400"
             title="Print job event stream"
@@ -247,26 +261,43 @@ export function AppShell({ children }: AppShellProps) {
         {isDesignRoute && <TypeRail />}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
 
-        {/* LAST child of the content row (dockable-preview feature) -- a
-            direct child of this row, not nested inside `children`/
-            GlobalTrayDrawer, and not a SIBLING of the row the way it used
-            to be either. Being the row's own last flex item is what lets
-            docked mode (ChainPreviewDrawer's own `xl:static ...` class
-            contract) render as a real in-flow right-hand column beside
-            `<main>` -- the row's `items-stretch` makes it fill the same
-            height. Containing-block check for undocked (overlay) mode's
-            `position: fixed`: this row carries no transform/filter/
-            backdrop-filter/contain of its own, and neither does anything
-            between it and the app root (this component's own top-level
-            div, then straight through JobEventsProvider/BrowserRouter/
-            QueryClientProvider in App.tsx, none of which render a DOM
-            wrapper at all) -- so `fixed` still resolves against the
-            viewport here exactly as it did at the old mount point (see
-            ChainPreviewDrawer's own docstring for why that ancestor check
-            matters -- the JobTray translate trap this project hit before).
-            On EVERY route, same as GlobalTrayDrawer above (no
+        {/* Dock rail: the LAST child of the content row, a plain wrapper
+            (dockable-tray + dockable-preview features) -- a direct child of
+            this row, not nested inside `children`, and not a SIBLING of the
+            row the way ChainPreviewDrawer's own mount used to be either.
+            Being the row's own last flex item is what lets EITHER panel's
+            docked mode (`xl:static ...` class contract, GlobalTrayDrawer.tsx
+            and ChainPreviewDrawer.tsx respectively) render as a real
+            in-flow right-hand column beside `<main>` -- the row's
+            `items-stretch` stretches this wrapper to the same height, same
+            as it always stretched ChainPreviewDrawer directly before.
+            GlobalTrayPanel mounts FIRST, ChainPreviewDrawer SECOND, so
+            when both are docked they stack tray-above-preview in this one
+            column (`flex-col`) instead of each fighting for its own
+            side-by-side column. No `xl:flex-1`/height split lives here on
+            the wrapper itself -- see GlobalTrayDrawer.tsx's own docstring
+            for the `xl:max-h-[50%]` chosen on the TRAY panel's own docked
+            class string instead (letting the preview panel, unedited, take
+            the rest): the wrapper only needs to be a plain flex column, not
+            a sizing authority.
+            Containing-block check for EITHER panel's undocked (overlay)
+            mode `position: fixed`: this wrapper carries no transform/
+            filter/backdrop-filter/contain of its own (`flex min-h-0
+            flex-col` only), the row it sits in doesn't either, and neither
+            does anything between the row and the app root (this
+            component's own top-level div, then straight through
+            JobEventsProvider/BrowserRouter/QueryClientProvider in App.tsx,
+            none of which render a DOM wrapper at all) -- so `fixed` still
+            resolves against the viewport here exactly as it did at
+            ChainPreviewDrawer's OLD direct mount point (see that
+            component's own docstring for why that ancestor check matters
+            -- the JobTray translate trap this project hit before).
+            On EVERY route, same as GlobalTrayButton above (no
             `isDesignRoute` gate on either). */}
-        <ChainPreviewDrawer />
+        <div className="flex min-h-0 flex-col">
+          <GlobalTrayPanel />
+          <ChainPreviewDrawer />
+        </div>
       </div>
     </div>
   );
