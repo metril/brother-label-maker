@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http } from "msw";
 import { TrayPanel, type CurrentDesign } from "./TrayPanel";
+import { useChainPreviewStore } from "../stores/chainPreview";
 import { useTrayStore } from "../stores/tray";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
@@ -12,6 +13,7 @@ const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
+  useChainPreviewStore.setState({ open: false });
 });
 
 function def(text: string): LabelDefinition {
@@ -60,40 +62,44 @@ describe("TrayPanel -- current === null (away from the Designer page)", () => {
   });
 });
 
-/** Track C2: the "Preview chain" button + ChainedPreviewDialog, mounted
- * through TrayPanel exactly as the real app does (JobTray/GlobalTrayDrawer
- * both render TrayPanel directly, never ChainedPreviewDialog on their
- * own). */
-describe("TrayPanel -- Preview chain dialog", () => {
+/** Track C2 rework: components/ChainPreviewDrawer.tsx no longer renders
+ * through TrayPanel at all -- it's mounted once, at AppShell level, and
+ * reads its own content straight off stores/tray.ts (see that component's
+ * own docstring). TrayPanel's own responsibility for "Preview chain" is
+ * now just the button: disabled gating, and wiring stores/chainPreview.ts
+ * + the optional `closeTrayDrawer` prop -- the drawer's actual content
+ * (PNG/segments/stats/mode tabs/zoom/focus/Escape) is covered end-to-end
+ * by ChainPreviewDrawer.test.tsx instead. */
+describe("TrayPanel -- Preview chain button", () => {
   it("is disabled when the tray has nothing valid to print (mirrors the estimate/Print gate)", () => {
     renderWithProviders(<TrayPanel current={currentDesign({ canSubmit: false })} />);
     expect(screen.getByRole("button", { name: "Preview chain" })).toBeDisabled();
   });
 
-  it("is enabled once there's something to print, and opens the dialog with the composite preview", async () => {
+  it("is enabled once there's something to print, and opens the shared drawer store without touching the tray's own chainMode", async () => {
     const user = userEvent.setup();
     renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
     const previewButton = screen.getByRole("button", { name: "Preview chain" });
     expect(previewButton).toBeEnabled();
+    expect(useChainPreviewStore.getState().open).toBe(false);
 
     await user.click(previewButton);
-    const dialog = await screen.findByRole("dialog", { name: "Chain preview" });
-    expect(await within(dialog).findByAltText("Chained job preview")).toBeInTheDocument();
 
-    // Opening the dialog does not touch the tray's own chainMode.
+    expect(useChainPreviewStore.getState().open).toBe(true);
+    // Opening the drawer does not touch the tray's own chainMode.
     expect(useTrayStore.getState().chainMode).toBe(INITIAL_TRAY_STATE.chainMode);
   });
 
-  it("closes on Escape and returns focus to the trigger button", async () => {
+  it("calls the optional closeTrayDrawer prop (GlobalTrayDrawer's own dialog.close) before opening the chain-preview drawer", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
-    const trigger = screen.getByRole("button", { name: "Preview chain" });
+    const closeTrayDrawer = vi.fn();
+    renderWithProviders(
+      <TrayPanel current={currentDesign()} onAddToTray={vi.fn()} closeTrayDrawer={closeTrayDrawer} />,
+    );
 
-    await user.click(trigger);
-    await screen.findByRole("dialog", { name: "Chain preview" });
+    await user.click(screen.getByRole("button", { name: "Preview chain" }));
 
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chain preview" })).not.toBeInTheDocument());
-    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(closeTrayDrawer).toHaveBeenCalledTimes(1);
+    expect(useChainPreviewStore.getState().open).toBe(true);
   });
 });

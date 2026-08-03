@@ -20,10 +20,35 @@ import { hasSequenceFieldError, sequenceTotalLabels } from "../lib/sequence";
 import { hasNumberOutOfRange } from "../schema/numberValidity";
 import { hasRenderableContent } from "../schema/renderable";
 import { buildDefinition, tapeMismatchWarning, useDesignerStore } from "../stores/designer";
+import { useChainPreviewStore, type CurrentDesignMirror } from "../stores/chainPreview";
 import { useTrayStore } from "../stores/tray";
 import type { LabelDefinition } from "../api/types";
 
 const HIGHLIGHT_MS = 2000;
+
+/** Mirrors the current, unsaved design into stores/chainPreview.ts so the
+ * AppShell-mounted ChainPreviewDrawer can fall back to it on an empty tray
+ * -- the same fallback TrayPanel's own bodyLabels/bodySerialization give
+ * the estimate and Print button. A child component (rendered from
+ * Designer's success branch, so its hooks never sit below Designer's own
+ * early returns) rather than inline hooks; cleared on unmount, because off
+ * this page there IS no current design. The mirror object is rebuilt every
+ * Designer render (fresh definition identity), so a JSON key guard (same
+ * convention as TrayPanel's bodyKey) keeps redundant store writes -- and
+ * re-renders of the always-mounted drawer -- from firing per keystroke. */
+function CurrentDesignMirrorEffect({ design }: { design: CurrentDesignMirror }) {
+  const setCurrentDesign = useChainPreviewStore((s) => s.setCurrentDesign);
+  const keyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = JSON.stringify(design);
+    if (key !== keyRef.current) {
+      keyRef.current = key;
+      setCurrentDesign(design);
+    }
+  });
+  useEffect(() => () => setCurrentDesign(null), [setCurrentDesign]);
+  return null;
+}
 
 /** track C3: the feed deck's own preview-zoom control -- on-screen
  * px-per-mm, threaded into FeedDeck's `pxPerMm` prop (feedDeckGeometry.ts's
@@ -323,6 +348,13 @@ export function Designer() {
           </HighlightContext.Provider>
         </section>
 
+        <CurrentDesignMirrorEffect
+          design={{
+            definition: currentDesign.definition,
+            serialization: currentDesign.serialization,
+            canSubmit: currentDesign.canSubmit,
+          }}
+        />
         <JobTray current={currentDesign} onAddToTray={handleAddToTray} />
       </div>
 

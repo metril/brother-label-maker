@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { postAuthLogout } from "../api/client";
 import type { AuthUser } from "../api/types";
+import { ChainPreviewDrawer } from "./ChainPreviewDrawer";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
 import { PrinterStatusBadge } from "./PrinterStatusBadge";
 import { TypeRail } from "./TypeRail";
@@ -144,6 +145,15 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * OTHER route, since JobTray.tsx already gives the Designer page its own
  * always-visible tray.
  *
+ * Track C2 rework: components/ChainPreviewDrawer.tsx mounts here too, but
+ * UNLIKE GlobalTrayDrawer -- on EVERY route, including Design. It's the
+ * one right-side slide-over reachable from either components/TrayPanel.tsx
+ * instance's own "Preview chain" button (JobTray's sidebar/sheet here on
+ * "/", GlobalTrayDrawer everywhere else), and it must be mounted OUTSIDE
+ * both of those hosts' own translated wrappers -- see that component's own
+ * docstring for why a body portal (ui/Dialog.tsx's own approach) isn't
+ * used instead.
+ *
  * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
  * (see that route's own docstring), so this branch is a pure no-op in the
@@ -231,6 +241,14 @@ export function AppShell({ children }: AppShellProps) {
         {isDesignRoute && <TypeRail />}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
+
+      {/* Mounted here -- a direct child of this component's own top-level
+          div, not nested inside `children`/GlobalTrayDrawer -- specifically
+          so it sits outside every translated ancestor either TrayPanel host
+          has. See ChainPreviewDrawer's own docstring, and this component's
+          own doc above. On EVERY route (no `isDesignRoute` gate, unlike
+          GlobalTrayDrawer above). */}
+      <ChainPreviewDrawer />
     </div>
   );
 }

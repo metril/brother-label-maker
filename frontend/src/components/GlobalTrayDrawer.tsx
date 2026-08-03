@@ -95,7 +95,13 @@ export function GlobalTrayDrawer() {
             ×
           </button>
         </div>
-        <TrayPanel current={null} />
+        {/* `closeTrayDrawer={dialog.close}`: Track C2's own "Preview chain"
+            button opens components/ChainPreviewDrawer.tsx, a SECOND
+            right-edge slide-over -- see TrayPanel.tsx's own
+            `closeTrayDrawer` prop doc for why this panel closes itself the
+            instant that happens, rather than the two ever being visible
+            stacked on top of each other. */}
+        <TrayPanel current={null} closeTrayDrawer={dialog.close} />
       </div>
     </>
   );
