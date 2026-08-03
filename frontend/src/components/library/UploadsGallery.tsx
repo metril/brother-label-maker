@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, deleteImage, getImages, imageThumbUrl, postImage } from "../../api/client";
 import { useDialogController } from "../../hooks/useDialogController";
 import { formatAbsoluteTime, formatRelativeTime } from "../../lib/time";
@@ -47,48 +47,50 @@ function formatBytes(bytes: number): string {
  * shape as `GET /api/history`) but this component ACCUMULATES pages
  * client-side behind a "Load more" button rather than a Prev/Next pager --
  * a thumbnail grid (like IconField's own symbol picker) reads better as one
- * continuously growing sheet than as a table with page controls. Uploading
- * or deleting an image resets back to page 1 and invalidates the whole
- * `["images"]` query family -- the simplest way to keep the accumulated
- * list correct once a new item enters the newest-first sort or a
- * currently-shown image_id vanishes, at the cost of losing "Load more"
- * progress on that one action (an acceptable trade -- the common case is
- * still page 1 when either happens).
+ * continuously growing sheet than as a table with page controls. Built on
+ * react-query's own `useInfiniteQuery` (M11, docs/code-review-2026-08.md)
+ * -- every loaded page lives under the ONE `["images"]` query key, not one
+ * `["images", page]` entry per page number, so `invalidateQueries({
+ * queryKey: ["images"]})` after an upload/delete refetches EVERY page
+ * currently loaded, not just the first. The PREVIOUS hand-rolled version
+ * tracked a `page` state var plus an `appendedPageRef` high-water mark and
+ * manually accumulated `data.items` into local state on every fetch; that
+ * scheme had a real gap -- `invalidateQueries` only refetches ACTIVE
+ * queries by default, so a background refetch of an already-loaded (now
+ * inactive) `["images", 2]` entry could resolve with fresh data AFTER the
+ * ref guard had already moved past it, and the stale slice then displayed
+ * permanently (see M11's own repro: load more, then delete/upload, then
+ * load more again). `useInfiniteQuery` has no such gap: there is only ever
+ * ONE query, its `data.pages` array is what "loaded so far" means, and a
+ * refetch replaces the whole array atomically.
  */
 export function UploadsGallery() {
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState<ImageListItem[]>([]);
-  // Tracks the highest page number already folded into `items` -- guards
-  // against re-appending the SAME page's items twice (e.g. a background
-  // refetch of an already-accumulated page resolving again with a fresh
-  // object reference).
-  const appendedPageRef = useRef(0);
 
-  const { data, isPending, isError, isFetching } = useQuery({
-    queryKey: ["images", page],
-    queryFn: () => getImages(page, PAGE_SIZE),
-    placeholderData: (previousData) => previousData,
+  const {
+    data,
+    isPending,
+    isError,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["images"],
+    queryFn: ({ pageParam }) => getImages(pageParam, PAGE_SIZE),
+    initialPageParam: 1,
+    // A next page exists iff fewer items are loaded so far (summed across
+    // every page already in `allPages`) than the server's own `total` --
+    // the same figure on every page of the same listing.
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, page) => sum + page.items.length, 0);
+      return loaded < lastPage.total ? lastPage.page + 1 : undefined;
+    },
   });
 
-  useEffect(() => {
-    if (!data) return;
-    if (data.page === 1) {
-      // Page 1 is always a full replace, not an append -- covers both the
-      // very first load AND the reset-after-upload/delete case below,
-      // regardless of what appendedPageRef currently holds.
-      setItems(data.items);
-      appendedPageRef.current = 1;
-      return;
-    }
-    if (data.page > appendedPageRef.current) {
-      setItems((prev) => [...prev, ...data.items]);
-      appendedPageRef.current = data.page;
-    }
-  }, [data]);
+  const items: ImageListItem[] = data?.pages.flatMap((page) => page.items) ?? [];
+  const total = data?.pages[0]?.total ?? 0;
 
   function resetAndInvalidate() {
-    setPage(1);
     queryClient.invalidateQueries({ queryKey: ["images"] });
   }
 
@@ -108,8 +110,7 @@ export function UploadsGallery() {
     },
   });
 
-  const total = data?.total ?? 0;
-  const hasMore = items.length < total;
+  const hasMore = hasNextPage ?? false;
 
   return (
     <div className={`${panel} flex h-full min-h-0 flex-col`}>
@@ -194,11 +195,11 @@ export function UploadsGallery() {
             {hasMore && (
               <button
                 type="button"
-                onClick={() => setPage((p) => p + 1)}
-                disabled={isFetching}
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
                 className="rounded-md border border-deck-600 bg-deck-800 px-4 py-1.5 text-[13px] font-medium text-deck-200 hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isFetching ? "Loading…" : "Load more"}
+                {isFetchingNextPage ? "Loading…" : "Load more"}
               </button>
             )}
           </div>

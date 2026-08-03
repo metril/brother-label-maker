@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -8,6 +8,7 @@ import { renderWithQueryClient } from "../../test/utils";
 import { server } from "../../test/msw/server";
 import { trimmedSymbolsFixture } from "../../test/msw/handlers";
 import symbolsFixture from "../../test/fixtures/symbols.json";
+import { columnCount } from "../../lib/columnCount";
 import { SymbolBrowser } from "./SymbolBrowser";
 
 /** Mirrors SymbolBrowser's own category+search predicate (see that
@@ -144,6 +145,38 @@ describe("SymbolBrowser: browse mode", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(192));
   });
 
+  it("windowing (bug fix): the sentinel is re-armed after each grow, so a STILL-visible sentinel keeps growing the window on repeated intersections", async () => {
+    // Before the fix: `observe()` on a target the observer was already
+    // observing was a silent no-op, and the sentinel div is the SAME DOM
+    // node before and after a grow (only its position in the grid's
+    // children moves) -- so the window would grow exactly ONCE no matter
+    // how many more times the (still-visible, per this test) sentinel
+    // "fired" after that. Triggering the SAME observer instance a SECOND
+    // time here proves the unobserve+observe re-arm actually re-establishes
+    // observation rather than degrading into a permanent no-op.
+    renderWithQueryClient(<SymbolBrowser mode="browse" />);
+    await screen.findByText(ALL_COUNT_TEXT);
+
+    const observer = mockIntersectionObserverInstances.at(-1)!;
+    observer.trigger();
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(192));
+
+    observer.trigger();
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(Math.min(288, trimmedSymbolsFixture.length)));
+  });
+
+  it("windowing (bug fix): the sentinel's IntersectionObserver uses the grid's own scroll container as root, not the viewport", async () => {
+    // Before the fix: the observer was constructed with no `root` at all,
+    // so it measured intersection against the VIEWPORT -- wrong once the
+    // grid became its own `overflow-y-auto` scroll region.
+    renderWithQueryClient(<SymbolBrowser mode="browse" />);
+    await screen.findByText(ALL_COUNT_TEXT);
+
+    const observer = mockIntersectionObserverInstances.at(-1)!;
+    expect(observer.root).toBe(screen.getByRole("listbox", { name: "Symbol" }));
+    expect(observer.rootMargin).toBe("400px");
+  });
+
   it("keyboard nav past the rendered window's edge grows the window and lands focus on the right option", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
@@ -153,15 +186,19 @@ describe("SymbolBrowser: browse mode", () => {
     // which is sorted by id -- filtering a sorted array preserves relative
     // order, so the trimmed slice is sorted by id too, and entries 95/96
     // (0-indexed) straddle the initial 96-item window boundary the same
-    // way they would against the raw fixture.
+    // way they would against the raw fixture. L18 (docs/code-review-2026-08.md):
+    // these two are picked purely POSITIONALLY (not for a verified-unique
+    // display name, unlike the hand-picked probes elsewhere in this file),
+    // so they're located by `data-testid` (keyed on the guaranteed-unique
+    // `id`) rather than by accessible name.
     const lastVisible = trimmedSymbolsFixture[95]!;
     const firstBeyondWindow = trimmedSymbolsFixture[96]!;
 
-    screen.getByRole("option", { name: lastVisible.name }).focus();
+    screen.getByTestId(`symbol-option-${lastVisible.id}`).focus();
     await user.keyboard("{ArrowRight}");
 
     await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByRole("option", { name: firstBeyondWindow.name }));
+      expect(document.activeElement).toBe(screen.getByTestId(`symbol-option-${firstBeyondWindow.id}`));
     });
     expect(screen.getAllByRole("option").length).toBeGreaterThan(96);
   });
@@ -341,4 +378,47 @@ describe("SymbolBrowser: full-catalog scale (H9)", () => {
     await user.keyboard("{ArrowUp}");
     expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(96 + 96);
   }, 10000);
+});
+
+describe("columnCount (L12(a))", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 1 for a null grid element", () => {
+    expect(columnCount(null)).toBe(1);
+  });
+
+  it("falls back to 1 against a real (unstyled) jsdom element -- jsdom applies no CSS at all, so `getComputedStyle` reports an empty gridTemplateColumns here, and this is the value this component's real jsdom tests (H7 included) depend on to keep their +-1 semantics", () => {
+    const grid = document.createElement("div");
+    expect(getComputedStyle(grid).gridTemplateColumns).toBe("");
+    expect(columnCount(grid)).toBe(1);
+  });
+
+  it("also falls back to 1 for the CSS-wide initial value 'none' -- what a real browser reports for grid-template-columns before layout has resolved an auto-fill track list, or for a non-grid element", () => {
+    const grid = document.createElement("div");
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      gridTemplateColumns: "none",
+    } as CSSStyleDeclaration);
+
+    expect(columnCount(grid)).toBe(1);
+  });
+
+  it("counts the resolved space-separated tracks when getComputedStyle reports concrete pixel columns, as a real browser's layout engine would for an auto-fill grid", () => {
+    const grid = document.createElement("div");
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      gridTemplateColumns: "72px 72px 72px 72px",
+    } as CSSStyleDeclaration);
+
+    expect(columnCount(grid)).toBe(4);
+  });
+
+  it("falls back to 1 for an empty gridTemplateColumns string", () => {
+    const grid = document.createElement("div");
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      gridTemplateColumns: "",
+    } as CSSStyleDeclaration);
+
+    expect(columnCount(grid)).toBe(1);
+  });
 });

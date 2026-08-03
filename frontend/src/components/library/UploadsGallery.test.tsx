@@ -139,4 +139,65 @@ describe("UploadsGallery", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete upload img-new" })).toBeInTheDocument());
   });
+
+  // L20 (docs/code-review-2026-08.md): the three failure branches below had
+  // no coverage at all -- every existing test above is happy-path.
+
+  it("upload failure shows the backend's own error detail via role=alert", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/images", () => HttpResponse.json({ items: [], page: 1, page_size: 24, total: 0 })),
+      // A realistic 422 detail string (router_images.py's own shape) --
+      // the ApiError unwrapping in client.ts must surface this VERBATIM,
+      // not a generic fallback, since it's the user's only feedback on
+      // exactly why their upload was rejected.
+      http.post("/api/images", () =>
+        HttpResponse.json(
+          { detail: "image is 4000x4000 (16000000 px), exceeding the 8000000px cap" },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQueryClient(<UploadsGallery />);
+    await screen.findByText(/No uploads yet/);
+
+    const file = new File(["fake-bytes"], "huge.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload image"), file);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "image is 4000x4000 (16000000 px), exceeding the 8000000px cap",
+    );
+  });
+
+  it("list load failure shows 'Could not load uploads.'", async () => {
+    server.use(
+      http.get("/api/images", () => HttpResponse.json({ detail: "internal error" }, { status: 500 })),
+    );
+    renderWithQueryClient(<UploadsGallery />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load uploads.");
+  });
+
+  it("delete failure surfaces the error inside the ConfirmDialog, which stays open", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/images", () =>
+        HttpResponse.json({ items: [item({ image_id: "img-1" })], page: 1, page_size: 24, total: 1 }),
+      ),
+      http.delete("/api/images/img-1", () =>
+        HttpResponse.json({ detail: "cannot delete: referenced by an active label" }, { status: 500 }),
+      ),
+    );
+    renderWithQueryClient(<UploadsGallery />);
+
+    await user.click(await screen.findByRole("button", { name: "Delete upload img-1" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("cannot delete: referenced by an active label");
+    // The dialog stays open (only a SUCCESSFUL delete closes it) and the
+    // item is still there -- the failed delete never silently removed it.
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete upload img-1" })).toBeInTheDocument();
+  });
 });

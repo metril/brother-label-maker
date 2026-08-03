@@ -71,18 +71,27 @@ export const mockIntersectionObserverInstances: MockIntersectionObserver[] = [];
  * something a test can drive synchronously. Real observers report once per
  * observed target; this app only ever observes a single windowing sentinel
  * per picker instance, so `.trigger()` fabricates one entry per currently-
- * observed target rather than a general per-target queue/timing model. */
+ * observed target rather than a general per-target queue/timing model.
+ *
+ * `root`/`rootMargin` are captured from the constructor's own `options`
+ * (SymbolBrowser.tsx's windowing fix needs its own grid element as `root`,
+ * not the viewport -- a test asserts that directly against this field) --
+ * purely observational, though: `observe`/`unobserve`/`trigger` below don't
+ * actually filter by root/threshold the way a real browser would, so
+ * existing tests that never inspect these fields see no behavior change. */
 export class MockIntersectionObserver implements IntersectionObserver {
-  readonly root: Element | Document | null = null;
-  readonly rootMargin: string = "";
+  readonly root: Element | Document | null;
+  readonly rootMargin: string;
   readonly scrollMargin: string = "";
   readonly thresholds: ReadonlyArray<number> = [];
 
   #callback: IntersectionObserverCallback;
   #targets = new Set<Element>();
 
-  constructor(callback: IntersectionObserverCallback) {
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
     this.#callback = callback;
+    this.root = options?.root ?? null;
+    this.rootMargin = options?.rootMargin ?? "";
     mockIntersectionObserverInstances.push(this);
   }
 
