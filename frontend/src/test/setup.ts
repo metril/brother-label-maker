@@ -88,6 +88,19 @@ export class MockIntersectionObserver implements IntersectionObserver {
   #callback: IntersectionObserverCallback;
   #targets = new Set<Element>();
 
+  /** Every observe/unobserve/disconnect call this instance has received, in
+   * call order -- `#targets` being a bare Set means `observe()`/`trigger()`
+   * alone can't tell a test whether a target was re-armed (unobserve then
+   * observe of the SAME node) or just left alone since mount: `observe()`
+   * on an already-observed target is a silent Set.add no-op, and
+   * `trigger()` fires for whatever's currently in the Set regardless of how
+   * many times (or whether) it was re-observed. This log lets a test assert
+   * on the CALLS themselves -- e.g. SymbolBrowser.test.tsx's re-arm
+   * regression, which needs to prove an actual unobserve+observe pair
+   * happened, not just that growth eventually occurred (additive: doesn't
+   * change observe/unobserve/disconnect's existing Set behavior). */
+  calls: Array<{ op: "observe" | "unobserve" | "disconnect"; target: Element }> = [];
+
   constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
     this.#callback = callback;
     this.root = options?.root ?? null;
@@ -96,14 +109,17 @@ export class MockIntersectionObserver implements IntersectionObserver {
   }
 
   observe(target: Element) {
+    this.calls.push({ op: "observe", target });
     this.#targets.add(target);
   }
 
   unobserve(target: Element) {
+    this.calls.push({ op: "unobserve", target });
     this.#targets.delete(target);
   }
 
   disconnect() {
+    for (const target of this.#targets) this.calls.push({ op: "disconnect", target });
     this.#targets.clear();
   }
 

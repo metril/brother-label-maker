@@ -177,17 +177,20 @@ describe("IconField", () => {
     // which is sorted by id -- filtering a sorted array preserves relative
     // order, so the trimmed slice is sorted by id too, and entries 95/96
     // (0-indexed) straddle the initial 96-item window boundary the same
-    // way they would against the raw fixture.
+    // way they would against the raw fixture. L18 (docs/code-review-2026-08.md):
+    // these two are picked purely POSITIONALLY (not for a verified-unique
+    // display name, unlike the hand-picked probes elsewhere in this file),
+    // so they're located by `data-testid` (keyed on the guaranteed-unique
+    // `id`) rather than by accessible name.
     const lastVisible = trimmedSymbolsFixture[95]!;
     const firstBeyondWindow = trimmedSymbolsFixture[96]!;
     expect(screen.getAllByRole("option")).toHaveLength(96);
 
-    const lastVisibleOption = screen.getByRole("option", { name: lastVisible.name });
-    lastVisibleOption.focus();
+    screen.getByTestId(`symbol-option-${lastVisible.id}`).focus();
     await user.keyboard("{ArrowRight}");
 
     await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByRole("option", { name: firstBeyondWindow.name }));
+      expect(document.activeElement).toBe(screen.getByTestId(`symbol-option-${firstBeyondWindow.id}`));
     });
     expect(screen.getAllByRole("option").length).toBeGreaterThan(96);
   });

@@ -71,6 +71,7 @@ export function UploadsGallery() {
     data,
     isPending,
     isError,
+    isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
@@ -196,7 +197,7 @@ export function UploadsGallery() {
               <button
                 type="button"
                 onClick={() => fetchNextPage()}
-                disabled={isFetchingNextPage}
+                disabled={isFetching}
                 className="rounded-md border border-deck-600 bg-deck-800 px-4 py-1.5 text-[13px] font-medium text-deck-200 hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isFetchingNextPage ? "Loading…" : "Load more"}

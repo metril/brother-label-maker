@@ -161,6 +161,25 @@ describe("SymbolBrowser: browse mode", () => {
     observer.trigger();
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(192));
 
+    // Pin the MECHANISM, not just the eventual growth: MockIntersectionObserver's
+    // `#targets` is a bare Set, so `trigger()` fires for whatever's already
+    // in it regardless of whether anything re-observed it -- the growth
+    // assertions above (and below) would pass identically even with the
+    // entire re-arm effect deleted, since the sentinel never leaves the Set
+    // in the first place. Assert directly on the call log instead: the grow
+    // above must have produced an unobserve(sentinel) immediately followed
+    // by an observe(sentinel) for the SAME node -- the actual re-arm, not a
+    // coincidental outcome.
+    const sentinel = observer.calls.find((call) => call.op === "observe")!.target;
+    const reArmed = observer.calls.some(
+      (call, i) =>
+        call.op === "unobserve" &&
+        call.target === sentinel &&
+        observer.calls[i + 1]?.op === "observe" &&
+        observer.calls[i + 1]?.target === sentinel,
+    );
+    expect(reArmed).toBe(true);
+
     observer.trigger();
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(Math.min(288, trimmedSymbolsFixture.length)));
   });
