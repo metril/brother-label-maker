@@ -92,7 +92,7 @@ const THEME_LABEL: Record<Theme, string> = { dark: "Dark", light: "Light", syste
  * `aria-label` announces the CURRENT theme (not what clicking does, which
  * would need updating every click and reads oddly for a toggle) -- the
  * glyph is decorative (`aria-hidden`), same convention as this file's other
- * icon buttons (JobTray's `×`, TrayItemRow's `↑`/`↓`/`⧉`). */
+ * icon buttons (GlobalTrayDrawer's `×`, TrayItemRow's `↑`/`↓`/`⧉`). */
 function ThemeCycleButton() {
   const { theme, setTheme } = useTheme();
 
@@ -140,19 +140,21 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  *
  * The TYPES rail only makes sense on the Designer page itself (it drives
  * useDesignerStore.selectedType, which nothing else reads) -- scoped to
- * `pathname === "/"` here rather than rendered on every route. Its
- * complement, GlobalTrayDrawer, is scoped the other way: mounted on every
- * OTHER route, since JobTray.tsx already gives the Designer page its own
- * always-visible tray.
+ * `pathname === "/"` here rather than rendered on every route.
  *
- * Track C2 rework: components/ChainPreviewDrawer.tsx mounts here too, but
- * UNLIKE GlobalTrayDrawer -- on EVERY route, including Design. It's the
- * one right-side slide-over reachable from either components/TrayPanel.tsx
- * instance's own "Preview chain" button (JobTray's sidebar/sheet here on
- * "/", GlobalTrayDrawer everywhere else), and it must be mounted OUTSIDE
- * both of those hosts' own translated wrappers -- see that component's own
- * docstring for why a body portal (ui/Dialog.tsx's own approach) isn't
- * used instead.
+ * GlobalTrayDrawer, by contrast, mounts unconditionally on EVERY route now,
+ * including "/" -- the Designer page's own tray UI (components/JobTray.tsx)
+ * was retired in favor of sharing this one drawer everywhere; it reads the
+ * Designer page's "current, unsaved design" off stores/currentDesign.ts
+ * when present (only ever true on "/") and simply has none elsewhere.
+ *
+ * Track C2 rework: components/ChainPreviewDrawer.tsx mounts here too, on
+ * EVERY route just like GlobalTrayDrawer now does. It's the one right-side
+ * slide-over reachable from components/TrayPanel.tsx's own "Preview"
+ * button (the SAME TrayPanel instance GlobalTrayDrawer renders on every
+ * route now), and it must be mounted OUTSIDE GlobalTrayDrawer's own
+ * translated slide-over wrapper -- see that component's own docstring for
+ * why a body portal (ui/Dialog.tsx's own approach) isn't used instead.
  *
  * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
@@ -221,11 +223,12 @@ export function AppShell({ children }: AppShellProps) {
         <div className="ml-auto flex items-center gap-4">
           <ThemeCycleButton />
           <PrinterStatusBadge />
-          {/* Away from the Designer page, this is the ONLY way to reach the
-              tray -- JobTray.tsx (the sticky sidebar/mobile sheet) only
-              mounts on "/". Hides itself entirely while the tray is empty
-              (see its own doc). */}
-          {!isDesignRoute && <GlobalTrayDrawer />}
+          {/* The ONE way to reach the tray on every route, including "/" --
+              the Designer page no longer mounts its own tray UI (see
+              pages/Designer.tsx and stores/currentDesign.ts). Hides itself
+              entirely when there's nothing to act on (empty tray AND no
+              current design) -- see its own doc. */}
+          <GlobalTrayDrawer />
           <span
             className="font-mono text-[11px] text-deck-400"
             title="Print job event stream"
@@ -244,10 +247,10 @@ export function AppShell({ children }: AppShellProps) {
 
       {/* Mounted here -- a direct child of this component's own top-level
           div, not nested inside `children`/GlobalTrayDrawer -- specifically
-          so it sits outside every translated ancestor either TrayPanel host
-          has. See ChainPreviewDrawer's own docstring, and this component's
-          own doc above. On EVERY route (no `isDesignRoute` gate, unlike
-          GlobalTrayDrawer above). */}
+          so it sits outside GlobalTrayDrawer's own translated wrapper. See
+          ChainPreviewDrawer's own docstring, and this component's own doc
+          above. On EVERY route, same as GlobalTrayDrawer above (no
+          `isDesignRoute` gate on either). */}
       <ChainPreviewDrawer />
     </div>
   );

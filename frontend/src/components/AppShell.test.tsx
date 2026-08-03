@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { AppShell } from "./AppShell";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import type { LabelDefinition } from "../api/types";
 
@@ -12,6 +13,22 @@ const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 function def(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
+}
+
+function currentDesign(overrides: Partial<CurrentDesign> = {}): CurrentDesign {
+  return {
+    definition: def("CURRENT"),
+    canSubmit: true,
+    isRenderable: () => true,
+    png: null,
+    lengthMm: 25.4,
+    label: "Text — CURRENT",
+    serializationEnabled: false,
+    serialization: null,
+    totalLabels: null,
+    serializationHasVisibleError: false,
+    ...overrides,
+  };
 }
 
 /** task 4.1: AppShell's own auth gating on top of GET /api/auth/me --
@@ -94,12 +111,16 @@ describe("AppShell auth gating (task 4.1)", () => {
 
 /** The TYPES rail (components/TypeRail.tsx) only drives Designer's own
  * useDesignerStore.selectedType -- scoped to the "/" route here rather than
- * rendered (uselessly) on every page. Its complement, GlobalTrayDrawer, is
- * scoped the opposite way: every route EXCEPT "/", since JobTray.tsx
- * already gives the Designer page its own always-visible tray. */
+ * rendered (uselessly) on every page. GlobalTrayDrawer, by contrast, mounts
+ * unconditionally on every route now, including "/" -- the Designer page's
+ * own tray UI (components/JobTray.tsx) was retired in favor of this same
+ * drawer everywhere; see stores/currentDesign.ts for the one thing that
+ * still differs by route (the "current, unsaved design" fallback, only
+ * ever non-null on "/"). */
 describe("AppShell -- Design-route scoping (type rail + global tray drawer)", () => {
   afterEach(() => {
     useTrayStore.setState(INITIAL_TRAY_STATE, true);
+    useCurrentDesignStore.setState({ current: null });
   });
 
   it("renders the type rail on the Design route, not on other routes", async () => {
@@ -123,7 +144,7 @@ describe("AppShell -- Design-route scoping (type rail + global tray drawer)", ()
     expect(screen.queryByRole("navigation", { name: "Label types" })).not.toBeInTheDocument();
   });
 
-  it("hides the global tray drawer button entirely on the Design route (JobTray already covers it there)", async () => {
+  it("shows the global tray drawer button on the Design route too, now that the tray is unified there", async () => {
     useTrayStore.getState().addItem({ definition: def("A"), png: null, lengthMm: 10, label: "Text — A" });
 
     renderWithProviders(
@@ -133,7 +154,20 @@ describe("AppShell -- Design-route scoping (type rail + global tray drawer)", ()
       { route: "/" },
     );
     await screen.findByText("designer content");
-    expect(screen.queryByRole("button", { name: /^Tray ·/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Tray · 1/ })).toBeInTheDocument();
+  });
+
+  it("on the Design route with an empty tray but a seeded current design, shows a plain 'Tray' button (never 'Tray · 0')", async () => {
+    useCurrentDesignStore.setState({ current: currentDesign() });
+
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+    expect(await screen.findByRole("button", { name: "Tray" })).toBeInTheDocument();
   });
 
   it("hides the global tray drawer button when the tray is empty, and shows it once an item is queued", async () => {

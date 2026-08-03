@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { ChainPreviewDrawer } from "./ChainPreviewDrawer";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
 import { useChainPreviewStore } from "../stores/chainPreview";
+import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { TINY_PNG_B64 } from "../test/msw/handlers";
 import { renderWithProviders } from "../test/utils";
@@ -15,11 +16,28 @@ const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
-  useChainPreviewStore.setState({ open: false, currentDesign: null });
+  useChainPreviewStore.setState({ open: false });
+  useCurrentDesignStore.setState({ current: null });
 });
 
 function def(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
+}
+
+function currentDesign(overrides: Partial<CurrentDesign> = {}): CurrentDesign {
+  return {
+    definition: def("CURRENT"),
+    canSubmit: true,
+    isRenderable: () => true,
+    png: null,
+    lengthMm: 25.4,
+    label: "Text — CURRENT",
+    serializationEnabled: false,
+    serialization: null,
+    totalLabels: null,
+    serializationHasVisibleError: false,
+    ...overrides,
+  };
 }
 
 function seedTrayItems(n: number) {
@@ -110,6 +128,10 @@ describe("ChainPreviewDrawer", () => {
 
     await user.click(screen.getByRole("button", { name: "Open" }));
     const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    // "Chain preview zoom", not "Preview zoom" (L14 review fix) -- avoids
+    // colliding with Designer's own same-named zoom control when both are
+    // mounted on the Design route at once.
+    expect(within(drawer).getByRole("radiogroup", { name: "Chain preview zoom" })).toBeInTheDocument();
     const img = await within(drawer).findByAltText("Chained job preview");
 
     await waitFor(() => expect(img.style.width).not.toBe(""));
@@ -117,6 +139,22 @@ describe("ChainPreviewDrawer", () => {
 
     await user.click(within(drawer).getByRole("radio", { name: "8×" }));
     expect(img.style.width).not.toBe(widthAt4x);
+  });
+
+  it("sizes the strip's height from the tape's PRINT height (print_mm), not its nominal width (M10)", async () => {
+    seedTrayItems(1);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const img = await within(drawer).findByAltText("Chained job preview");
+
+    // The tray items' tape is 24mm/tze (see `def`); the tapes fixture's
+    // matching row has print_mm: 18.1. At the drawer's opening zoom
+    // (DEFAULT_PX_PER_MM, 4), the correct height is 18.1 * 4 = 72.4px --
+    // the pre-fix, nominal-based figure would instead be 24 * 4 = 96px.
+    await waitFor(() => expect(img.style.height).toBe("72.4px"));
   });
 
   it("closes on Escape and returns focus to the trigger", async () => {
@@ -143,9 +181,9 @@ describe("ChainPreviewDrawer", () => {
   });
 
   it("empty tray falls back to Designer's mirrored current design, serialization included", async () => {
-    // pages/Designer.tsx mirrors its current design into the store (see
-    // CurrentDesignMirror); the drawer previews it when the tray is empty
-    // -- the same fallback TrayPanel's estimate/Print already have.
+    // pages/Designer.tsx mirrors its current design into
+    // stores/currentDesign.ts; the drawer previews it when the tray is
+    // empty -- the same fallback TrayPanel's estimate/Print already have.
     interface CapturedBody {
       labels?: unknown[];
       serialization?: unknown;
@@ -168,11 +206,13 @@ describe("ChainPreviewDrawer", () => {
       }),
     );
     const serialization = { kind: "numeric", start: 1, end: 3, step: 1, pad: 0, copies_per_value: 1 };
-    useChainPreviewStore.getState().setCurrentDesign({
-      definition: def("CURRENT-UNSAVED"),
-      serialization: serialization as never,
-      canSubmit: true,
-    });
+    useCurrentDesignStore.getState().setCurrent(
+      currentDesign({
+        definition: def("CURRENT-UNSAVED"),
+        serialization: serialization as never,
+        canSubmit: true,
+      }),
+    );
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
 
@@ -221,6 +261,53 @@ describe("ChainPreviewDrawer", () => {
     await waitFor(() => expect(requestCount).toBe(2));
   });
 
+  it("renders a non-empty `warnings` response as an alert (M13)", async () => {
+    seedTrayItems(1);
+    server.use(
+      http.post("/api/print/preview", () =>
+        HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          chain_mode: "cut_each",
+          total_mm: 30,
+          content_mm: 25,
+          feed_overhead_mm: 5,
+          per_label_mm: 30,
+          notes: [],
+          segments: [{ index: 0, start_mm: 0, end_mm: 25, length_mm: 25 }],
+          warnings: ["label 1: text may be cramped at this tape width"],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    await within(drawer).findByAltText("Chained job preview");
+
+    expect(within(drawer).getByRole("alert")).toHaveTextContent("label 1: text may be cramped at this tape width");
+  });
+
+  it("shows the request's error detail in an alert, and recovers without a permanent spinner (M14)", async () => {
+    seedTrayItems(1);
+    server.use(
+      http.post("/api/print/preview", () =>
+        HttpResponse.json({ detail: "combined tape length exceeds the 1000mm maximum" }, { status: 422 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+
+    const alert = await within(drawer).findByRole("alert");
+    expect(alert).toHaveTextContent("combined tape length exceeds the 1000mm maximum");
+    // Recovers to the error state rather than getting stuck showing the
+    // loading spinner forever.
+    expect(within(drawer).queryByRole("status", { name: "Loading" })).not.toBeInTheDocument();
+  });
+
   it("opening the chain preview from TrayPanel's own button closes the GlobalTrayDrawer slide-over, and restores focus there on close", async () => {
     seedTrayItems(2);
     server.use(
@@ -249,7 +336,7 @@ describe("ChainPreviewDrawer", () => {
     await user.click(trayTrigger);
     await screen.findByRole("dialog", { name: "Print tray" });
 
-    await user.click(screen.getByRole("button", { name: "Preview chain" }));
+    await user.click(screen.getByRole("button", { name: "Preview" }));
 
     // Both slide-overs occupy the right edge -- opening the chain preview
     // drawer closes the tray drawer rather than stacking on top of it (see

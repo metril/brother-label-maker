@@ -21,7 +21,18 @@ const listeners = new Set<() => void>();
  * fallback for having never chosen -- an unconfigured browser on a
  * light-mode OS should not silently show the light theme. */
 function readStoredTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  // localStorage.getItem throws (SecurityError) when site data is blocked
+  // (third-party iframe contexts, a user's storage-blocking browser
+  // setting, ...) -- there is no ErrorBoundary above this hook's consumers,
+  // so an uncaught throw here white-screens the very first render (L15
+  // review fix). Falls back to this app's own unconfigured-browser default
+  // ("dark", same as the branch below) rather than propagating.
+  let stored: string | null;
+  try {
+    stored = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return "dark";
+  }
   return stored === "light" || stored === "system" ? stored : "dark";
 }
 
@@ -44,7 +55,17 @@ function subscribe(onStoreChange: () => void): () => void {
 }
 
 function setTheme(next: Theme): void {
-  localStorage.setItem(STORAGE_KEY, next);
+  // Same guard as readStoredTheme's own (L15): a blocked/full localStorage
+  // throws on write too. Swallowed as a no-op -- the theme still applies
+  // to <html> for this tab and this session, it just won't survive a
+  // reload, which is strictly better than the setTheme call itself
+  // throwing and leaving the UI that called it (ThemeToggle's onClick,
+  // Settings' Appearance section) in a broken state.
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    // no-op -- see comment above.
+  }
   applyTheme(next);
   listeners.forEach((listener) => listener());
 }

@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Designer } from "./Designer";
+import { GlobalTrayDrawer } from "../components/GlobalTrayDrawer";
 import { useDesignerStore } from "../stores/designer";
 import { useTrayStore } from "../stores/tray";
 import { renderWithProviders } from "../test/utils";
@@ -39,8 +40,17 @@ describe("Designer + serialization -- Print button label and request body", () =
       }),
     );
 
-    renderWithProviders(<Designer />);
+    // GlobalTrayDrawer is mounted alongside Designer, the same way
+    // AppShell.tsx mounts it -- Print now lives inside its slide-over
+    // (components/TrayPanel.tsx), reachable via the header's "Tray" button.
+    renderWithProviders(
+      <>
+        <Designer />
+        <GlobalTrayDrawer />
+      </>,
+    );
     await typeLineWithToken(user);
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
 
     // task 2.12: the empty-tray plain path now reads "Print 1 label" (an
     // explicit count) rather than a bare "Print".
@@ -62,8 +72,14 @@ describe("Designer + serialization -- Print button label and request body", () =
       }),
     );
 
-    renderWithProviders(<Designer />);
+    renderWithProviders(
+      <>
+        <Designer />
+        <GlobalTrayDrawer />
+      </>,
+    );
     await typeLineWithToken(user);
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
 
     await user.click(await screen.findByRole("switch", { name: "On" }));
     const count = await screen.findByLabelText("Count");
@@ -83,8 +99,14 @@ describe("Designer + serialization -- Print button label and request body", () =
 describe("Designer + serialization -- over-cap blocks print", () => {
   it("a total over 1000 disables the Print CTA and shows the server's message inline", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Designer />);
+    renderWithProviders(
+      <>
+        <Designer />
+        <GlobalTrayDrawer />
+      </>,
+    );
     await typeLineWithToken(user);
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
 
     await user.click(await screen.findByRole("switch", { name: "On" }));
     const count = await screen.findByLabelText("Count");

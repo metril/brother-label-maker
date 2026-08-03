@@ -43,7 +43,16 @@ export function useChainedPreview(
   open: boolean,
 ): UseChainedPreviewResult {
   const enabled = open && isRenderable(labels);
-  const bodyKey = JSON.stringify({ labels, options, serialization });
+  // Skip the JSON.stringify entirely while closed (L13 review fix): the
+  // drawer stays mounted (see ChainPreviewDrawer.tsx's own docstring) and
+  // subscribes to the live tray/current-design, so without this a closed
+  // drawer still re-stringifies its whole request body on every keystroke
+  // elsewhere in the app (e.g. the Design route) for a query that
+  // `enabled` above never even runs. The literal "closed" value is never
+  // compared against a real bodyKey -- `enabled` alone gates the fetch --
+  // it only needs to be constant so toggling `open` closed doesn't itself
+  // look like a query-key change.
+  const bodyKey = open ? JSON.stringify({ labels, options, serialization }) : "closed";
 
   const query = useQuery({
     queryKey: ["print-preview", bodyKey],

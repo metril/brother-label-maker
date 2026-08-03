@@ -2,6 +2,7 @@ import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { usePrintJob } from "../hooks/usePrintJob";
 import { useTrayPreviews } from "../hooks/useTrayPreviews";
 import { useChainPreviewStore } from "../stores/chainPreview";
+import type { CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
 import { PrintButton } from "./PrintButton";
@@ -10,43 +11,15 @@ import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { Switch } from "./ui/Switch";
 import { dashedAddButtonClass, eyebrow, helpText } from "./ui/styles";
-import type { LabelDefinition, PrintOptions, Sequence } from "../api/types";
+import type { LabelDefinition, PrintOptions } from "../api/types";
 
-/** The "current, unsaved design" half of what the tray can print -- built by
- * pages/Designer.tsx (which owns the schema/params/preview this is derived
- * from) and handed down as one bundle rather than half a dozen loose props.
- * `null` away from the Designer page (components/GlobalTrayDrawer.tsx) --
- * there is no such design to fall back to or add from on any other route,
- * see TrayPanelProps' own doc. */
-export interface CurrentDesign {
-  definition: LabelDefinition;
-  /** Strict "safe to submit THIS right now" gate -- content present, every
-   * number field in bounds, and (if serialization is on) the run confirmed
-   * printable. Mirrors what Designer.tsx used to compute as its own
-   * `jobTrayCanSubmit` pre-2.12. */
-  canSubmit: boolean;
-  /** The debounce-safe predicate (schema/renderable.ts + numberValidity.ts)
-   * applied to a single definition -- used to gate usePrintEstimate's
-   * network call the same "match the debounced value, not the live one"
-   * way usePreview.ts already does (see that hook's own docstring). */
-  isRenderable: (definition: LabelDefinition) => boolean;
-  png: string | null;
-  lengthMm: number | null;
-  /** "Type + first text line" -- what a tray item added FROM this design
-   * would be captioned (lib/tray.ts's describeCurrentDesign). */
-  label: string;
-  serializationEnabled: boolean;
-  /** The confirmed serialization spec, or null (off, or not yet confirmed
-   * printable) -- see Designer.tsx's own `activeSerialization`. */
-  serialization: Sequence | null;
-  totalLabels: number | null;
-  /** True while the Serialize panel (components/SequenceEditor.tsx) is
-   * ALREADY showing its own error for the current settled sequence (e.g. a
-   * total-labels-over-1000 422) -- carry-forward fix: lets the tray's
-   * estimate panel defer to that instead of re-printing the identical raw
-   * server message a second time (see the estimate-error branch below). */
-  serializationHasVisibleError: boolean;
-}
+// Re-exported for compat: every existing import site/test wrote
+// `import { TrayPanel, type CurrentDesign } from "./TrayPanel"` back when
+// this file owned the type directly -- it now lives in
+// stores/currentDesign.ts (stores must not import from components, and
+// components/GlobalTrayDrawer.tsx needs it too), so this is the ONE place
+// every consumer of the type keeps importing it from without a churn edit.
+export type { CurrentDesign };
 
 interface TrayPanelProps {
   current: CurrentDesign | null;
@@ -321,7 +294,7 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
         aria-haspopup="dialog"
         className="self-start rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 text-[13px] font-medium text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        Preview chain
+        Preview
       </button>
 
       {/* The block message renders exactly ONCE, inside PrintButton itself

@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Designer } from "./Designer";
+import { GlobalTrayDrawer } from "../components/GlobalTrayDrawer";
 import { useDesignerStore } from "../stores/designer";
 import { useTrayStore } from "../stores/tray";
 import { buildDefaultParams } from "../schema/defaults";
@@ -121,41 +122,41 @@ describe("Designer tape-mismatch banner (I1)", () => {
   });
 });
 
-// task 2.12: the Job tray's mobile presentation moved from an in-flow panel
-// (task 2.11's own "order-1 before the form" reorder trick) to a `position:
-// fixed` bottom bar/sheet -- it can no longer push the parametric form down
-// the page or require scrolling past it, on ANY viewport, since it never
-// occupies flow space in the first place. Asserted via a class contract
-// (fixed/bottom-0/lg:hidden) and DOM containment, not real computed
-// layout/pixel positions -- jsdom doesn't apply Tailwind's actual responsive
-// CSS the way a real browser does (see JobTray.tsx's own docstring), so a
-// getBoundingClientRect-based "above the fold" check would be meaningless
-// here regardless of viewport.
-describe("Designer -- mobile layout (task 2.12)", () => {
-  it("the tray's mobile bar/sheet is out of normal document flow, and the first form input is not nested inside it", async () => {
+// The Designer page no longer renders any tray UI of its own -- it shares
+// components/GlobalTrayDrawer.tsx (header button + slide-over) with every
+// other route now (see that component's own docstring and
+// stores/currentDesign.ts). Pins the one-tray-path: no leftover JobTray
+// testids, and no second "Print" affordance hiding somewhere in Designer's
+// own tree.
+describe("Designer -- no inline tray UI (tray unified into GlobalTrayDrawer)", () => {
+  it("renders no job-tray UI of its own", async () => {
     renderWithProviders(<Designer />);
 
-    const firstInput = await screen.findByLabelText("Lines 1");
-    const mobileBar = screen.getByTestId("job-tray-mobile-bar");
-    const panel = screen.getByTestId("job-tray-panel");
-
-    expect(mobileBar.className).toContain("fixed");
-    expect(mobileBar.className).toContain("bottom-0");
-    expect(mobileBar.className).toContain("lg:hidden");
-    expect(panel.className).toContain("fixed");
-
-    expect(panel.contains(firstInput)).toBe(false);
-    expect(mobileBar.contains(firstInput)).toBe(false);
+    await screen.findByLabelText("Lines 1");
+    expect(screen.queryByTestId("job-tray-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("job-tray-mobile-bar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Print/ })).not.toBeInTheDocument();
   });
 });
 
-describe("Designer -- Add to tray (task 2.12)", () => {
+describe("Designer -- Add to tray (via GlobalTrayDrawer, current-design mirror)", () => {
   it("snapshots the current design as a DEEP COPY -- editing the form afterward never retroactively changes the queued item", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Designer />);
+    // GlobalTrayDrawer is mounted alongside Designer here the same way
+    // AppShell.tsx mounts it (a sibling, not a Designer child) -- Designer
+    // only feeds it stores/currentDesign.ts's mirror now, it doesn't render
+    // any tray UI of its own (see the describe block above).
+    renderWithProviders(
+      <>
+        <Designer />
+        <GlobalTrayDrawer />
+      </>,
+    );
 
     const lines1 = await screen.findByLabelText("Lines 1");
     await user.type(lines1, "UPLINK-A");
+
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
 
     const addButton = await screen.findByRole("button", { name: "+ Add to tray" });
     await waitFor(() => expect(addButton).not.toBeDisabled());

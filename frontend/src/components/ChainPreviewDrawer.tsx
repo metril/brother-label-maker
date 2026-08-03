@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { pngDataUrl } from "../api/client";
 import { useChainedPreview } from "../hooks/useChainedPreview";
+import { useTapes } from "../hooks/useTapes";
 import { useChainPreviewStore } from "../stores/chainPreview";
+import { useCurrentDesignStore } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
-import { DEFAULT_PX_PER_MM } from "../lib/feedDeckGeometry";
+import { computeFeedDeckGeometry, DEFAULT_PX_PER_MM } from "../lib/feedDeckGeometry";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { errorText, eyebrow, helpText, iconButtonClass } from "./ui/styles";
@@ -42,11 +44,11 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
  * the way the old dialog's `labels`/`options`/`serialization`/`isRenderable`
  * were. The one exception: the Designer page's "current, unsaved design"
  * lives only in Designer's render state, so pages/Designer.tsx mirrors it
- * into stores/chainPreview.ts (`currentDesign`, cleared on unmount) and an
- * EMPTY tray falls back to previewing that single design -- the exact
- * fallback TrayPanel's own bodyLabels/bodySerialization give the estimate
- * and Print button, serialization included. Off the Design route the
- * mirror is null and an empty tray shows "Nothing to preview".
+ * into stores/currentDesign.ts (cleared on unmount) and an EMPTY tray falls
+ * back to previewing that single design -- the exact fallback TrayPanel's
+ * own bodyLabels/bodySerialization give the estimate and Print button,
+ * serialization included. Off the Design route the mirror is null and an
+ * empty tray shows "Nothing to preview".
  *
  * Open/close is stores/chainPreview.ts's `open` (shared with every
  * TrayPanel instance), not hooks/useDialogController.ts -- that hook owns
@@ -69,12 +71,16 @@ export function ChainPreviewDrawer() {
   const open = useChainPreviewStore((s) => s.open);
   const closeDrawer = useChainPreviewStore((s) => s.closeDrawer);
   // Designer's mirrored "current, unsaved design" -- the empty-tray
-  // fallback (see this file's docstring and stores/chainPreview.ts).
-  const currentDesign = useChainPreviewStore((s) => s.currentDesign);
+  // fallback (see this file's docstring and stores/currentDesign.ts).
+  const currentDesign = useCurrentDesignStore((s) => s.current);
 
   const items = useTrayStore((s) => s.items);
   const trayChainMode = useTrayStore((s) => s.chainMode);
   const autoCut = useTrayStore((s) => s.autoCut);
+  // /api/tapes' full geometry catalog -- needed below (M10) to size the
+  // strip off the tape's PRINT height, not its nominal width. Same source
+  // Designer.tsx's own FeedDeck usage reads.
+  const { data: tapes } = useTapes();
 
   const [mode, setMode] = useState<ChainMode>(trayChainMode);
   // DEFAULT_PX_PER_MM (4) as the drawer's opening zoom level -- reusing the
@@ -139,6 +145,12 @@ export function ChainPreviewDrawer() {
   // router_print.py's _validate_and_measure) -- the nominal tape width is
   // therefore the same read off any one of them.
   const tapeWidthMm = labels[0]?.tape.width_mm ?? 0;
+  // /api/tapes' matching row (nominal_mm+family exact match, same lookup
+  // Designer.tsx does for FeedDeck's own tapeInfo prop) -- gives print_mm,
+  // which LabelDefinition.tape itself doesn't carry (only width_mm/family).
+  // null for the brief window before /api/tapes resolves (staleTime:
+  // Infinity, so effectively once per session).
+  const tapeInfo = tapes?.find((t) => t.family === labels[0]?.tape.family && t.nominal_mm === tapeWidthMm) ?? null;
   const lastSegment = preview && preview.segments.length > 0 ? preview.segments[preview.segments.length - 1]! : null;
   // UNIT TRAP (see ChainedPreviewResponse's own doc): the composite PNG's
   // own drawn content ends at the LAST segment's end_mm, NOT at
@@ -147,8 +159,18 @@ export function ChainPreviewDrawer() {
   // painted into the image, so sizing the strip from it would stretch the
   // image past its own real content.
   const contentWidthMm = lastSegment?.end_mm ?? 0;
-  const stripWidthPx = contentWidthMm * pxPerMm;
-  const stripHeightPx = tapeWidthMm * pxPerMm;
+  // Reuse feedDeckGeometry's own printMm-based math (M10 review fix)
+  // instead of a second, independently-derived height rule: the composite
+  // PNG is drawn print_dots tall -- the PRINTABLE band (~18.1mm on 24mm
+  // tape), not the tape's full nominal width -- so sizing the strip off
+  // nominal (as this used to) stretched the image ~1.33x vertically vs.
+  // FeedDeck's own (correct) strip. `minFeedMm: 0` is a throwaway: this
+  // drawer has no feed-waste indicator, only `printableHeightPx` below is
+  // read off the result. Falls back to the nominal width for printMm while
+  // `tapeInfo` is still null (the brief pre-/api/tapes window above).
+  const geo = computeFeedDeckGeometry(contentWidthMm, tapeWidthMm, tapeInfo?.print_mm ?? tapeWidthMm, 0, pxPerMm);
+  const stripWidthPx = geo.stripWidthPx;
+  const stripHeightPx = geo.printableHeightPx;
 
   const renderable = isRenderable(labels);
 
@@ -188,7 +210,12 @@ export function ChainPreviewDrawer() {
           </div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] text-deck-400">Zoom</span>
-            <SegmentedControl ariaLabel="Preview zoom" options={ZOOM_OPTIONS} value={zoom} onChange={setZoom} />
+            {/* "Chain preview zoom", not "Preview zoom" (L14 review fix) --
+                Designer.tsx's own zoom control shares that exact name, and
+                both can legitimately be mounted at once (this drawer opens
+                from the Design route too), which would otherwise give two
+                same-named radiogroups on one page. */}
+            <SegmentedControl ariaLabel="Chain preview zoom" options={ZOOM_OPTIONS} value={zoom} onChange={setZoom} />
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useTheme } from "./useTheme";
 
@@ -42,5 +42,30 @@ describe("useTheme", () => {
 
     expect(a.result.current.theme).toBe("light");
     expect(b.result.current.theme).toBe("light");
+  });
+
+  describe("localStorage guarded against throwing (L15 -- blocked site data throws SecurityError, no ErrorBoundary above this hook)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("falls back to \"dark\" instead of propagating when localStorage.getItem throws", () => {
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new DOMException("blocked", "SecurityError");
+      });
+
+      const { result } = renderHook(() => useTheme());
+      expect(result.current.theme).toBe("dark");
+    });
+
+    it("setTheme swallows a throwing localStorage.setItem instead of propagating -- <html data-theme> still updates for this tab", () => {
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new DOMException("blocked", "SecurityError");
+      });
+
+      const { result } = renderHook(() => useTheme());
+      expect(() => act(() => result.current.setTheme("light"))).not.toThrow();
+      expect(document.documentElement.dataset.theme).toBe("light");
+    });
   });
 });

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { HighlightContext } from "../components/schema/HighlightContext";
 import { SchemaForm } from "../components/schema/SchemaForm";
 import { FeedDeck } from "../components/FeedDeck";
-import { JobTray, type CurrentDesign } from "../components/JobTray";
 import { SavePresetDialog } from "../components/SavePresetDialog";
 import { SequenceEditor } from "../components/SequenceEditor";
 import { TapeSelector } from "../components/TapeSelector";
@@ -20,33 +19,38 @@ import { hasSequenceFieldError, sequenceTotalLabels } from "../lib/sequence";
 import { hasNumberOutOfRange } from "../schema/numberValidity";
 import { hasRenderableContent } from "../schema/renderable";
 import { buildDefinition, tapeMismatchWarning, useDesignerStore } from "../stores/designer";
-import { useChainPreviewStore, type CurrentDesignMirror } from "../stores/chainPreview";
-import { useTrayStore } from "../stores/tray";
+import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import type { LabelDefinition } from "../api/types";
 
 const HIGHLIGHT_MS = 2000;
 
-/** Mirrors the current, unsaved design into stores/chainPreview.ts so the
- * AppShell-mounted ChainPreviewDrawer can fall back to it on an empty tray
- * -- the same fallback TrayPanel's own bodyLabels/bodySerialization give
- * the estimate and Print button. A child component (rendered from
- * Designer's success branch, so its hooks never sit below Designer's own
- * early returns) rather than inline hooks; cleared on unmount, because off
- * this page there IS no current design. The mirror object is rebuilt every
- * Designer render (fresh definition identity), so a JSON key guard (same
- * convention as TrayPanel's bodyKey) keeps redundant store writes -- and
- * re-renders of the always-mounted drawer -- from firing per keystroke. */
-function CurrentDesignMirrorEffect({ design }: { design: CurrentDesignMirror }) {
-  const setCurrentDesign = useChainPreviewStore((s) => s.setCurrentDesign);
+/** Mirrors the current, unsaved design into stores/currentDesign.ts so
+ * every other tray surface -- components/GlobalTrayDrawer.tsx (now the
+ * ONE tray UI, including on "/") and the AppShell-mounted
+ * components/ChainPreviewDrawer.tsx (its own empty-tray fallback) -- can
+ * read it from outside Designer's own subtree. A child component (rendered
+ * from Designer's success branch, so its hooks never sit below Designer's
+ * own early returns) rather than inline hooks; cleared on unmount, because
+ * off this page there IS no current design. The mirror object is rebuilt
+ * every Designer render (fresh definition/isRenderable identity), so a
+ * JSON key guard (same convention as TrayPanel's bodyKey) keeps redundant
+ * store writes -- and re-renders of every always-mounted consumer -- from
+ * firing per keystroke. `isRenderable` (a function) is deliberately left
+ * OUT of that JSON key -- JSON.stringify drops functions silently anyway,
+ * and its behavior always co-varies with `definition`/`schema` (both of
+ * which DO change the key), so a stale closure never survives a change
+ * that would have altered what it returns. */
+function CurrentDesignMirrorEffect({ design }: { design: CurrentDesign }) {
+  const setCurrent = useCurrentDesignStore((s) => s.setCurrent);
   const keyRef = useRef<string | null>(null);
   useEffect(() => {
     const key = JSON.stringify(design);
     if (key !== keyRef.current) {
       keyRef.current = key;
-      setCurrentDesign(design);
+      setCurrent(design);
     }
   });
-  useEffect(() => () => setCurrentDesign(null), [setCurrentDesign]);
+  useEffect(() => () => setCurrent(null), [setCurrent]);
   return null;
 }
 
@@ -80,7 +84,6 @@ export function Designer() {
   const setParams = useDesignerStore((s) => s.setParams);
   const serializationEnabled = useDesignerStore((s) => s.serializationEnabled);
   const sequence = useDesignerStore((s) => s.sequence);
-  const addTrayItem = useTrayStore((s) => s.addItem);
 
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -244,9 +247,14 @@ export function Designer() {
     );
   }
 
-  // task 2.12: the "current, unsaved design" half of what the Job tray can
-  // print (see components/JobTray.tsx's own CurrentDesign doc) -- built
-  // here since this page owns the schema/params/preview it's derived from.
+  // the "current, unsaved design" half of what the tray can print (see
+  // stores/currentDesign.ts's own CurrentDesign doc) -- built here since
+  // this page owns the schema/params/preview it's derived from, then
+  // mirrored into that store below (CurrentDesignMirrorEffect) for
+  // components/GlobalTrayDrawer.tsx and components/ChainPreviewDrawer.tsx
+  // to read from outside this page's own subtree. "+ Add to tray" itself
+  // now lives in GlobalTrayDrawer (the snapshot logic moved there verbatim
+  // -- see that component's own `handleAddToTray`).
   const currentDesign: CurrentDesign = {
     definition,
     canSubmit: jobTrayCanSubmit,
@@ -260,18 +268,8 @@ export function Designer() {
     serializationHasVisibleError: sequenceExpand.error !== null,
   };
 
-  function handleAddToTray() {
-    if (!currentDesign.canSubmit) return;
-    addTrayItem({
-      definition: structuredClone(currentDesign.definition),
-      png: currentDesign.png,
-      lengthMm: currentDesign.lengthMm,
-      label: currentDesign.label,
-    });
-  }
-
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 pb-24 lg:pb-0">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <section className={panel}>
         <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
           <h2 className={typeHeading}>{typeInfo.title}</h2>
@@ -283,12 +281,13 @@ export function Designer() {
             }}
           />
         </div>
-        {/* The ONE place this warning shows -- see JobTray/Designer's own
-            history for why a second copy next to Print was removed: the
+        {/* The ONE place this warning shows -- see Designer's own history
+            for why a second copy next to Print was removed: the
             role="alert" here is announced immediately regardless, and the
-            Job tray (task 2.12: a sticky sidebar at lg:, a fixed bottom
-            bar/sheet below that) is reachable from every viewport without
-            needing a second copy. */}
+            tray (components/GlobalTrayDrawer.tsx, reachable from the
+            header on every route including this one) is a slide-over, not
+            in-flow content next to Print, so there's no natural "second
+            spot" for it to live either. */}
         {tapeWarning && (
           <div role="alert" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-300">
             {tapeWarning}
@@ -329,39 +328,32 @@ export function Designer() {
         />
       </section>
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        {/* JobTray (task 2.12) owns its OWN full responsive shell now --
-            a sticky sidebar here at lg: and above, and a `position: fixed`
-            bottom bar/sheet below that (out of normal document flow, so it
-            no longer needs the old mobile reorder trick to keep the form
-            reachable without scrolling past it -- see that component's own
-            docstring). */}
-        <section className={`${panel} min-w-0 flex-1`}>
-          <h2 className={panelHeading}>Parameters</h2>
-          <HighlightContext.Provider value={highlightId}>
-            <SchemaForm
-              labelType={selectedType}
-              schema={schema}
-              params={params}
-              onChange={(next) => setParams(selectedType, next)}
-            />
-          </HighlightContext.Provider>
-        </section>
+      {/* The Job tray itself no longer renders inline here -- the Designer
+          page shares components/GlobalTrayDrawer.tsx (header button +
+          slide-over) with every other route now, rather than owning its
+          own sticky-sidebar/mobile-sheet shell. Parameters is therefore a
+          normal full-width panel, same as the deck/Serialize panels above
+          and below it, not one half of a two-column row. */}
+      <section className={panel}>
+        <h2 className={panelHeading}>Parameters</h2>
+        <HighlightContext.Provider value={highlightId}>
+          <SchemaForm
+            labelType={selectedType}
+            schema={schema}
+            params={params}
+            onChange={(next) => setParams(selectedType, next)}
+          />
+        </HighlightContext.Provider>
+      </section>
 
-        <CurrentDesignMirrorEffect
-          design={{
-            definition: currentDesign.definition,
-            serialization: currentDesign.serialization,
-            canSubmit: currentDesign.canSubmit,
-          }}
-        />
-        <JobTray current={currentDesign} onAddToTray={handleAddToTray} />
-      </div>
+      {/* Mirrors `currentDesign` into stores/currentDesign.ts -- see that
+          effect's own docstring above -- so GlobalTrayDrawer/
+          ChainPreviewDrawer can read it from the header, well outside this
+          component's own subtree. Renders nothing itself. */}
+      <CurrentDesignMirrorEffect design={currentDesign} />
 
-      {/* task 2.13: "Save current design as preset", placed directly below
-          the tray it saves a snapshot of (the brief's own "near the tray")
-          -- full-width so it reads clearly on every viewport rather than
-          only living inside the desktop sidebar column. */}
+      {/* "Save current design as preset" -- full-width so it reads clearly
+          on every viewport. */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-deck-800 bg-deck-900/40 px-4 py-3">
         <p className="text-[13px] text-deck-400">Like this design? Save it to reuse later without rebuilding it.</p>
         <SavePresetDialog
@@ -373,9 +365,9 @@ export function Designer() {
         />
       </div>
 
-      {/* task 2.11: a third, full-width panel BELOW the parameters-form/
-          job-tray row -- see components/SequenceEditor.tsx's own docstring
-          for why here rather than nested in either column above. */}
+      {/* A third, full-width panel below Parameters -- see
+          components/SequenceEditor.tsx's own docstring for why here rather
+          than nested inside the Parameters panel above. */}
       <section className={panel}>
         <SequenceEditor />
       </section>

@@ -27,7 +27,17 @@ const LABEL_TYPES = labelTypesFixture as unknown as FixtureType[];
 // regeneration (more types, fewer types) doesn't need this file touched.
 describe("SchemaForm renders every real label type without crashing", () => {
   it(`all ${LABEL_TYPES.length} types (default params, straight from their own schema) render without throwing`, () => {
-    expect(LABEL_TYPES.length).toBeGreaterThan(0);
+    // Exact set, not just a non-empty count (L17 review fix --
+    // toBeGreaterThan(0) catches nothing: a fixture that silently dropped
+    // half the types would still pass it). Mirrors backend/tests/
+    // test_cable_types.py's own test_api_lists_eleven_types list verbatim.
+    expect(new Set(LABEL_TYPES.map((t) => t.type))).toEqual(
+      new Set([
+        "text", "barcode", "patch_panel", "punch_down", "faceplate",
+        "cable_wrap", "cable_flag", "terminal_block", "breaker_box",
+        "homebox_asset", "homebox_location",
+      ]),
+    );
 
     for (const labelType of LABEL_TYPES) {
       const params = buildDefaultParams(labelType.params_schema);

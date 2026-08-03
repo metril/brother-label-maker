@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
+import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
@@ -13,10 +14,27 @@ const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
+  useCurrentDesignStore.setState({ current: null });
 });
 
 function def(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
+}
+
+function currentDesign(overrides: Partial<CurrentDesign> = {}): CurrentDesign {
+  return {
+    definition: def("CURRENT"),
+    canSubmit: true,
+    isRenderable: () => true,
+    png: null,
+    lengthMm: 25.4,
+    label: "Text — CURRENT",
+    serializationEnabled: false,
+    serialization: null,
+    totalLabels: null,
+    serializationHasVisibleError: false,
+    ...overrides,
+  };
 }
 
 function estimateBody(overrides: Partial<PrintEstimateResponse> = {}): PrintEstimateResponse {
@@ -135,5 +153,129 @@ describe("GlobalTrayDrawer -- tray item previews (useTrayPreviews)", () => {
     );
     // previewHandler's own fixture length_mm (test/msw/handlers.ts).
     expect(screen.getByText("25.4 mm")).toBeInTheDocument();
+  });
+});
+
+// The describe blocks below moved here (adapted from the Designer-only
+// `current` prop to stores/currentDesign.ts, the SAME store
+// pages/Designer.tsx now writes) from the now-deleted
+// components/JobTray.test.tsx, as part of unifying the Designer page's own
+// tray into this component -- GlobalTrayDrawer is now the ONE place a
+// "current, unsaved design" (only ever non-null on the Design route) can
+// power an empty-tray print fallback and "+ Add to tray".
+describe("GlobalTrayDrawer -- current design (Design route)", () => {
+  it('shows the empty-state prompt and "Print 1 label" for the current design when the tray is empty', async () => {
+    useCurrentDesignStore.setState({ current: currentDesign() });
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalTrayDrawer />);
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
+
+    expect(await screen.findByText(/Nothing queued\. Design a label and add it to print several at once\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Print 1 label" })).toBeInTheDocument();
+  });
+
+  it("empty tray: Print POSTs a body whose `labels` is just the current design", async () => {
+    useCurrentDesignStore.setState({ current: currentDesign() });
+    const user = userEvent.setup();
+    let capturedBody: { labels: LabelDefinition[] } | undefined;
+    server.use(
+      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/print", async ({ request }) => {
+        capturedBody = (await request.json()) as typeof capturedBody;
+        return HttpResponse.json({ job_id: "job-1" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<GlobalTrayDrawer />);
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
+    const printButton = await screen.findByRole("button", { name: "Print 1 label" });
+    await user.click(printButton);
+
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody?.labels).toEqual([def("CURRENT")]);
+  });
+
+  it("non-empty tray: Print POSTs the tray's own items, NOT the current design", async () => {
+    useCurrentDesignStore.setState({ current: currentDesign() });
+    seedTrayItems(2);
+    const user = userEvent.setup();
+    let capturedBody: { labels: LabelDefinition[] } | undefined;
+    server.use(
+      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
+      http.post("/api/print", async ({ request }) => {
+        capturedBody = (await request.json()) as typeof capturedBody;
+        return HttpResponse.json({ job_id: "job-2" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<GlobalTrayDrawer />);
+    await user.click(await screen.findByRole("button", { name: /^Tray · 2/ }));
+    const printButton = await screen.findByRole("button", { name: "Print 2 labels (tray)" });
+    await user.click(printButton);
+
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody?.labels).toEqual([def("ITEM-0"), def("ITEM-1")]);
+  });
+
+  it("serialization on + a non-empty tray blocks Print with a clear message instead of ever POSTing", async () => {
+    useCurrentDesignStore.setState({
+      current: currentDesign({ serializationEnabled: true, serialization: { kind: "numeric", count: 5 }, totalLabels: 5 }),
+    });
+    seedTrayItems(1);
+    const user = userEvent.setup();
+    const printSpy = vi.fn();
+    server.use(
+      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/print", () => {
+        printSpy();
+        return HttpResponse.json({ job_id: "job-x" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<GlobalTrayDrawer />);
+    await user.click(await screen.findByRole("button", { name: /^Tray · 1/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/can't be combined/);
+    const printButton = screen.getByRole("button", { name: "Print 1 label (tray)" });
+    expect(printButton).toBeDisabled();
+
+    await user.click(printButton);
+    expect(printSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("GlobalTrayDrawer -- adding from the current design, and item controls", () => {
+  it("+ Add to tray adds a DEEP-COPIED snapshot to the real store, and up/duplicate/remove work through it", async () => {
+    useCurrentDesignStore.setState({ current: currentDesign() });
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalTrayDrawer />);
+    await user.click(await screen.findByRole("button", { name: "Tray" }));
+
+    await user.click(await screen.findByRole("button", { name: "+ Add to tray" }));
+    expect(await screen.findByText("Text — CURRENT")).toBeInTheDocument();
+    expect(useTrayStore.getState().items).toHaveLength(1);
+
+    // Deep copy, not a live reference: mutating the queued item's
+    // definition must never retroactively change the current-design
+    // store's own copy (or vice versa) -- the exact regression the old
+    // pages/Designer.tsx snapshot logic (structuredClone) guarded against,
+    // now moved into this component's own `handleAddToTray`.
+    const queuedDefinition = useTrayStore.getState().items[0]!.definition;
+    expect(queuedDefinition).toEqual(def("CURRENT"));
+    expect(queuedDefinition).not.toBe(useCurrentDesignStore.getState().current!.definition);
+
+    await user.click(await screen.findByRole("button", { name: "+ Add to tray" }));
+    expect(useTrayStore.getState().items).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Duplicate item 1" }));
+    expect(useTrayStore.getState().items).toHaveLength(3);
+
+    await user.click(screen.getByRole("button", { name: "Move item 2 up" }));
+    await user.click(screen.getByRole("button", { name: "Remove item 1" }));
+    expect(useTrayStore.getState().items).toHaveLength(2);
   });
 });

@@ -15,12 +15,22 @@
       // `data-theme` attribute off (letting index.css's own
       // prefers-color-scheme media query govern instead).
       (function () {
-        var stored = localStorage.getItem("lm-theme");
-        if (stored === "light") {
-          document.documentElement.dataset.theme = "light";
-        } else if (stored === "system") {
-          delete document.documentElement.dataset.theme;
-        } else {
+        // localStorage.getItem/setItem throw (SecurityError) when site
+        // data is blocked -- there's no React ErrorBoundary this early (the
+        // bundle hasn't even loaded yet), so an uncaught throw here
+        // white-screens before the very first paint. Mirrors
+        // src/hooks/useTheme.ts's own try/catch exactly (L15 review fix):
+        // fall back to "dark", this app's own unconfigured-browser default.
+        try {
+          var stored = localStorage.getItem("lm-theme");
+          if (stored === "light") {
+            document.documentElement.dataset.theme = "light";
+          } else if (stored === "system") {
+            delete document.documentElement.dataset.theme;
+          } else {
+            document.documentElement.dataset.theme = "dark";
+          }
+        } catch (e) {
           document.documentElement.dataset.theme = "dark";
         }
       })();
