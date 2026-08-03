@@ -155,6 +155,9 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * route now), and it must be mounted OUTSIDE GlobalTrayDrawer's own
  * translated slide-over wrapper -- see that component's own docstring for
  * why a body portal (ui/Dialog.tsx's own approach) isn't used instead.
+ * Dockable-preview feature: it's mounted as the LAST child of the content
+ * row below (not a sibling of that row the way it used to be) -- see the
+ * inline comment at that mount point for why.
  *
  * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
@@ -243,15 +246,28 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex flex-1 flex-col lg:flex-row lg:items-stretch">
         {isDesignRoute && <TypeRail />}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
-      </div>
 
-      {/* Mounted here -- a direct child of this component's own top-level
-          div, not nested inside `children`/GlobalTrayDrawer -- specifically
-          so it sits outside GlobalTrayDrawer's own translated wrapper. See
-          ChainPreviewDrawer's own docstring, and this component's own doc
-          above. On EVERY route, same as GlobalTrayDrawer above (no
-          `isDesignRoute` gate on either). */}
-      <ChainPreviewDrawer />
+        {/* LAST child of the content row (dockable-preview feature) -- a
+            direct child of this row, not nested inside `children`/
+            GlobalTrayDrawer, and not a SIBLING of the row the way it used
+            to be either. Being the row's own last flex item is what lets
+            docked mode (ChainPreviewDrawer's own `xl:static ...` class
+            contract) render as a real in-flow right-hand column beside
+            `<main>` -- the row's `items-stretch` makes it fill the same
+            height. Containing-block check for undocked (overlay) mode's
+            `position: fixed`: this row carries no transform/filter/
+            backdrop-filter/contain of its own, and neither does anything
+            between it and the app root (this component's own top-level
+            div, then straight through JobEventsProvider/BrowserRouter/
+            QueryClientProvider in App.tsx, none of which render a DOM
+            wrapper at all) -- so `fixed` still resolves against the
+            viewport here exactly as it did at the old mount point (see
+            ChainPreviewDrawer's own docstring for why that ancestor check
+            matters -- the JobTray translate trap this project hit before).
+            On EVERY route, same as GlobalTrayDrawer above (no
+            `isDesignRoute` gate on either). */}
+        <ChainPreviewDrawer />
+      </div>
     </div>
   );
 }

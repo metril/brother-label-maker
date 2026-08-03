@@ -66,10 +66,36 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
  * `labels` on every render, which changes useChainedPreview's own query
  * key and live-refetches the preview -- exactly the same "in-flight state
  * survives" property GlobalTrayDrawer's own docstring describes, just for
- * a query instead of a WS-tracked print job. */
+ * a query instead of a WS-tracked print job.
+ *
+ * Dockable-preview feature: `docked` (stores/chainPreview.ts, persisted)
+ * switches this SAME panel between that fixed-overlay behavior (unchanged
+ * above) and a real in-flow right-hand column -- AppShell.tsx now mounts
+ * this component as the LAST child of its content row specifically so a
+ * docked panel has somewhere to sit in normal flow, beside `<main>`. Only
+ * the panel's own classes/attributes switch (a single DOM node, no
+ * conditional unmount) -- `docked`/`open` are both ordinary component
+ * state, not viewport-dependent, so THOSE branches are plain JS
+ * conditionals; only the actual per-breakpoint sizing stays Tailwind
+ * `xl:`-prefixed classes (jsdom can't evaluate media queries, so any
+ * viewport-dependent behavior has to stay class-based to be testable at
+ * all -- the same rule this app's other responsive panels, e.g.
+ * symbols/SymbolBrowser.tsx's own sidebar switch, already follow). Docked
+ * mode swaps dialog semantics for a landmark (`role="complementary"`, no
+ * `aria-modal`), drops the backdrop scrim entirely, and skips the
+ * focus-steal/Escape-close/trigger-restore contract below (see the
+ * dedicated effect for why `docked` sits in ITS OWN dependency array,
+ * separate from the mode-resync effect) -- none of that modal machinery
+ * belongs to an in-flow landmark a user can otherwise ignore. The close
+ * button still works in every mode; below `xl` a docked panel simply falls
+ * back to the same fixed-overlay positioning as undocked (just without the
+ * scrim/modality), so docking is never a no-op even on a narrow viewport
+ * that can't actually fit an in-flow column. */
 export function ChainPreviewDrawer() {
   const open = useChainPreviewStore((s) => s.open);
   const closeDrawer = useChainPreviewStore((s) => s.closeDrawer);
+  const docked = useChainPreviewStore((s) => s.docked);
+  const toggleDocked = useChainPreviewStore((s) => s.toggleDocked);
   // Designer's mirrored "current, unsaved design" -- the empty-tray
   // fallback (see this file's docstring and stores/currentDesign.ts).
   const currentDesign = useCurrentDesignStore((s) => s.current);
@@ -98,17 +124,34 @@ export function ChainPreviewDrawer() {
     triggerRef.current = null;
   }
 
-  // Re-seed `mode` from the tray's own chain mode, capture whatever
-  // triggered the open (`document.activeElement` at the moment `open`
-  // flips true -- nothing else moves focus between a trigger's own click
-  // handler and this effect running, so it's reliably still the clicked
-  // button here), move focus onto the close button, and wire Escape --
-  // ALL guarded on `open` alone (not `trayChainMode`), same "never clobber
-  // a tab the user already clicked mid-comparison" semantics the old
-  // ChainedPreviewDialog's own effect had.
+  // Re-seed `mode` from the tray's own chain mode whenever the drawer
+  // opens -- guarded on `open` alone (not `trayChainMode`), same "never
+  // clobber a tab the user already clicked mid-comparison" semantics the
+  // old ChainedPreviewDialog's own effect had. Split out from the
+  // focus/Escape effect below (dockable-preview feature) specifically so
+  // toggling `docked` mid-open can never re-run THIS effect and stomp a
+  // mode the user already picked.
   useEffect(() => {
     if (!open) return;
     setMode(trayChainMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Focus/Escape modal contract: capture whatever triggered the open
+  // (`document.activeElement` at the moment `open` flips true -- nothing
+  // else moves focus between a trigger's own click handler and this effect
+  // running, so it's reliably still the clicked button here), move focus
+  // onto the close button, and wire Escape. Skipped entirely while `docked`
+  // (dockable-preview feature): a docked panel is a landmark
+  // (`role="complementary"` below), not a modal dialog, so it must never
+  // steal focus off whatever the user's doing elsewhere on the page, or
+  // swallow their Escape key. `docked` deliberately sits in this effect's
+  // OWN dependency array (unlike the mode-resync effect above) -- toggling
+  // dock mid-open needs this effect to tear down (remove the Escape
+  // listener) the instant `docked` flips true, and re-arm itself if the
+  // user undocks again while still open.
+  useEffect(() => {
+    if (!open || docked) return;
     triggerRef.current = document.activeElement as HTMLElement | null;
     closeButtonRef.current?.focus();
     function onKeyDown(e: KeyboardEvent) {
@@ -117,7 +160,7 @@ export function ChainPreviewDrawer() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, docked]);
 
   // Same body-composition rule as TrayPanel: a non-empty tray previews the
   // tray's own items (never silently mixing in the current design); an
@@ -176,30 +219,61 @@ export function ChainPreviewDrawer() {
 
   return (
     <>
-      {open && <div aria-hidden onClick={close} className="fixed inset-0 z-40 bg-scrim/70" />}
+      {/* No scrim in docked mode (dockable-preview feature) -- a docked
+          panel is an in-flow landmark, not a modal overlay, so nothing
+          behind it should dim or click-to-close. */}
+      {open && !docked && <div aria-hidden onClick={close} className="fixed inset-0 z-40 bg-scrim/70" />}
 
       {/* Always mounted (visibility/translate-toggled below) -- see this
-          component's own docstring. */}
+          component's own docstring. Below `xl`, docked and undocked render
+          IDENTICALLY (same fixed/translate overlay classes, just without
+          the scrim/dialog semantics above/below when docked); the
+          `docked && open` class group only kicks in at `xl:` and up, where
+          it overrides position/translate/visibility back to an in-flow
+          column -- see this component's own docstring for the full
+          contract. `transition-transform` is dropped while `docked` so
+          that override never animates as a slide (there's nothing to slide
+          once the panel's back in normal flow). */}
       <div
         data-testid="chain-preview-drawer-panel"
-        role={open ? "dialog" : undefined}
-        aria-modal={open ? true : undefined}
-        aria-label={open ? "Chain preview" : undefined}
-        className={`fixed inset-y-0 right-0 z-50 flex w-[min(94vw,56rem)] flex-col gap-4 overflow-y-auto border-l border-deck-800 bg-deck-900 p-5 shadow-lg transition-transform duration-150 motion-reduce:transition-none ${
-          open ? "visible translate-x-0" : "invisible translate-x-full"
+        role={open ? (docked ? "complementary" : "dialog") : undefined}
+        aria-modal={open && !docked ? true : undefined}
+        aria-label={open ? "Print preview" : undefined}
+        className={`fixed inset-y-0 right-0 z-50 flex w-[min(94vw,56rem)] flex-col gap-4 overflow-y-auto border-l border-deck-800 bg-deck-900 p-5 shadow-lg ${
+          docked ? "" : "transition-transform duration-150 motion-reduce:transition-none"
+        } ${open ? "visible translate-x-0" : "invisible translate-x-full"} ${
+          docked && open
+            ? "xl:static xl:inset-auto xl:z-auto xl:translate-x-0 xl:visible xl:w-[26rem] xl:shrink-0 xl:border-l"
+            : ""
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className={eyebrow}>Chain preview</span>
-          <button
-            type="button"
-            ref={closeButtonRef}
-            onClick={close}
-            aria-label="Close chain preview"
-            className={iconButtonClass}
-          >
-            ×
-          </button>
+          <span className={eyebrow}>Print preview</span>
+          <div className="flex items-center gap-1.5">
+            {/* Dock/undock toggle (dockable-preview feature) -- house
+                icon-button styling (iconButtonClass, same as the close
+                button beside it), accessible name flips with the current
+                state rather than describing the click (same convention as
+                AppShell's own ThemeCycleButton). */}
+            <button
+              type="button"
+              onClick={toggleDocked}
+              aria-label={docked ? "Undock preview" : "Dock preview"}
+              title={docked ? "Undock preview" : "Dock preview"}
+              className={iconButtonClass}
+            >
+              <span aria-hidden="true">{docked ? "▣" : "▢"}</span>
+            </button>
+            <button
+              type="button"
+              ref={closeButtonRef}
+              onClick={close}
+              aria-label="Close chain preview"
+              className={iconButtonClass}
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -210,12 +284,12 @@ export function ChainPreviewDrawer() {
           </div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] text-deck-400">Zoom</span>
-            {/* "Chain preview zoom", not "Preview zoom" (L14 review fix) --
+            {/* "Print preview zoom", not "Preview zoom" (L14 review fix) --
                 Designer.tsx's own zoom control shares that exact name, and
                 both can legitimately be mounted at once (this drawer opens
                 from the Design route too), which would otherwise give two
                 same-named radiogroups on one page. */}
-            <SegmentedControl ariaLabel="Chain preview zoom" options={ZOOM_OPTIONS} value={zoom} onChange={setZoom} />
+            <SegmentedControl ariaLabel="Print preview zoom" options={ZOOM_OPTIONS} value={zoom} onChange={setZoom} />
           </div>
         </div>
 

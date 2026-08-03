@@ -13,10 +13,16 @@ import { server } from "../test/msw/server";
 import type { LabelDefinition } from "../api/types";
 
 const INITIAL_TRAY_STATE = useTrayStore.getState();
+const INITIAL_CHAIN_PREVIEW_STATE = useChainPreviewStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
-  useChainPreviewStore.setState({ open: false });
+  // Full reset (not just `open`) -- `docked` (dockable-preview feature) is
+  // persisted via zustand's own `persist` middleware, so a test that
+  // toggles it must not leak into the next one via the in-memory store
+  // singleton (test/setup.ts's own `localStorage.clear()` only covers the
+  // localStorage side of that, not this module's already-hydrated state).
+  useChainPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
   useCurrentDesignStore.setState({ current: null });
 });
 
@@ -71,7 +77,7 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
 
     const img = await within(drawer).findByAltText("Chained job preview");
     expect(img).toHaveAttribute("src", `data:image/png;base64,${TINY_PNG_B64}`);
@@ -111,7 +117,7 @@ describe("ChainPreviewDrawer", () => {
     const storeBefore = useTrayStore.getState().chainMode;
     renderWithProviders(<Harness />);
     await user.click(screen.getByRole("button", { name: "Open" }));
-    await screen.findByRole("dialog", { name: "Chain preview" });
+    await screen.findByRole("dialog", { name: "Print preview" });
 
     await waitFor(() => expect(capturedModes).toEqual(["cut_each"]));
 
@@ -127,11 +133,11 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
-    // "Chain preview zoom", not "Preview zoom" (L14 review fix) -- avoids
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    // "Print preview zoom", not "Preview zoom" (L14 review fix) -- avoids
     // colliding with Designer's own same-named zoom control when both are
     // mounted on the Design route at once.
-    expect(within(drawer).getByRole("radiogroup", { name: "Chain preview zoom" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("radiogroup", { name: "Print preview zoom" })).toBeInTheDocument();
     const img = await within(drawer).findByAltText("Chained job preview");
 
     await waitFor(() => expect(img.style.width).not.toBe(""));
@@ -147,7 +153,7 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
     const img = await within(drawer).findByAltText("Chained job preview");
 
     // The tray items' tape is 24mm/tze (see `def`); the tapes fixture's
@@ -164,10 +170,10 @@ describe("ChainPreviewDrawer", () => {
     const trigger = screen.getByRole("button", { name: "Open" });
 
     await user.click(trigger);
-    await screen.findByRole("dialog", { name: "Chain preview" });
+    await screen.findByRole("dialog", { name: "Print preview" });
 
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chain preview" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Print preview" })).not.toBeInTheDocument());
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
@@ -176,7 +182,7 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
     expect(within(drawer).getByText("Nothing to preview.")).toBeInTheDocument();
   });
 
@@ -217,7 +223,7 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
     await within(drawer).findByAltText("Chained job preview");
     expect(within(drawer).queryByText("Nothing to preview.")).not.toBeInTheDocument();
     expect(lastBody).not.toBeNull();
@@ -252,7 +258,7 @@ describe("ChainPreviewDrawer", () => {
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
     await user.click(screen.getByRole("button", { name: "Open" }));
-    await screen.findByRole("dialog", { name: "Chain preview" });
+    await screen.findByRole("dialog", { name: "Print preview" });
 
     await waitFor(() => expect(requestCount).toBe(1));
 
@@ -282,7 +288,7 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
     await within(drawer).findByAltText("Chained job preview");
 
     expect(within(drawer).getByRole("alert")).toHaveTextContent("label 1: text may be cramped at this tape width");
@@ -299,7 +305,7 @@ describe("ChainPreviewDrawer", () => {
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const drawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
 
     const alert = await within(drawer).findByRole("alert");
     expect(alert).toHaveTextContent("combined tape length exceeds the 1000mm maximum");
@@ -342,16 +348,129 @@ describe("ChainPreviewDrawer", () => {
     // drawer closes the tray drawer rather than stacking on top of it (see
     // TrayPanel.tsx's own `closeTrayDrawer` prop doc).
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Print tray" })).not.toBeInTheDocument());
-    const chainDrawer = await screen.findByRole("dialog", { name: "Chain preview" });
+    const chainDrawer = await screen.findByRole("dialog", { name: "Print preview" });
     expect(chainDrawer).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Close chain preview" })).toHaveFocus());
 
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chain preview" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Print preview" })).not.toBeInTheDocument());
     // Focus returns to GlobalTrayDrawer's own trigger -- the button that
     // was focused (by `closeTrayDrawer`'s own `dialog.close()`) the instant
     // the chain preview drawer opened, not the (now hidden) "Preview
     // chain" button nested inside the tray drawer's own panel.
     await waitFor(() => expect(trayTrigger).toHaveFocus());
+  });
+});
+
+describe("ChainPreviewDrawer -- dockable preview", () => {
+  it("the dock toggle flips the store's `docked` flag, and its accessible name flips with it", async () => {
+    seedTrayItems(1);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("dialog", { name: "Print preview" });
+
+    const dockButton = screen.getByRole("button", { name: "Dock preview" });
+    await user.click(dockButton);
+
+    expect(useChainPreviewStore.getState().docked).toBe(true);
+    expect(screen.getByRole("button", { name: "Undock preview" })).toBeInTheDocument();
+  });
+
+  it("docked + open swaps in a complementary landmark -- no scrim, no aria-modal, no dialog role", async () => {
+    seedTrayItems(1);
+    useChainPreviewStore.setState({ docked: true });
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const panel = await screen.findByRole("complementary", { name: "Print preview" });
+
+    expect(panel).not.toHaveAttribute("aria-modal");
+    expect(document.querySelector('[aria-hidden][class*="bg-scrim/70"]')).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Print preview" })).not.toBeInTheDocument();
+  });
+
+  it("undocked + open keeps today's dialog semantics and scrim, unchanged", async () => {
+    seedTrayItems(1);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const panel = await screen.findByRole("dialog", { name: "Print preview" });
+
+    expect(panel).toHaveAttribute("aria-modal", "true");
+    expect(document.querySelector('[aria-hidden][class*="bg-scrim/70"]')).not.toBeNull();
+  });
+
+  it("close still works while docked, without stealing focus onto the close button", async () => {
+    seedTrayItems(1);
+    useChainPreviewStore.setState({ docked: true });
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    const trigger = screen.getByRole("button", { name: "Open" });
+    await user.click(trigger);
+    await screen.findByRole("complementary", { name: "Print preview" });
+
+    // Docked mode skips the focus-steal contract entirely (see this
+    // component's own docstring) -- the close button never gets
+    // programmatic focus the way it does when undocked.
+    expect(screen.getByRole("button", { name: "Close chain preview" })).not.toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Close chain preview" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "Print preview" })).not.toBeInTheDocument(),
+    );
+    expect(useChainPreviewStore.getState().open).toBe(false);
+    // `docked` itself is untouched by closing -- remembered for next open
+    // (stores/chainPreview.ts's own persisted preference).
+    expect(useChainPreviewStore.getState().docked).toBe(true);
+  });
+
+  it("Escape does nothing while docked -- no Escape-to-close", async () => {
+    seedTrayItems(1);
+    useChainPreviewStore.setState({ docked: true });
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("complementary", { name: "Print preview" });
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("complementary", { name: "Print preview" })).toBeInTheDocument();
+    expect(useChainPreviewStore.getState().open).toBe(true);
+  });
+
+  it("carries the xl:static in-flow-column class contract only while docked AND open", async () => {
+    seedTrayItems(1);
+    useChainPreviewStore.setState({ docked: true });
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    await screen.findByRole("complementary", { name: "Print preview" });
+
+    const panel = screen.getByTestId("chain-preview-drawer-panel");
+    expect(panel.className).toContain("xl:static");
+    expect(panel.className).toContain("xl:inset-auto");
+    expect(panel.className).toContain("xl:w-[26rem]");
+    expect(panel.className).toContain("xl:shrink-0");
+    expect(panel.className).toContain("xl:border-l");
+    // Docked mode drops the slide transition entirely (this component's
+    // own docstring) -- nothing to animate once it's back in normal flow.
+    expect(panel.className).not.toContain("transition-transform");
+  });
+
+  it("a closed docked panel is hidden exactly like an undocked one -- no xl: override leaks through while closed", () => {
+    useChainPreviewStore.setState({ docked: true });
+    renderWithProviders(<Harness />);
+
+    const panel = screen.getByTestId("chain-preview-drawer-panel");
+    expect(panel).not.toHaveAttribute("role");
+    expect(panel.className).toContain("invisible");
+    expect(panel.className).toContain("translate-x-full");
+    expect(panel.className).not.toContain("xl:static");
   });
 });

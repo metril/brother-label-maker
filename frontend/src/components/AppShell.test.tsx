@@ -5,11 +5,13 @@ import { http, HttpResponse } from "msw";
 import { AppShell } from "./AppShell";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { useChainPreviewStore } from "../stores/chainPreview";
 import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import type { LabelDefinition } from "../api/types";
 
 const INITIAL_TRAY_STATE = useTrayStore.getState();
+const INITIAL_CHAIN_PREVIEW_STATE = useChainPreviewStore.getState();
 
 function def(text: string): LabelDefinition {
   return { type: "text", tape: { width_mm: 24, family: "tze" }, params: { lines: [text] } };
@@ -243,5 +245,43 @@ describe("AppShell -- compact theme control", () => {
     await user.click(screen.getByRole("button", { name: "Theme: System" }));
     expect(await screen.findByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+});
+
+/** Dockable-preview feature: components/ChainPreviewDrawer.tsx's own
+ * `xl:static` in-flow-column class contract only produces a real docked
+ * column if the panel is an actual flex ITEM of AppShell's content row
+ * (the div holding TypeRail + `<main>`) -- a sibling of that row (the old
+ * mount point) could never reflow `<main>` beside it no matter what
+ * classes the panel itself carried. This proves the DOM shape the move
+ * (AppShell.tsx's own docstring at the mount point) is supposed to
+ * guarantee, independent of ChainPreviewDrawer's own docked/undocked
+ * rendering (covered by ChainPreviewDrawer.test.tsx itself). */
+describe("AppShell -- chain preview drawer mount point (dockable preview)", () => {
+  afterEach(() => {
+    useChainPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
+  });
+
+  it("mounts the chain preview drawer panel as a child of the content row, sharing a parent with <main>", async () => {
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+
+    // ChainPreviewDrawer itself returns a Fragment (no wrapping DOM node),
+    // so the panel's real DOM parent is whichever element renders
+    // `<ChainPreviewDrawer />` as JSX -- AppShell's content row.
+    const drawerPanel = screen.getByTestId("chain-preview-drawer-panel");
+    const contentRow = drawerPanel.parentElement;
+    expect(contentRow).not.toBeNull();
+    expect(contentRow?.className).toContain("lg:flex-row");
+    expect(contentRow?.className).toContain("items-stretch");
+
+    const main = screen.getByText("designer content").closest("main");
+    expect(main).not.toBeNull();
+    expect(main?.parentElement).toBe(contentRow);
   });
 });
