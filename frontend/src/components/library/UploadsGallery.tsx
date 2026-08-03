@@ -32,8 +32,16 @@ function formatBytes(bytes: number): string {
  * Self-contained: owns its own list query, upload mutation, and delete
  * confirm flow, the same "mounting it is the entire integration cost"
  * convention PresetCard.tsx/SequenceCsvUpload.tsx use -- whichever page
- * hosts this (pages/Library.tsx, built separately) needs nothing more than
- * `<UploadsGallery />`.
+ * hosts this (pages/Library.tsx) needs nothing more than `<UploadsGallery
+ * />`. `h-full min-h-0 flex-col` on the panel (2026-08 layout rework) lets
+ * it fill whatever height its host gives it -- Library.tsx's "Uploads" tab
+ * passes the full remaining viewport height -- with the thumbnail grid as
+ * the one scrolling region (`min-h-0 flex-1 overflow-y-auto`) between the
+ * fixed upload-control header and the fixed count/"Load more" footer,
+ * instead of the grid growing the whole page. A host that doesn't bound
+ * this component's height (there isn't one today) just gets its natural
+ * content height, same as before -- `h-full` against an unbounded parent
+ * resolves to `auto`.
  *
  * Pagination: `GET /api/images` is server-paginated (page/page_size, same
  * shape as `GET /api/history`) but this component ACCUMULATES pages
@@ -104,8 +112,8 @@ export function UploadsGallery() {
   const hasMore = items.length < total;
 
   return (
-    <div className={panel}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className={`${panel} flex h-full min-h-0 flex-col`}>
+      <div className="mb-4 flex shrink-0 flex-wrap items-start justify-between gap-3">
         <h2 className={eyebrow}>Uploads</h2>
         <div className="flex flex-col items-end gap-1.5">
           <input
@@ -140,37 +148,46 @@ export function UploadsGallery() {
         </p>
       ) : (
         <>
-          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {items.map((item) => (
-              <li key={item.image_id} className="flex flex-col gap-1.5 rounded-lg border border-deck-800 bg-deck-900/40 p-2">
-                <div className="flex aspect-square items-center justify-center overflow-hidden rounded-md border border-deck-600 bg-icon-well p-1.5">
-                  <img
-                    src={imageThumbUrl(item.image_id)}
-                    alt={`Upload ${item.image_id}`}
-                    loading="lazy"
-                    className="h-full w-full object-contain"
-                  />
-                </div>
-                <p className="font-mono text-[11px] text-deck-200" title={formatAbsoluteTime(item.mtime)}>
-                  {item.width}×{item.height} · {formatBytes(item.size_bytes)}
-                </p>
-                <p className="font-mono text-[10px] text-deck-400">{formatRelativeTime(item.mtime)}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeleteTarget(item);
-                    deleteDialog.open();
-                  }}
-                  aria-label={`Delete upload ${item.image_id}`}
-                  className="self-start text-[11px] font-medium text-rust-500 hover:underline"
-                >
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
+          {/* The one scrolling region: denser auto-fill columns (a fixed
+              `minmax(8rem, 1fr)` tile floor, not a breakpoint-capped
+              `lg:grid-cols-6`) pack more thumbnails per row as the panel
+              gets wider, and `min-h-0 flex-1 overflow-y-auto` lets this
+              div -- not the whole page -- absorb the grid's height, same
+              "own scroll region" treatment as SymbolBrowser's browse-mode
+              grid. */}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ul className="grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-4 pb-1">
+              {items.map((item) => (
+                <li key={item.image_id} className="flex flex-col gap-1.5 rounded-lg border border-deck-800 bg-deck-900/40 p-2">
+                  <div className="flex aspect-square items-center justify-center overflow-hidden rounded-md border border-deck-600 bg-icon-well p-1.5">
+                    <img
+                      src={imageThumbUrl(item.image_id)}
+                      alt={`Upload ${item.image_id}`}
+                      loading="lazy"
+                      className="h-full w-full object-contain"
+                    />
+                  </div>
+                  <p className="font-mono text-[11px] text-deck-200" title={formatAbsoluteTime(item.mtime)}>
+                    {item.width}×{item.height} · {formatBytes(item.size_bytes)}
+                  </p>
+                  <p className="font-mono text-[10px] text-deck-400">{formatRelativeTime(item.mtime)}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteTarget(item);
+                      deleteDialog.open();
+                    }}
+                    aria-label={`Delete upload ${item.image_id}`}
+                    className="self-start text-[11px] font-medium text-rust-500 hover:underline"
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-          <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="mt-4 flex shrink-0 items-center justify-between gap-3">
             <p className="font-mono text-[12px] text-deck-400">
               {items.length} of {total} upload{total === 1 ? "" : "s"}
             </p>

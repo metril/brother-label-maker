@@ -68,7 +68,16 @@ interface SymbolBrowserBrowseProps {
  *
  * Grid sizing/windowing (WINDOW_SIZE, the IntersectionObserver sentinel,
  * arrow-key growth) is identical in both modes and catalog-size-proof --
- * see WINDOW_SIZE's own docstring. */
+ * see WINDOW_SIZE's own docstring. Grid DENSITY/tile size and the detail
+ * panel's layout are NOT identical (2026-08 Library page rework): `select`
+ * mode is IconField's icon-field popover and must stay pixel-for-pixel
+ * what it always was (same `max-h-56`/`grid-cols-6 sm:grid-cols-8`/`h-9
+ * w-9` tiles, no visible per-tile label) -- every className/style branch
+ * below keyed on `props.mode === "select"` reproduces that exact markup
+ * unchanged. `browse` mode (pages/Library.tsx's whole-viewport tab) instead
+ * gets a denser auto-fill grid of bigger, labeled tiles that grows to fill
+ * its host's height, and (see the detail panel below) reflows into a
+ * right-hand sidebar at `xl`. */
 export type SymbolBrowserProps = SymbolBrowserSelectProps | SymbolBrowserBrowseProps;
 
 export function SymbolBrowser(props: SymbolBrowserProps) {
@@ -227,9 +236,92 @@ export function SymbolBrowser(props: SymbolBrowserProps) {
 
   const selected = props.mode === "select" && props.selectedId ? (symbols.find((s) => s.id === props.selectedId) ?? null) : null;
   const detail = props.mode === "browse" && detailId ? (symbols.find((s) => s.id === detailId) ?? null) : null;
+  const browse = props.mode === "browse";
+
+  // The grid itself: identical windowing/keyboard-nav wiring in both
+  // modes, but browse mode swaps in a denser auto-fill layout with bigger,
+  // labeled tiles and lets the grid grow to fill its host's height instead
+  // of capping at select mode's popover-sized `max-h-56`. Built once (not
+  // duplicated per mode) so the option list/sentinel/empty-state below are
+  // one source of truth -- only the wrapping listbox's own className, and
+  // each tile's className/style/children, branch on `browse`.
+  const grid = (
+    <div
+      role="listbox"
+      aria-label="Symbol"
+      className={
+        browse
+          ? "grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2 overflow-y-auto rounded-md border border-deck-700 bg-deck-900/40 p-3"
+          : "grid max-h-56 grid-cols-6 gap-1.5 overflow-y-auto rounded-md border border-deck-700 bg-deck-900/40 p-2 sm:grid-cols-8"
+      }
+    >
+      {visible.map((symbol, index) => {
+        const marked = props.mode === "select" ? props.selectedId === symbol.id : detailId === symbol.id;
+        return (
+          <button
+            key={symbol.id}
+            ref={(el) => {
+              if (el) buttonRefs.current.set(symbol.id, el);
+              else buttonRefs.current.delete(symbol.id);
+            }}
+            type="button"
+            role="option"
+            aria-selected={marked}
+            tabIndex={symbol.id === activeId ? 0 : -1}
+            title={symbol.name}
+            onClick={() => activate(symbol.id)}
+            onKeyDown={(e) => handleKeyDown(e, index)}
+            // content-visibility/contain-intrinsic-size have no Tailwind
+            // v4 utility for an arbitrary two-axis size, so plain `style`
+            // here -- same rationale as ui/inputs.tsx's Select chevron.
+            // Skips layout/paint for grid items scrolled out of view (on
+            // top of windowing itself, which caps how many of these exist
+            // in the DOM at all). Browse mode's tiles are taller (icon +
+            // a label line), so its intrinsic size guess is bigger too.
+            style={
+              browse
+                ? { contentVisibility: "auto", containIntrinsicSize: "72px 84px" }
+                : { contentVisibility: "auto", containIntrinsicSize: "36px 36px" }
+            }
+            className={
+              browse
+                ? `flex flex-col items-center gap-1 rounded-md border p-2 ${
+                    marked ? "border-amber-500 bg-icon-well" : "border-deck-600 bg-icon-well/90 hover:bg-icon-well"
+                  }`
+                : `flex h-9 w-9 items-center justify-center rounded-md border p-1.5 ${
+                    marked ? "border-amber-500 bg-icon-well" : "border-deck-600 bg-icon-well/90 hover:bg-icon-well"
+                  }`
+            }
+          >
+            {/* Browse mode's name is a real visible <span> (below), so the
+                image itself is decorative here (empty alt) -- an
+                `alt={symbol.name}` on the image AND a labeled span would
+                double up in the button's computed accessible name (e.g.
+                "Bolt Bolt"), breaking every `getByRole("option", { name:
+                ... })` lookup. Select mode has no span, so its img alt is
+                still the tile's only name source -- unchanged. */}
+            <img
+              src={symbolSvgUrl(symbol.id)}
+              alt={browse ? "" : symbol.name}
+              loading="lazy"
+              className={browse ? "h-10 w-10 shrink-0" : "h-full w-full"}
+            />
+            {browse && <span className="w-full truncate text-center text-[11px] text-deck-300">{symbol.name}</span>}
+          </button>
+        );
+      })}
+      {windowCount < filtered.length && <div ref={sentinelRef} aria-hidden="true" className="col-span-full h-px" />}
+      {filtered.length === 0 && (
+        <p className="col-span-full text-[12px] text-deck-400">
+          No symbols match{q ? ` "${query}"` : ""}
+          {category !== "all" ? ` in ${CATEGORY_LABELS[category]}` : ""}.
+        </p>
+      )}
+    </div>
+  );
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={browse ? "flex min-h-0 flex-1 flex-col gap-3" : "flex flex-col gap-2"}>
       <TextInput value={query} onChange={setQuery} placeholder='Search symbols (e.g. "network", "power")' ariaLabel="Search symbols" />
       <SegmentedControl ariaLabel="Symbol category" options={categoryOptions} value={category} onChange={setCategory} />
       <p className="text-[12px] text-deck-400">
@@ -248,68 +340,54 @@ export function SymbolBrowser(props: SymbolBrowserProps) {
           </button>
         </div>
       )}
-      {detail && (
-        // Browse mode's lightweight detail affordance -- opened by
-        // clicking (or activating via keyboard) an icon in the grid below,
-        // closed by clicking it again or this panel's own "Close" button.
-        // Stays visible above the grid regardless of the active filter,
-        // same rationale as the selected chip above.
-        <div role="group" aria-label={`${detail.name} details`} className="flex items-start gap-3 rounded-md border border-deck-700 bg-icon-well/60 p-3">
-          <img src={symbolSvgUrl(detail.id)} alt="" loading="lazy" className="h-12 w-12 shrink-0" />
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <div className="flex items-start justify-between gap-2">
-              <span className="truncate text-[13px] font-medium text-deck-200">{detail.name}</span>
-              <button type="button" onClick={() => setDetailId(null)} className="shrink-0 text-[12px] text-deck-400 underline hover:text-deck-200">
-                Close
-              </button>
-            </div>
-            <p className="truncate font-mono text-[11px] text-deck-400">{detail.id}</p>
-            <p className="text-[11px] text-deck-400">{categoryLabel(detail.category)}</p>
-            {detail.tags.length > 0 && <p className="truncate text-[11px] text-deck-400">{detail.tags.join(", ")}</p>}
-            <p className="truncate text-[11px] text-deck-400">{`${detail.source} · ${detail.license}`}</p>
-          </div>
-        </div>
-      )}
-      <div role="listbox" aria-label="Symbol" className="grid max-h-56 grid-cols-6 gap-1.5 overflow-y-auto rounded-md border border-deck-700 bg-deck-900/40 p-2 sm:grid-cols-8">
-        {visible.map((symbol, index) => {
-          const marked = props.mode === "select" ? props.selectedId === symbol.id : detailId === symbol.id;
-          return (
-            <button
-              key={symbol.id}
-              ref={(el) => {
-                if (el) buttonRefs.current.set(symbol.id, el);
-                else buttonRefs.current.delete(symbol.id);
-              }}
-              type="button"
-              role="option"
-              aria-selected={marked}
-              tabIndex={symbol.id === activeId ? 0 : -1}
-              title={symbol.name}
-              onClick={() => activate(symbol.id)}
-              onKeyDown={(e) => handleKeyDown(e, index)}
-              // content-visibility/contain-intrinsic-size have no Tailwind
-              // v4 utility for an arbitrary two-axis size, so plain
-              // `style` here -- same rationale as ui/inputs.tsx's Select
-              // chevron. Skips layout/paint for grid items scrolled out of
-              // the max-h-56 viewport (on top of windowing itself, which
-              // caps how many of these exist in the DOM at all).
-              style={{ contentVisibility: "auto", containIntrinsicSize: "36px 36px" }}
-              className={`flex h-9 w-9 items-center justify-center rounded-md border p-1.5 ${
-                marked ? "border-amber-500 bg-icon-well" : "border-deck-600 bg-icon-well/90 hover:bg-icon-well"
-              }`}
+      {browse ? (
+        // Grid + detail panel share ONE flex container so the panel can
+        // reflow between two positions via plain responsive classes,
+        // rather than rendering two copies of it (which would double up
+        // `role="group"` nodes with the identical accessible name -- see
+        // SymbolBrowser.test.tsx's own sidebar-layout test). Below `xl`:
+        // `flex-col`, panel first -> renders above the grid, same spot
+        // browse mode has always used. At `xl`+: `flex-row` plus
+        // `xl:order-last` on the panel -> the grid takes the main column
+        // and the panel becomes a persistent right-hand sidebar.
+        <div className="flex min-h-0 flex-1 flex-col gap-3 xl:flex-row xl:gap-4">
+          {detail && (
+            // Browse mode's detail affordance -- opened by clicking (or
+            // activating via keyboard) an icon in the grid, closed by
+            // clicking it again or this panel's own "Close" button. Stays
+            // visible regardless of the active filter, same rationale as
+            // the selected chip above.
+            <div
+              role="group"
+              aria-label={`${detail.name} details`}
+              // Panel surface is a normal deck panel (readable deck-* text);
+              // ONLY the icon sits on an icon-well tile, same as the grid's
+              // own cells -- icon-well is a light token for icon contrast,
+              // and body text on top of it is illegible in dark mode.
+              className="flex shrink-0 items-start gap-3 rounded-md border border-deck-700 bg-deck-800 p-3 xl:order-last xl:w-72 xl:flex-col xl:items-center xl:gap-2 xl:p-4 xl:text-center"
             >
-              <img src={symbolSvgUrl(symbol.id)} alt={symbol.name} loading="lazy" className="h-full w-full" />
-            </button>
-          );
-        })}
-        {windowCount < filtered.length && <div ref={sentinelRef} aria-hidden="true" className="col-span-full h-px" />}
-        {filtered.length === 0 && (
-          <p className="col-span-full text-[12px] text-deck-400">
-            No symbols match{q ? ` "${query}"` : ""}
-            {category !== "all" ? ` in ${CATEGORY_LABELS[category]}` : ""}.
-          </p>
-        )}
-      </div>
+              <span className="shrink-0 rounded-md border border-deck-600 bg-icon-well p-1.5 xl:p-3">
+                <img src={symbolSvgUrl(detail.id)} alt="" loading="lazy" className="block h-12 w-12 xl:h-24 xl:w-24" />
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5 xl:w-full xl:items-center">
+                <div className="flex w-full items-start justify-between gap-2">
+                  <span className="truncate text-[13px] font-medium text-deck-200">{detail.name}</span>
+                  <button type="button" onClick={() => setDetailId(null)} className="shrink-0 text-[12px] text-deck-400 underline hover:text-deck-200">
+                    Close
+                  </button>
+                </div>
+                <p className="truncate font-mono text-[11px] text-deck-400">{detail.id}</p>
+                <p className="text-[11px] text-deck-400">{categoryLabel(detail.category)}</p>
+                {detail.tags.length > 0 && <p className="truncate text-[11px] text-deck-400">{detail.tags.join(", ")}</p>}
+                <p className="truncate text-[11px] text-deck-400">{`${detail.source} · ${detail.license}`}</p>
+              </div>
+            </div>
+          )}
+          {grid}
+        </div>
+      ) : (
+        grid
+      )}
     </div>
   );
 }

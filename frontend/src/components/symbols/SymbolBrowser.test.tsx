@@ -203,6 +203,30 @@ describe("SymbolBrowser: browse mode", () => {
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("group", { name: `${second.name} details` })).not.toBeInTheDocument();
   });
+
+  it("the detail panel is laid out to relocate into a right-hand sidebar on wide (xl) screens", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<SymbolBrowser mode="browse" />);
+    const first = firstUniquelyNamed(1)[0]!;
+
+    await user.click(await screen.findByRole("option", { name: first.name }));
+
+    // jsdom doesn't evaluate media queries, so this can't observe the
+    // actual reflow -- it proves the SAME node (opened via the ordinary
+    // click-to-open flow every other test in this file uses) carries the
+    // Tailwind classes that flip it from "inline, above the grid" (its
+    // position below `xl`, and in every browser-width-agnostic assertion
+    // elsewhere in this file) into an `order-last` sidebar column beside
+    // the grid at `xl`+. One panel, not two: the grid+panel wrapper switch
+    // from a column to a row at `xl`, and `xl:order-last` reorders the
+    // panel within it -- there is no separate sidebar copy to find (which
+    // would otherwise leave two `role="group"` nodes with the identical
+    // accessible name once a real browser's `xl` media query engaged).
+    const panel = screen.getByRole("group", { name: `${first.name} details` });
+    expect(panel.className).toContain("xl:order-last");
+    expect(panel.className).toContain("xl:w-72");
+    expect(panel.parentElement?.className).toContain("xl:flex-row");
+  });
 });
 
 describe("SymbolBrowser: select mode", () => {
