@@ -442,6 +442,85 @@ async def test_list_images_pagination_math(app_and_client):
     assert page3.json()["total"] == 3
 
 
+async def test_list_images_paged_items_carry_correct_per_item_metadata(app_and_client):
+    # M7 (2026-08 review) rework: the scan is now a stat-first candidate
+    # pass (sort/slice on mtime alone) followed by a PIL pass over ONLY the
+    # survivors of that slice. This confirms the two-pass split still
+    # attaches the RIGHT width/height/size_bytes/mtime to each image_id
+    # after slicing -- on every page, not just page 1.
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+
+    dims = [(30, 15), (12, 40), (60, 10)]
+    ids = []
+    for i, (w, h) in enumerate(dims):
+        resp = await client.post(
+            "/api/images",
+            files={"file": (f"{i}.png", io.BytesIO(_png_bytes(w, h)), "image/png")},
+        )
+        ids.append(resp.json()["image_id"])
+    for i, image_id in enumerate(ids):
+        os.utime(uploads / f"{image_id}.png", (1_700_000_000 + i, 1_700_000_000 + i))
+    expected_dims = {ids[0]: dims[0], ids[1]: dims[1], ids[2]: dims[2]}
+
+    page1 = await client.get("/api/images", params={"page": 1, "page_size": 2})
+    page2 = await client.get("/api/images", params={"page": 2, "page_size": 2})
+    assert page1.status_code == 200
+    assert page2.status_code == 200
+
+    all_items = page1.json()["items"] + page2.json()["items"]
+    assert {item["image_id"] for item in all_items} == set(ids)
+    for item in all_items:
+        width, height = expected_dims[item["image_id"]]
+        assert (item["width"], item["height"]) == (width, height)
+        assert item["size_bytes"] > 0
+        assert _ISO_MTIME_RE.match(item["mtime"])
+
+
+async def test_list_images_skips_corrupt_png_without_500_or_breaking_other_pages(app_and_client):
+    # M7 (2026-08 review): the PIL header probe now runs AFTER stat-based
+    # slicing, only on the (at most page_size) candidates that survive into
+    # a given page. A candidate that passes the name/containment/stat
+    # checks but fails to open as an image is dropped from THAT page
+    # (silently, at DEBUG, per _list_uploaded_images' documented
+    # page-shortfall behavior) -- it must never 500, and it must never
+    # touch/affect a different page's candidates.
+    app, client = app_and_client
+    data_dir = app.state.config.data_dir
+    uploads = data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+
+    good_ids = []
+    for i in range(2):
+        resp = await client.post(
+            "/api/images", files={"file": (f"{i}.png", io.BytesIO(_png_bytes()), "image/png")}
+        )
+        good_ids.append(resp.json()["image_id"])
+
+    corrupt_id = uuid.uuid4().hex
+    (uploads / f"{corrupt_id}.png").write_bytes(b"not a real png at all")
+
+    base = 1_700_000_000
+    os.utime(uploads / f"{good_ids[0]}.png", (base, base))
+    os.utime(uploads / f"{corrupt_id}.png", (base + 1, base + 1))
+    os.utime(uploads / f"{good_ids[1]}.png", (base + 2, base + 2))
+    # Newest-first candidate order: good_ids[1], corrupt_id, good_ids[0].
+
+    page1 = await client.get("/api/images", params={"page": 1, "page_size": 2})
+    assert page1.status_code == 200
+    body1 = page1.json()
+    ids1 = [item["image_id"] for item in body1["items"]]
+    assert corrupt_id not in ids1
+    assert ids1 == [good_ids[1]]  # the corrupt candidate's slot was dropped, not backfilled
+    assert body1["total"] == 3  # candidate-pass total counts it; PIL pass doesn't back-patch it
+
+    page2 = await client.get("/api/images", params={"page": 2, "page_size": 2})
+    assert page2.status_code == 200
+    ids2 = [item["image_id"] for item in page2.json()["items"]]
+    assert ids2 == [good_ids[0]]  # unaffected by page 1's corrupt candidate
+
+
 async def test_list_images_invalid_page_returns_422(client):
     resp = await client.get("/api/images", params={"page": 0})
     assert resp.status_code == 422

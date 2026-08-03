@@ -142,6 +142,31 @@ async def test_history_list_bounds_map_to_422(client):
         assert resp.status_code == 422, params
 
 
+async def test_history_list_extreme_page_maps_to_422_not_500(client):
+    # M1 (2026-08 review): `offset = (page - 1) * page_size` used to be
+    # bound straight into `LIMIT ? OFFSET ?` unbounded above -- past
+    # 2**63-1 sqlite3 raises OverflowError (not ValueError), which escaped
+    # router_history.py's `except ValueError -> 422` mapping and reached
+    # Starlette as an uncaught 500. db.list_jobs now rejects a
+    # pathologically large offset itself, so this is a clean 422 like every
+    # other malformed pagination value, never a 500.
+    for page in (10**18, 10**19):
+        resp = await client.get("/api/history", params={"page": page})
+        assert resp.status_code == 422, page
+
+
+async def test_history_list_large_but_legal_page_is_200_with_empty_items(client):
+    # A big page number that still produces an offset well under the
+    # 10**9 cap must behave like any other out-of-range-but-valid page:
+    # 200 with an empty page, not rejected.
+    resp = await client.get("/api/history", params={"page": 10**6})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["items"] == []
+    assert body["page"] == 10**6
+    assert body["total"] == 0
+
+
 async def test_history_list_filters_by_status_and_q(app_and_client):
     app, client = app_and_client
     db = app.state.db

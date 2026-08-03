@@ -494,6 +494,20 @@ class Database:
             raise ValueError(f"page_size must be between 1 and 100, got {page_size}")
         if status is not None and status not in _VALID_JOB_STATUSES:
             raise ValueError(f"invalid status: {status!r}")
+        # M1 (2026-08 review): page has no upper bound above, so a large
+        # enough `page` pushes `offset` past 2**63-1 and sqlite3 raises
+        # OverflowError (not ValueError) trying to bind it into `LIMIT ?
+        # OFFSET ?` below -- router_history.py's `except ValueError -> 422`
+        # never sees that, so it escaped to Starlette as an uncaught 500.
+        # Rejecting a clearly-pathological offset here, before any SQL
+        # runs, keeps this failure mode a ValueError like every other
+        # malformed-pagination case above, well under sqlite3's real limit.
+        offset = (page - 1) * page_size
+        if offset > 10**9:
+            raise ValueError(
+                f"page {page} with page_size {page_size} is out of range "
+                f"(offset {offset} exceeds the 10**9 cap)"
+            )
 
         clauses = []
         params: list[Any] = []
@@ -509,7 +523,6 @@ class Database:
         row = await cur.fetchone()
         total = row[0]
 
-        offset = (page - 1) * page_size
         cur = await self._conn.execute(
             "SELECT id, created_at, status, error, definition, label_count, chain_mode, "
             "strategy, tape_width_mm, media_raw_byte, tape_used_mm, "

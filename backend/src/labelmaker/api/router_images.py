@@ -50,6 +50,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import anyio
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from PIL import Image
@@ -162,14 +163,24 @@ def _resolve_existing_image_path(image_id: str, data_dir: Path) -> Path:
     return path
 
 
-@router.post("", status_code=201)
-async def upload_image(
-    request: Request, config: AppConfigDep, file: UploadFile
-) -> ImageUploadResponse:
-    data = await _read_capped(request, file)
-    if not data:
-        raise HTTPException(status_code=422, detail="uploaded file is empty")
+def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
+    """The blocking half of `POST /api/images` (M7, 2026-08 review): every
+    step below decodes/re-encodes real pixel data (two `Image.open()`
+    probes, a `.load()`, an alpha-composite `.convert()`, and a PNG
+    `.save()`) and used to run inline on the event loop -- the same class
+    of bug the module docstring's cap discussion is about, just for CPU
+    time instead of memory. The caller runs this via
+    `anyio.to_thread.run_sync` so it never blocks the loop that also
+    carries `/api/ws` and the print worker (see `list_images` below for
+    the read-side counterpart).
 
+    Raises the exact same `HTTPException`s this used to raise inline --
+    raising them from a worker thread is fine, `anyio.to_thread.run_sync`
+    propagates them back into the awaiting coroutine unchanged, and
+    FastAPI's normal exception handling takes it from there -- so response
+    codes/bodies are byte-for-byte identical to before this was moved off
+    the loop.
+    """
     try:
         probe = Image.open(io.BytesIO(data))
         probe_format = probe.format
@@ -216,11 +227,25 @@ async def upload_image(
         img = img.convert("RGB")
 
     image_id = uuid.uuid4().hex
-    target_dir = uploads_dir(config.data_dir)
+    target_dir = uploads_dir(data_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
-    img.save(image_path(image_id, config.data_dir), format="PNG")
+    img.save(image_path(image_id, data_dir), format="PNG")
 
-    return ImageUploadResponse(image_id=image_id, width=img.width, height=img.height)
+    return image_id, img.width, img.height
+
+
+@router.post("", status_code=201)
+async def upload_image(
+    request: Request, config: AppConfigDep, file: UploadFile
+) -> ImageUploadResponse:
+    data = await _read_capped(request, file)
+    if not data:
+        raise HTTPException(status_code=422, detail="uploaded file is empty")
+
+    image_id, width, height = await anyio.to_thread.run_sync(
+        _process_upload, data, config.data_dir
+    )
+    return ImageUploadResponse(image_id=image_id, width=width, height=height)
 
 
 def _iso_mtime(epoch_seconds: float) -> str:
@@ -235,27 +260,47 @@ def _iso_mtime(epoch_seconds: float) -> str:
 def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
     """Backing implementation for `GET /api/images` (task D2a): scans
     `uploads_dir` directly rather than any DB table -- uploads have never
-    had a DB row (see this module's own docstring) -- and pairs each
-    surviving `*.png` entry with its width/height (a cheap, header-only
-    `Image.open()` -- no `.load()`/`.convert()`, so this never decodes a
-    full pixel buffer just to answer a LIST request) and its `stat()`
-    size/mtime.
+    had a DB row (see this module's own docstring).
 
     `page`/`page_size` validation mirrors router_history.py's `list_jobs`
     bounds exactly (page>=1, 1<=page_size<=100) -- raises `ValueError`,
     422-mappable by the route handler below, same convention.
 
-    Directory-listing hardening: `target_dir.iterdir()` is only ever used
-    to enumerate CANDIDATE filenames -- never trusted as a source of real
-    paths. Every candidate's stem is re-validated against `IMAGE_ID_RE` and
-    then re-resolved through `image_path()` (the same containment-checked
-    choke point GET/DELETE /api/images/{id} already use), so a filename
-    that doesn't fit the shape `POST /api/images` ever mints, OR a
-    regex-valid name whose resolved path escapes `uploads_dir` (e.g. a
-    symlink planted inside it), is silently dropped -- logged at DEBUG,
-    never surfaced as a 500 and never included in the listing. A file that
-    passes both checks but still fails to open as an image (corrupt/
-    truncated) is dropped the same way.
+    M7 (2026-08 review): this used to pair EVERY surviving entry with a
+    full `Image.open()` header probe before sorting/slicing, making the
+    whole scan O(total uploads) instead of O(page_size) -- page 5 cost
+    exactly what page 1 cost. Now split into two passes:
+
+    1. Candidate pass, over every entry: name-validated (`IMAGE_ID_RE`) and
+       containment-checked (`image_path()`, same choke point GET/DELETE
+       /api/images/{id} already use) exactly as before, plus a `stat()` --
+       cheap syscalls only, no PIL. Sorted and sliced to the requested page
+       on `st_mtime` alone.
+    2. PIL pass, over only the (at most `page_size`) survivors of the
+       slice: the header-only `Image.open()` probe (no `.load()`/
+       `.convert()`, so this never decodes a full pixel buffer just to
+       answer a LIST request) that actually needs each candidate's
+       width/height.
+
+    Directory-listing hardening (candidate pass): `target_dir.iterdir()`
+    is only ever used to enumerate CANDIDATE filenames -- never trusted as
+    a source of real paths. A filename that doesn't fit the shape
+    `POST /api/images` ever mints, OR a regex-valid name whose resolved
+    path escapes `uploads_dir` (e.g. a symlink planted inside it), is
+    silently dropped -- logged at DEBUG, never surfaced as a 500 and never
+    included in the listing.
+
+    Page-shortfall note (PIL pass): a candidate that passes the name/
+    containment/stat checks but still fails to open as an image (corrupt/
+    truncated) is ALSO dropped the same way, but only after it has already
+    been counted in `total` and consumed a slot in this page's slice --
+    deliberately NOT backfilled from the next candidate, which would put
+    the PIL probe back on the O(total) path this fix exists to avoid. The
+    user-visible cost is a page that is up to N items short, where N is
+    the number of corrupt files that landed in that page's slice --
+    accepted per the review's suggested fix (stat-first slicing, PIL probe
+    only on survivors) as strictly better than paying O(total) PIL work on
+    every single request just to keep every page exactly `page_size` long.
     """
     if page < 1:
         raise ValueError(f"page must be >= 1, got {page}")
@@ -263,7 +308,9 @@ def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
         raise ValueError(f"page_size must be between 1 and 100, got {page_size}")
 
     target_dir = uploads_dir(data_dir)
-    records: list[tuple[float, dict]] = []
+    # (mtime, image_id, path, size_bytes) -- everything the PIL pass and
+    # the final item shape need, without re-`stat()`ing.
+    candidates: list[tuple[float, str, Path, int]] = []
     if target_dir.is_dir():
         for entry in target_dir.iterdir():
             if entry.suffix != ".png":
@@ -285,35 +332,50 @@ def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
                 continue
             try:
                 file_stat = path.stat()
-                with Image.open(path) as probe:  # header-only -- no .load()
-                    width, height = probe.size
-            except Exception as exc:  # noqa: BLE001 -- any per-file failure just drops that one entry
-                _LOG.debug("GET /api/images: skipping unreadable upload %r: %s", entry.name, exc)
-                continue
-            records.append(
-                (
-                    file_stat.st_mtime,
-                    {
-                        "image_id": image_id,
-                        "width": width,
-                        "height": height,
-                        "size_bytes": file_stat.st_size,
-                        "mtime": _iso_mtime(file_stat.st_mtime),
-                    },
+            except OSError as exc:
+                _LOG.debug(
+                    "GET /api/images: skipping upload %r that vanished mid-scan: %s",
+                    entry.name,
+                    exc,
                 )
-            )
+                continue
+            candidates.append((file_stat.st_mtime, image_id, path, file_stat.st_size))
 
-    records.sort(key=lambda record: record[0], reverse=True)
-    total = len(records)
+    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+    total = len(candidates)
     offset = (page - 1) * page_size
-    page_items = [item for _, item in records[offset : offset + page_size]]
+    page_candidates = candidates[offset : offset + page_size]
+
+    page_items = []
+    for mtime, image_id, path, size_bytes in page_candidates:
+        try:
+            with Image.open(path) as probe:  # header-only -- no .load()
+                width, height = probe.size
+        except Exception as exc:  # noqa: BLE001 -- any per-file failure just drops that one entry
+            _LOG.debug("GET /api/images: skipping unreadable upload %r: %s", path.name, exc)
+            continue
+        page_items.append(
+            {
+                "image_id": image_id,
+                "width": width,
+                "height": height,
+                "size_bytes": size_bytes,
+                "mtime": _iso_mtime(mtime),
+            }
+        )
+
     return {"items": page_items, "page": page, "page_size": page_size, "total": total}
 
 
 @router.get("")
 async def list_images(config: AppConfigDep, page: int = 1, page_size: int = 20) -> dict:
     try:
-        return _list_uploaded_images(config.data_dir, page, page_size)
+        # M7 (2026-08 review): the only filesystem/PIL route in this API
+        # that didn't hop off the event loop -- see _list_uploaded_images'
+        # own docstring for the O(page_size) rework alongside this.
+        return await anyio.to_thread.run_sync(
+            _list_uploaded_images, config.data_dir, page, page_size
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=error_message(exc)) from exc
 
@@ -367,7 +429,10 @@ async def get_image_thumb(image_id: str, config: AppConfigDep) -> FileResponse:
     path = _resolve_existing_image_path(image_id, config.data_dir)
     thumb = thumb_path(image_id, config.data_dir)
     if not thumb.is_file():
-        _generate_thumbnail(path, thumb)
+        # First request for this id pays the PIL resize -- off-loop, same
+        # M7 discipline as upload/list (an 8 MP source takes long enough
+        # to stall /api/ws and the status poll otherwise).
+        await anyio.to_thread.run_sync(_generate_thumbnail, path, thumb)
     return FileResponse(thumb, media_type="image/png", headers={"Cache-Control": _CACHE_CONTROL})
 
 
