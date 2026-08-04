@@ -255,23 +255,30 @@ describe("AppShell -- compact theme control", () => {
 /** The two panels don't share one rail column. GlobalTrayDrawer.tsx's own
  * `xl:static` in-flow-column class contract still needs the tray panel to
  * be an actual flex ITEM of a column that is ITSELF a flex item of
- * AppShell's content row (the div holding TypeRail + `<main>`) -- a sibling
- * of that row could never reflow `<main>` beside it no matter what classes
- * the panel itself carried. PrintPreviewDeck.tsx, by contrast, mounts as a
- * root-level sibling AFTER the content row entirely, so its own
- * `xl:static xl:h-64` bottom-deck contract can span the FULL viewport
- * width instead of being squeezed into a right-hand column. This proves the
+ * AppShell's content row (the div holding TypeRail + the middle column that
+ * wraps `<main>`) -- a sibling of that row could never reflow `<main>`
+ * beside it no matter what classes the panel itself carried.
+ * PrintPreviewDeck.tsx, by contrast, mounts as the LAST child of that middle
+ * column -- a sibling of `<main>`, NOT of the tray rail, and no longer a
+ * root-level sibling of the whole content row at all (a prior bug: mounting
+ * it there took its `xl:h-64` out of the content row's own flex budget,
+ * which shortened the tray rail beside it too, every time it opened). Its
+ * own `xl:static xl:h-64` bottom-deck contract now spans the middle
+ * column's width (the viewport minus TypeRail and the tray rail when either
+ * is visible) instead of the full browser viewport, and its `xl:h-64`
+ * shrinks ONLY `<main>` -- the tray rail, a separate flex item of the
+ * content row, never resizes when the deck opens or closes. This proves the
  * DOM shape AppShell.tsx's own docstring documents, independent of either
  * panel's own in-flow-vs-modal rendering (covered by
  * GlobalTrayDrawer.test.tsx/PrintPreviewDeck.test.tsx themselves). */
-describe("AppShell -- tray-only rail, and the preview deck as a root-level sibling", () => {
+describe("AppShell -- tray-only rail, and the preview deck nested in the middle column beside <main>", () => {
   afterEach(() => {
     useTrayStore.setState(INITIAL_TRAY_STATE, true);
     usePrintPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
     useTrayDrawerStore.setState(INITIAL_TRAY_DRAWER_STATE, true);
   });
 
-  it("mounts the tray panel inside a rail that is a child of the content row, sharing a parent with <main>, holding no other panel", async () => {
+  it("mounts the tray panel inside a rail that is a child of the content row, a sibling of the middle column that holds <main>, holding no other panel", async () => {
     renderWithProviders(
       <AppShell>
         <div>designer content</div>
@@ -308,19 +315,27 @@ describe("AppShell -- tray-only rail, and the preview deck as a root-level sibli
     // The root column is what actually owns the viewport-bound height now
     // (`h-screen`, not `min-h-screen`) -- see AppShell.tsx's own
     // top-of-file docstring for why that's what lets flexbox alone divide
-    // the frame between the header, this row, and the preview deck below.
+    // the frame between the header, this row, and the preview deck nested
+    // below.
     const rootColumn = contentRow?.parentElement;
     expect(rootColumn).not.toBeNull();
     const rootClasses = rootColumn?.className.split(" ") ?? [];
     expect(rootClasses).toContain("h-screen");
     expect(rootClasses).not.toContain("min-h-screen");
 
+    // `<main>` now lives inside a middle column of its own -- a sibling of
+    // the rail within the content row, not a direct child of the row
+    // itself (that middle column is where the preview deck mounts too, see
+    // the next test).
     const main = screen.getByText("designer content").closest("main");
     expect(main).not.toBeNull();
-    expect(main?.parentElement).toBe(contentRow);
+    const middleColumn = main?.parentElement;
+    expect(middleColumn).not.toBeNull();
+    expect(middleColumn).not.toBe(dockRail);
+    expect(middleColumn?.parentElement).toBe(contentRow);
   });
 
-  it("mounts the preview deck panel OUTSIDE the rail, as the root column's own last child, after the content row", async () => {
+  it("mounts the preview deck panel inside the middle column that holds <main> -- a sibling of <main> and that column's own last child, never a sibling of the tray rail", async () => {
     renderWithProviders(
       <AppShell>
         <div>designer content</div>
@@ -332,14 +347,22 @@ describe("AppShell -- tray-only rail, and the preview deck as a root-level sibli
     const trayPanel = screen.getByTestId("global-tray-drawer-panel");
     const dockRail = trayPanel.parentElement!;
     const contentRow = dockRail.parentElement!;
-    const rootColumn = contentRow.parentElement!;
+
+    const main = screen.getByText("designer content").closest("main")!;
+    const middleColumn = main.parentElement!;
+    expect(middleColumn.parentElement).toBe(contentRow);
 
     const deckPanel = screen.getByTestId("print-preview-deck-panel");
-    expect(deckPanel.parentElement).toBe(rootColumn);
+    // Same parent as <main> -- NOT the tray rail, and NOT the content row
+    // itself (the deck's old root-level mount point, before this fix).
+    expect(deckPanel.parentElement).toBe(middleColumn);
     expect(deckPanel.parentElement).not.toBe(dockRail);
+    expect(deckPanel.parentElement).not.toBe(contentRow);
 
-    const rootChildren = Array.from(rootColumn.children);
-    expect(rootChildren.indexOf(contentRow)).toBeLessThan(rootChildren.indexOf(deckPanel));
+    // Comes after <main> among the middle column's own children -- the
+    // deck is that column's LAST child.
+    const columnChildren = Array.from(middleColumn.children);
+    expect(columnChildren.indexOf(main)).toBeLessThan(columnChildren.indexOf(deckPanel));
   });
 
   it("the tray rail's class contract does not change when the preview deck is open -- the two panels are fully decoupled now", async () => {
@@ -365,6 +388,33 @@ describe("AppShell -- tray-only rail, and the preview deck as a root-level sibli
     usePrintPreviewStore.setState({ open: true });
     await waitFor(() => expect(usePrintPreviewStore.getState().open).toBe(true));
     expect(dockRail.className).toBe(beforeClassName);
+  });
+
+  it("with the preview deck open, the rail stays a direct child of the content row and the deck stays out of that row entirely -- they never become siblings", async () => {
+    usePrintPreviewStore.setState({ open: true });
+
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+      { route: "/" },
+    );
+    await screen.findByText("designer content");
+
+    const trayPanel = screen.getByTestId("global-tray-drawer-panel");
+    const dockRail = trayPanel.parentElement!;
+    const contentRow = dockRail.parentElement!;
+
+    // The rail is still a direct child of the content row...
+    expect(Array.from(contentRow.children)).toContain(dockRail);
+
+    // ...and the (now open) deck still isn't: it's nested one level down,
+    // inside the middle column beside <main>, regardless of `open` -- this
+    // is the geometry fix itself, expressed as a DOM assertion rather than
+    // a visual one.
+    const deckPanel = screen.getByTestId("print-preview-deck-panel");
+    expect(deckPanel.parentElement).not.toBe(contentRow);
+    expect(Array.from(contentRow.children)).not.toContain(deckPanel);
   });
 
   it("open at `xl`, the preview deck panel carries the in-flow bottom-deck class contract (static/h-64/full-width), not sticky and not the old right-column width", async () => {

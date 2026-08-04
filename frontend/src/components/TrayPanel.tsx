@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { usePrintJob } from "../hooks/usePrintJob";
 import { useTrayPreviews } from "../hooks/useTrayPreviews";
@@ -81,16 +80,6 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
   const moveUp = useTrayStore((s) => s.moveUp);
   const moveDown = useTrayStore((s) => s.moveDown);
   const clearTray = useTrayStore((s) => s.clear);
-
-  // Estimate details disclosure -- collapsed by default, extends
-  // PrintPreviewDeck.tsx's own identical "Notes" disclosure pattern (see
-  // that component's own comment above its button) to also hide the
-  // Per-label/Content-overhead `<dl>`: the docked preview deck's own stats
-  // column already shows those same numbers at a glance when it's open, so
-  // permanently spending ~45px on a second copy here isn't worth it against
-  // the xl rail's tight height budget -- see the disclosure's own comment
-  // below for the measured numbers.
-  const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   // Track C2: components/PrintPreviewDeck.tsx's own open flag -- shared
   // (not local state) since that drawer mounts once, in AppShell.tsx, well
@@ -178,7 +167,8 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
           is the sole flexible (`xl:flex-1 xl:min-h-0`) region left to absorb
           a long queue. Below `xl` it's a plain div -- the whole panel (or,
           below `xl`, the modal overlay) scrolls as one, unchanged. */}
-      <div className="flex flex-col xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+      {/* [scrollbar-gutter:stable] reserves the scrollbar's width so item rows don't shift ~11px when the scrollbar appears/disappears -- inert below xl, where overflow is never set. */}
+      <div className="flex flex-col xl:min-h-0 xl:flex-1 xl:overflow-y-auto [scrollbar-gutter:stable]">
         {trayHasItems ? (
           <ul className="flex flex-col gap-2">
             {items.map((item, i) => (
@@ -262,12 +252,13 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
             </div>
           ) : (
             <>
-              {/* data-testid: for a single-label body, "Per label" below is
-                  numerically IDENTICAL to this total (total_mm / 1 label) --
-                  a plain text query can't disambiguate the two in that (very
-                  common) case, so both this and JobTray's own compact mobile
-                  bar copy of the same total get stable testids/roles instead
-                  of relying on unique text. */}
+              {/* data-testid, not text: `total_mm` is just a formatted
+                  number ("X.X mm") that can collide with other elements
+                  showing the same figure elsewhere on the page (e.g. a
+                  one-label body's total matches PrintPreviewDeck's own
+                  "Total" stat when its docked deck previews the same job) --
+                  a stable testid sidesteps that ambiguity instead of relying
+                  on unique text. */}
               <p data-testid="estimate-total-mm" className="mt-1.5 font-mono text-[20px] leading-none text-deck-200">
                 {estimate.total_mm.toFixed(1)} mm
               </p>
@@ -292,54 +283,14 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
                       : (estimateFetching || baseline.isFetching) && <Pending />}
                 </p>
               )}
-              {/* Details disclosure -- collapsed by default at EVERY
-                  breakpoint (not just xl), extending
-                  components/PrintPreviewDeck.tsx's own identical "Notes"
-                  disclosure pattern (see that component's own comment above
-                  its button) to also hold the Per-label/Content-overhead
-                  `<dl>`: the docked preview deck's own stats column already
-                  shows those same numbers at a glance, so the tray's copy is
-                  one click away instead of permanently spending ~45px here.
-                  Total mm/usage bar above and the savings-delta line stay
-                  unconditionally visible either way. `aria-label` gives this
-                  button a distinct accessible name from the deck's own
-                  "Notes" button -- both can be mounted at once
-                  (GlobalTrayDrawer + PrintPreviewDeck both live in
-                  AppShell.tsx). Renders whenever there's an estimate at all
-                  (the dl is always there, unlike the notes ul below it,
-                  which only renders when non-empty) -- button and region
-                  always render together, so `aria-controls` never dangles. */}
-              <button
-                type="button"
-                onClick={() => setDetailsExpanded((v) => !v)}
-                aria-expanded={detailsExpanded}
-                aria-controls="tray-estimate-details"
-                aria-label="Estimate details"
-                className="mt-2 flex items-center gap-1 self-start font-mono text-[11px] text-deck-400 transition-colors hover:text-deck-200"
-              >
-                Details <span aria-hidden="true">{detailsExpanded ? "▾" : "▸"}</span>
-              </button>
-              <div id="tray-estimate-details" hidden={!detailsExpanded}>
-                <dl className="mt-2 flex flex-col gap-1 font-mono text-[13px] text-deck-200">
-                  <div className="flex justify-between">
-                    <dt className="text-deck-400">Per label</dt>
-                    <dd>{estimate.per_label_mm.toFixed(1)} mm</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-deck-400">Content / overhead</dt>
-                    <dd>
-                      {estimate.content_mm.toFixed(1)} / {estimate.feed_overhead_mm.toFixed(1)} mm
-                    </dd>
-                  </div>
-                </dl>
-                {estimate.notes.length > 0 && (
-                  <ul className="mt-2 flex flex-col gap-0.5 text-[11px] leading-snug text-deck-400">
-                    {estimate.notes.map((note, i) => (
-                      <li key={i}>· {note}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              {/* Tray headline, Preview breakdown (user-approved dedup): the
+                  tray keeps only the decision headline above (total + usage
+                  bar + savings delta) -- the full breakdown (Total / Per
+                  label / Content-overhead / Notes) lives exclusively in
+                  components/PrintPreviewDeck.tsx's own stats column, one
+                  click away via the "Preview" button below. Per-label,
+                  content/overhead, and estimate notes no longer render
+                  anywhere in this component. */}
             </>
           )}
         </div>

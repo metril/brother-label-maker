@@ -107,13 +107,24 @@ const cyclerButtonClass =
  * a function of viewport width. No `position: sticky` involved --
  * AppShell.tsx's own frame is viewport-bound (`h-screen` on its root
  * column; `<main>` scrolls internally instead), so this component, mounted
- * as the LAST child of that root column (below the header and the
- * `<main>`/dock-rail content row), is simply the root column's own last
- * in-flow child once `open` makes it `xl:static`. Fixed at `xl:h-64`
- * (16rem) tall -- that figure is this component's own height alone now; no
- * other file needs to know it (AppShell.tsx's dock rail used to reserve a
- * matching `calc()` height for the tray, but that mechanism is gone --
- * flexbox alone sizes the rail now, see AppShell.tsx's own docstring).
+ * as the LAST child of AppShell's own MIDDLE column (the one that also
+ * holds `<main>`, itself a child of the content row alongside the TYPES
+ * rail and the tray rail -- NOT a root-level sibling of that whole row),
+ * is simply that column's own last in-flow child once `open` makes it
+ * `xl:static`. "FULL-WIDTH" above means the width of that middle column --
+ * the viewport minus the TypeRail and tray-rail columns when either is
+ * visible -- not the full browser viewport; nesting the deck one level
+ * down like this (rather than at the content row's own root) is what
+ * keeps opening it from ever changing the tray rail's height, since its
+ * `xl:h-64` now comes out of the middle column's own flex budget alone,
+ * shrinking `<main>` beside it, instead of the content row's budget, which
+ * used to shrink every column in the row by the same amount (see
+ * AppShell.tsx's own docstring for the full before/after). Fixed at
+ * `xl:h-64` (16rem) tall -- that figure is this component's own height
+ * alone now; no other file needs to know it (AppShell.tsx's dock rail used
+ * to reserve a matching `calc()` height for the tray, but that mechanism
+ * is gone -- flexbox alone sizes the rail now, see AppShell.tsx's own
+ * docstring).
  *
  * Only the panel's own classes/attributes switch (a single DOM node, no
  * conditional unmount) -- `open` is ordinary component state, not
@@ -135,10 +146,21 @@ const cyclerButtonClass =
  * Three-group internal layout: the panel's children are wrapped into three
  * sibling groups -- A (header + zoom), B (cycler + strip), C (stats/
  * warnings/notes/disclaimer) -- so that once `open` flips the panel itself
- * to `xl:flex-row` (at `xl`), A and C can take fixed side columns
- * (`xl:w-56`/`xl:w-72`) and B (the strip, the whole point of the in-flow
- * bottom band) gets the leftover width via `xl:flex-1`. Below `xl`, all
- * three groups stack exactly as their un-grouped predecessors did.
+ * to `xl:grid` (at `xl`), it becomes a 2-column grid
+ * (`xl:grid-cols-[13rem_minmax(0,1fr)] xl:grid-rows-[auto_minmax(0,1fr)]`):
+ * the left column stacks A over C (`xl:col-start-1`, A at `xl:row-start-1`,
+ * C at `xl:row-start-2`), and B (the strip, the whole point of the in-flow
+ * bottom band) spans BOTH rows of the right column (`xl:col-start-2
+ * xl:row-span-2`) to take the leftover width. This narrower 13rem left
+ * column (not the old `xl:w-56`/`xl:w-72` side-by-side pair) is sized for
+ * the deck now living in AppShell's own MIDDLE column rather than the full
+ * viewport -- with the tray rail open beside it (26rem,
+ * GlobalTrayDrawer.tsx), three side-by-side groups at the old widths
+ * crushed the strip down to an unusably narrow sliver; stacking A over C
+ * frees that width back to B instead. DOM order stays A, B, C either way --
+ * only the `xl:` classes change, so below `xl` (the overlay mode) is
+ * untouched; all three groups still stack exactly as their un-grouped
+ * predecessors did.
  *
  * Cycling through queued labels: once a preview with 2+ segments is
  * loaded, a small previous/next row appears above the strip
@@ -393,7 +415,7 @@ export function PrintPreviewDeck() {
               // own in-flow contract (GlobalTrayDrawer.tsx) already uses.
               // `xl:h-64` is this component's own height alone now -- no
               // other file needs to know the figure.
-              "xl:static xl:inset-auto xl:z-auto xl:h-64 xl:w-full xl:translate-x-0 xl:visible xl:shrink-0 xl:border-l-0 xl:border-t xl:flex-row xl:items-stretch xl:overflow-hidden xl:gap-5"
+              "xl:static xl:inset-auto xl:z-auto xl:h-64 xl:w-full xl:translate-x-0 xl:visible xl:shrink-0 xl:border-l-0 xl:border-t xl:grid xl:grid-cols-[13rem_minmax(0,1fr)] xl:grid-rows-[auto_minmax(0,1fr)] xl:overflow-hidden xl:gap-x-5 xl:gap-y-2"
             : ""
         }`}
       >
@@ -405,7 +427,7 @@ export function PrintPreviewDeck() {
             wrapper existed -- the panel's own `gap-4` now only separates
             the three top-level groups from each other, not the rows within
             them. */}
-        <div className={`flex flex-col gap-4 ${open ? "xl:w-56 xl:shrink-0" : ""}`}>
+        <div className={`flex flex-col gap-4 ${open ? "xl:col-start-1 xl:row-start-1 xl:min-w-0" : ""}`}>
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className={eyebrow}>Print preview</span>
@@ -447,8 +469,9 @@ export function PrintPreviewDeck() {
         {/* Group B: the cycler row + the strip itself (or, before a
             preview exists, whichever placeholder state applies) -- the
             strip is the whole point of the in-flow bottom band, so it's
-            the one group that actually grows (`xl:flex-1`) to fill the
-            leftover width once A and C take their fixed columns.
+            the group that spans the WHOLE right column (`xl:col-start-2
+            xl:row-span-2`) once A and C stack in the narrower 13rem left
+            column instead of sitting beside it as a fixed-width sibling.
             `xl:min-h-0 xl:overflow-y-auto` (review fix): the band's own
             inner height is fixed (`xl:h-64`, 16rem, minus Group A/C's
             padding leaves ~216px), and at high zoom (8x) the cycler row +
@@ -459,7 +482,9 @@ export function PrintPreviewDeck() {
             part; `xl:overflow-y-auto` gives Group B its own scroll escape
             instead of silently clipping content. */}
         <div
-          className={`flex flex-col ${open ? "xl:min-w-0 xl:flex-1 xl:flex xl:flex-col xl:min-h-0 xl:overflow-y-auto" : ""}`}
+          className={`flex flex-col ${
+            open ? "xl:min-w-0 xl:flex xl:flex-col xl:min-h-0 xl:overflow-y-auto xl:col-start-2 xl:row-start-1 xl:row-span-2" : ""
+          }`}
         >
           {!renderable ? (
             <div className="flex flex-col gap-1">
@@ -587,8 +612,24 @@ export function PrintPreviewDeck() {
             column virtually never needs its own `xl:overflow-y-auto` scroll
             escape in the common case. */}
         {renderable && !error && preview && (
-          <div className={`flex flex-col ${open ? "xl:w-72 xl:shrink-0 xl:overflow-y-auto" : ""}`}>
-            <dl className="flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px] text-deck-200">
+          <div
+            className={`flex flex-col ${
+              open ? "xl:col-start-1 xl:row-start-2 xl:min-h-0 xl:min-w-0 xl:overflow-y-auto" : ""
+            }`}
+          >
+            {/* At `xl` this `<dl>` lives in the narrow 13rem left column
+                (shared with Group A above it), not a `xl:w-72` column of its
+                own -- the below-xl `flex-wrap gap-x-6` pairing (fine at full
+                width) would wrap into an awkward one-and-a-bit-per-row
+                layout at 13rem, so it switches to a single stacked column
+                (`xl:flex-col`, no wrap, no horizontal gap) instead; `gap-y-1`
+                keeps spacing the three stat blocks the same way either
+                layout stacks them. */}
+            <dl
+              className={`flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px] text-deck-200 ${
+                open ? "xl:flex-col xl:flex-nowrap xl:gap-x-0" : ""
+              }`}
+            >
               <div className="flex flex-col">
                 <dt className="text-[11px] text-deck-400">Total</dt>
                 <dd data-testid="preview-total-mm">{preview.total_mm.toFixed(1)} mm</dd>

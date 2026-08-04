@@ -169,10 +169,16 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * SAME TrayPanel instance GlobalTrayPanel renders on every route now), and
  * it must be mounted OUTSIDE GlobalTrayPanel's own translated slide-over
  * wrapper -- see that component's own docstring for why a body portal
- * (ui/Dialog.tsx's own approach) isn't used instead. It's mounted as a
- * ROOT-level sibling, the LAST child of this component's own top-level
- * column, AFTER the content row rather than inside it -- see the inline
- * comment at that mount point for why.
+ * (ui/Dialog.tsx's own approach) isn't used instead. It's mounted as the
+ * LAST child of a middle column that also holds `<main>`, itself a child of
+ * the content row (a sibling of the TYPES rail and the tray rail below) --
+ * NOT a root-level sibling of the whole row anymore. That move (user-
+ * reported bug fix) is what keeps opening the deck from ever changing the
+ * tray rail's height: the deck's `xl:h-64` now comes out of the middle
+ * column's own flex budget alone, shrinking `<main>` beside it, instead of
+ * out of the content row's budget, which used to shrink every column in the
+ * row -- including the tray rail -- by the same amount. See the inline
+ * comment at that mount point for the full class contract.
  *
  * Both panels are permanently mounted, open or not, on every route -- there
  * is no dock preference to persist anymore. Whether an OPEN panel renders
@@ -184,14 +190,19 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * `open` alone gates the in-flow class blocks either way.
  *
  * GlobalTrayPanel mounts separately, in its own rail inside the content row
- * (a sibling of `<main>`) -- see the inline comment at that mount point for
- * the exact class contract. Because the frame above is viewport-bound
- * (`h-screen` on the root column), the rail needs no explicit height of its
- * own: the content row's `items-stretch` plus the root's definite height
- * size it exactly. The preview deck, when open at `xl`, is just a plain
- * in-flow `xl:h-64` band at the very bottom of that same root column (see
- * the mount point below the content row) -- there's no reservation/shrink
- * logic anywhere in this file for the rail to coordinate with it.
+ * (a sibling of the middle column below, which itself holds `<main>` and the
+ * preview deck) -- see the inline comment at that mount point for the exact
+ * class contract. Because the frame above is viewport-bound (`h-screen` on
+ * the root column), the rail needs no explicit height of its own: the
+ * content row's `items-stretch` plus the root's definite height size it
+ * exactly. The preview deck, when open at `xl`, is just a plain in-flow
+ * `xl:h-64` band at the bottom of the MIDDLE COLUMN (see the mount point
+ * inside the content row, below `<main>`) -- a sibling of `<main>` there,
+ * not a sibling of this rail or of the content row itself. There's no
+ * reservation/shrink logic anywhere in this file for the rail to coordinate
+ * with it, and there doesn't need to be: the rail is a separate flex item of
+ * the row from the middle column the deck lives in, so the deck opening or
+ * closing never touches the rail's own size.
  *
  * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
@@ -283,18 +294,62 @@ export function AppShell({ children }: AppShellProps) {
 
       <div className="flex flex-1 flex-col lg:flex-row lg:items-stretch min-h-0">
         {isDesignRoute && <TypeRail />}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+
+        {/* Middle column: `<main>` stacked above the (open, `xl`) preview
+            deck -- the deck lives HERE, as this column's own last child,
+            NOT as a root-level sibling of the whole content row anymore
+            (user-reported bug fix: mounting it at the root used to take its
+            `xl:h-64` out of the ENTIRE row's flex budget, which shortened
+            the tray rail beside it too, every time the deck opened). Nested
+            one level down like this, the deck's height comes out of THIS
+            column's own budget alone -- shrinking `<main>` right above it --
+            so the tray rail, a separate flex item of the row, never resizes
+            regardless of whether the deck is open. Plain flex classes only
+            (`flex min-w-0 flex-1 flex-col`) -- no transform/filter/
+            backdrop-filter/contain, preserving the containing-block
+            guarantee the deck's own below-`xl` `position: fixed` overlay
+            mode depends on (see the rail's own comment below for the full
+            ancestor chain this wrapper is now also part of; nothing between
+            it and the app root introduces one). `min-w-0` matches the row's
+            other flex items (TypeRail, the tray rail) so this column can
+            still shrink below its content's intrinsic width instead of
+            forcing the row wider. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+
+          {/* This column's own last child, AFTER `<main>` -- see the column
+              wrapper's comment above for why it moved here from the root.
+              No sticky positioning, no calc() -- see PrintPreviewDeck.tsx's
+              own docstring: open at `xl` it's just `xl:static xl:h-64`, a
+              plain in-flow block. `xl:w-full` there now spans THIS column's
+              width (viewport minus the TypeRail and tray-rail columns when
+              visible), not the full viewport the way it did at the old
+              root-level mount point -- exactly right, since the deck should
+              only ever occupy the canvas area, never slide under the rails
+              on either side of it. It settles at this column's bottom
+              purely because flexbox puts it there: the column is `flex-1`
+              inside a `flex-col`, `<main>` above it is `min-h-0 flex-1`, and
+              this is the column's LAST child -- once `xl:static` makes it a
+              real flex item, `<main>`'s own `flex-1` simply shrinks to leave
+              it exactly `xl:h-64`. Below `xl`, or closed, it stays
+              `position: fixed` instead (unchanged from before), which
+              removes it from this column's flex layout entirely -- `<main>`
+              then claims the full remaining column height itself, same as
+              it always did. On EVERY route, same as the rail and
+              GlobalTrayButton (no `isDesignRoute` gate). */}
+          <PrintPreviewDeck />
+        </div>
 
         {/* Rail: the content row's own LAST child, a plain wrapper holding
             GlobalTrayPanel ONLY -- a direct child of this row, not nested
-            inside `children`. The preview deck never mounts here -- it's a
-            root-level sibling AFTER this whole row instead (see the mount
-            point below this row's closing tag, and this component's own
-            docstring above). Being the row's own last flex item is what
-            lets the tray's own open-at-`xl` in-flow mode (`xl:static ...`
-            class contract, GlobalTrayDrawer.tsx) render as a real in-flow
-            right-hand column beside `<main>` -- the row's `items-stretch`
-            stretches this wrapper to the same height as the row itself.
+            inside `children` or the middle column above. The preview deck
+            never mounts here, and is no longer even a sibling of this
+            wrapper at all -- see the middle column's own comment above.
+            Being the row's own last flex item is what lets the tray's own
+            open-at-`xl` in-flow mode (`xl:static ...` class contract,
+            GlobalTrayDrawer.tsx) render as a real in-flow right-hand column
+            beside the middle column -- the row's `items-stretch` stretches
+            this wrapper to the same height as the row itself.
             No explicit height, no sticky, no calc() -- the rail is a plain
             `flex min-h-0 flex-col` wrapper. This component's own root
             column is `h-screen` (see the top-of-file docstring), so the
@@ -302,9 +357,11 @@ export function AppShell({ children }: AppShellProps) {
             height, and `items-stretch` sizes this wrapper to exactly that
             -- no matter how tall the header happens to render (it
             flex-wraps, so its own height varies) or whether the preview
-            deck below is open. There is nothing left for this rail to
-            reserve or shrink for: flexbox alone divides the frame. When the
-            tray is closed (or below `xl`) the rail has zero width (the
+            deck is open. There is nothing left for this rail to reserve or
+            shrink for -- and unlike before, it isn't even a sibling of the
+            deck's own flex budget anymore, so there's nothing to coordinate
+            with even in principle: flexbox alone divides the frame. When
+            the tray is closed (or below `xl`) the rail has zero width (the
             panel is fixed or hidden), so the column is invisible.
             Containing-block check for the tray panel's below-`xl` (overlay)
             mode `position: fixed`: this wrapper carries no transform/
@@ -315,46 +372,18 @@ export function AppShell({ children }: AppShellProps) {
             JobEventsProvider/BrowserRouter/QueryClientProvider in App.tsx,
             none of which render a DOM wrapper at all) -- so `fixed` still
             resolves against the viewport here exactly as it did at
-            PrintPreviewDeck's OLD direct mount point (see that
+            PrintPreviewDeck's OLD root-level mount point (see that
             component's own docstring for why that ancestor check matters
             -- the JobTray translate trap this project hit before).
-            PrintPreviewDeck's own root-level mount point below relies on
-            this SAME guarantee -- see the comment there.
+            PrintPreviewDeck's own mount point, now inside the middle column
+            beside this rail, relies on this SAME guarantee -- see the
+            comment there.
             On EVERY route, same as GlobalTrayButton above (no
             `isDesignRoute` gate). */}
         <div className="flex min-h-0 flex-col">
           <GlobalTrayPanel />
         </div>
       </div>
-
-      {/* Root-level sibling, mounted AFTER the content row -- NOT inside the
-          rail above, and NOT inside `children`. As the root `h-screen`
-          column's own last child it spans the FULL viewport width,
-          underneath both `<main>` and the tray rail, which is what lets its
-          open-at-`xl` mode render as a full-width BOTTOM deck instead of a
-          right-hand column the tray rail's `items-stretch` would otherwise
-          squeeze it into.
-          No sticky positioning, no calc() -- see PrintPreviewDeck.tsx's own
-          docstring: open at `xl` it's just `xl:static xl:h-64`, a plain
-          in-flow block, the same shape the tray rail's own open-at-`xl`
-          contract already uses. It settles at the viewport bottom purely
-          because flexbox puts it there: the root column is `h-screen`, the
-          content row above it is `flex-1 min-h-0`, and this is the column's
-          LAST child -- once `xl:static` makes it a real flex item, the
-          content row's own `flex-1` simply shrinks to leave it exactly
-          `xl:h-64`. Below `xl`, or closed, it stays `position: fixed`
-          instead (unchanged from before), which removes it from the flex
-          layout entirely -- the content row then claims the full remaining
-          height itself, same as it always did. No padding/margin reserved
-          for it anywhere else in this file either way.
-          The containing-block guarantee its `position: fixed` overlay mode
-          depends on (no transform/filter/backdrop-filter between this mount
-          point and the root) still holds -- see the rail's own comment
-          above for the full ancestor check, which covers this mount point
-          too since nothing between the two changes it.
-          On EVERY route, same as the rail and GlobalTrayButton above (no
-          `isDesignRoute` gate). */}
-      <PrintPreviewDeck />
     </div>
   );
 }
