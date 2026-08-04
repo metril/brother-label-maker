@@ -84,10 +84,14 @@ async def test_history_list_is_light_shape_without_definition_or_thumbnail_bytes
         "tape_width_mm",
         "tape_used_mm",
         "thumbnail_url",
+        "kind",
     }
     assert item["status"] == "done"
     assert item["strategy"] == "classic"
     assert item["thumbnail_url"] == f"/api/history/{job['id']}/thumbnail"
+    # 0003_print_jobs_kind.sql (feed & cut trigger): every job created via
+    # the plain POST /api/print path defaults to kind='print'.
+    assert item["kind"] == "print"
 
 
 async def test_history_list_thumbnail_url_derives_from_preview_png_not_status(app_and_client):
@@ -290,6 +294,38 @@ async def test_reprint_serialization_job_reexpands_to_same_label_count(client):
 async def test_reprint_unknown_job_404(client):
     resp = await client.post("/api/history/does-not-exist/reprint")
     assert resp.status_code == 404
+
+
+async def test_reprint_feed_cut_row_queues_a_new_feed_cut_job(client):
+    """Fix wave item 1: a feed-cut row's `definition` is router_printer.py's
+    own placeholder (`labels: []`), never a real PrintRequest -- reprinting
+    it used to 409 with a raw pydantic blob (`labels` failing `min_length=
+    1`) instead of doing anything useful. reprint_job now branches on
+    `kind == "feed_cut"` FIRST and queues a brand new feed-cut trigger job
+    via the SAME helper POST /api/printer/cut itself uses -- proven here by
+    a 202 (not 409), a NEW job id, the new row carrying kind='feed_cut',
+    and (mock mode) it running to completion exactly like a fresh
+    POST /api/printer/cut would."""
+    cut_resp = await client.post("/api/printer/cut")
+    assert cut_resp.status_code == 202
+    original_id = cut_resp.json()["job_id"]
+    original = await _wait_for_terminal_job(client, original_id)
+    assert original["status"] == "done", original["error"]
+    assert original["kind"] == "feed_cut"
+
+    reprint_resp = await client.post(f"/api/history/{original_id}/reprint")
+    assert reprint_resp.status_code == 202
+    new_job_id = reprint_resp.json()["job_id"]
+    assert new_job_id != original_id
+
+    new_job = await _wait_for_terminal_job(client, new_job_id)
+    assert new_job["status"] == "done", new_job["error"]
+    assert new_job["kind"] == "feed_cut"
+    assert new_job["error"] is None
+
+    history = await client.get(f"/api/history/{new_job_id}")
+    assert history.json()["kind"] == "feed_cut"
+    assert history.json()["definition"]["labels"] == []
 
 
 async def test_reprint_409_when_stored_definition_no_longer_validates(app_and_client):

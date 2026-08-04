@@ -9,6 +9,18 @@ precedes rendering (see _expand_and_render) -- runs via
 `anyio.to_thread.run_sync` -- this coroutine must never block the event loop
 the rest of the API (and every other in-flight job's polling client) shares
 with it.
+
+A job's `kind` (0003_print_jobs_kind.sql, feed & cut trigger --
+docs/superpowers/specs/2026-08-04-feed-cut-trigger-design.md) branches
+_process_job between two entirely different bodies of work: 'print' (the
+default, everything above/below) renders label definitions and prints them;
+'feed_cut' (api/router_printer.py's POST /api/printer/cut) skips rendering
+entirely and builds the blank feed-and-cut page directly (see
+_open_feed_cut_close) -- no fake label definitions are ever synthesized for
+it. Both share the exact same lifecycle: status="printing" -> job.started,
+USB_LOCK-serialized open/print/close off the event-loop thread, the .bin
+stream written to the same jobs_dir, status="done"/job.done or
+status="failed"/job.failed on the way out.
 """
 
 from __future__ import annotations
@@ -21,9 +33,15 @@ from pathlib import Path
 import anyio
 from PIL import Image
 
-from labelmaker.driver.geometry import dots_to_mm
-from labelmaker.driver.job import JobOptions
-from labelmaker.driver.printer import PrintResult, get_status, print_images
+from labelmaker.driver.geometry import MIN_FEED_MM, TapeSpec, all_tapes, dots_to_mm
+from labelmaker.driver.job import JobOptions, feed_cut_image, feed_cut_options
+from labelmaker.driver.printer import (
+    PrinterBusyError,
+    PrintResult,
+    get_status,
+    print_images,
+    resolve_tape,
+)
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.driver.raster import BitOrder, RasterConfig
 from labelmaker.driver.strategies import InitStrategy, get_strategy
@@ -156,6 +174,10 @@ async def _process_job(state, job_id: str) -> None:
     await bus.broadcast({"event": "job.started", "job_id": job_id})
 
     try:
+        if job["kind"] == "feed_cut":
+            await _process_feed_cut_job(state, job_id, effective)
+            return
+
         definition = job["definition"]
         options = definition.get("options", {})
 
@@ -250,6 +272,163 @@ async def _process_job(state, job_id: str) -> None:
     except Exception as exc:
         await db.update_job(job_id, status="failed", error=str(exc))
         await bus.broadcast({"event": "job.failed", "job_id": job_id, "error": str(exc)})
+
+
+async def _process_feed_cut_job(state, job_id: str, effective) -> None:
+    """The feed-cut counterpart of the tail of _process_job's print branch
+    (build -> write stream -> backfill -> job.done). Called from inside
+    _process_job's own try block (see there) -- any exception here
+    propagates straight to that SAME except-and-mark-failed handler, so a
+    feed-cut job gets the exact same status="failed"/job.failed treatment a
+    print job's render/build/print failure gets, no separate handling
+    needed here.
+
+    `effective` is threaded through from _process_job rather than
+    re-snapshotted here -- task 4.5's own invariant (see _process_job's
+    comment on `effective`) is that the settings-overlay snapshot is taken
+    ONCE, before the status="printing" update/job.started broadcast, so a
+    PUT /api/settings racing this job can only ever affect the NEXT job.
+    Calling state.settings.effective() again here, after those awaits,
+    would quietly break that guarantee for feed-cut jobs specifically.
+
+    Deliberately does NOT call _expand_and_render/render_definition/
+    rasterize -- there is no label definition to render (job["definition"]
+    is router_printer.py's own placeholder, not a real PrintRequest -- see
+    that router's _feed_cut_definition) -- and does NOT set preview_png:
+    the printed page is a single blank dot-wide column, nothing meaningful
+    to thumbnail, so a feed-cut history row simply has no thumbnail_url
+    (db.list_jobs' `has_thumbnail` already derives straight from the
+    preview_png column, so this falls out for free -- see that method).
+    """
+    db = state.db
+    bus = state.bus
+    config = state.config
+
+    strategy = get_strategy(effective.printer_init_strategy)
+    progress_cb = _make_progress_cb(bus, job_id)
+
+    # C1: same single to_thread.run_sync-wrapped open->print->drain->close
+    # call _open_print_close's docstring describes for the print path --
+    # see _open_feed_cut_close below for why this one ALSO has to resolve
+    # the tape itself (status before image) rather than just handing
+    # already-built images to print_images.
+    result = await anyio.to_thread.run_sync(
+        _open_feed_cut_close, effective.printer_mode, strategy, progress_cb
+    )
+
+    jobs_dir = config.data_dir / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    stream_path = jobs_dir / f"{job_id}.bin"
+    await anyio.to_thread.run_sync(stream_path.write_bytes, result.job.data)
+
+    # M7's own convention (cli.py's _print_job_summary): tape consumed,
+    # floored at MIN_FEED_MM's mechanical head-to-cutter gap -- a feed-cut
+    # job's single raster line is far shorter than that gap, so this is
+    # MIN_FEED_MM in practice, same as the design doc's own "~24.5mm" framing.
+    tape_used_mm = max(dots_to_mm(result.job.total_raster_lines), MIN_FEED_MM)
+
+    await db.update_job(
+        job_id,
+        status="done",
+        strategy=result.job.strategy_name,
+        tape_width_mm=result.tape.nominal_mm,
+        media_raw_byte=result.status_before.media_type_raw,
+        tape_used_mm=tape_used_mm,
+    )
+    await bus.broadcast({"event": "job.done", "job_id": job_id})
+
+
+def _open_feed_cut_close(
+    printer_mode: str,
+    strategy: InitStrategy,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> PrintResult:
+    """Feed-cut counterpart of _open_print_close (see that function's own
+    docstring for the USB_LOCK/open/close contract, which this mirrors
+    exactly -- same lock-acquire-blocking, same mock/USB transport choice,
+    same finally-close/finally-release nesting).
+
+    The one structural difference: a normal print job's image is already
+    built (against the LABEL's declared tape) before _open_print_close ever
+    runs -- print_images then resolves the printer's LIVE tape and either
+    matches or raises a friendly mismatch error (_print's own job). A
+    feed-cut job has no declared tape to render against -- job.
+    feed_cut_image(tape) needs the REAL one (print_dots varies by tape
+    width) to build the blank image at all, so the status request has to
+    happen HERE, before print_images is even called, exactly like cli.py's
+    _run_usb_print does for its own test patterns (see that function's own
+    docstring for the same status-before-image-size ordering constraint).
+    status_before=status is then handed to print_images so it doesn't
+    re-request status a second time.
+
+    has_error/resolve_tape are therefore checked twice in total across one
+    feed-cut job when resolve_tape succeeds -- once here (to learn
+    tape.print_dots before an image can exist at all), once more inside
+    print_images itself (from the same status_before, structurally
+    unreachable but cheap) -- the exact same double-check cli._run_usb_print
+    already accepts for its own test patterns, not a new pattern introduced
+    here.
+
+    Fix wave item 4: when resolve_tape yields NO TapeSpec at all (an
+    unrecognized media width -- see resolve_tape's own contract), a normal
+    print job correctly refuses (TapeNotFoundError -- it has real content
+    that needs the ACTUAL loaded tape's geometry to render correctly). A
+    feed-cut job has no such content: feed_cut_image builds a 1-dot-wide,
+    ALL-WHITE image (see that function's own docstring) -- tape geometry
+    here only sizes a blank raster taller or shorter, it can never change
+    what (nothing) prints. Refusing the trigger here would block an
+    operator from the one thing it exists for -- a manual cut -- at exactly
+    the moment they most need it: right when the cassette's status reads
+    weird. So THIS path falls back to the widest known TapeSpec
+    (_widest_known_tape) instead of raising, and passes it to print_images
+    as `tape_override` (see that function's own docstring) so print_images'
+    OWN internal resolve_tape() call -- which would otherwise hit the exact
+    same "no TapeSpec" case and raise anyway -- is skipped for this one
+    request. When resolve_tape DOES succeed, `tape_override` is left None
+    and the double-check above still applies unchanged.
+    """
+    USB_LOCK.acquire()
+    try:
+        if printer_mode == "mock":
+            transport: Transport = MockPrinterTransport()
+        else:
+            transport = PyUsbTransport.open()
+        try:
+            status = get_status(transport)
+            if status.has_error:
+                raise PrinterBusyError(status)
+            tape, _assumed_tze = resolve_tape(status)
+            fallback_tape = tape is None
+            if fallback_tape:
+                tape = _widest_known_tape()
+
+            return print_images(
+                [feed_cut_image(tape)],
+                strategy=strategy,
+                options=feed_cut_options(),
+                transport=transport,
+                status_before=status,
+                progress_cb=progress_cb,
+                tape_override=tape if fallback_tape else None,
+            )
+        finally:
+            transport.close()
+    finally:
+        USB_LOCK.release()
+
+
+def _widest_known_tape() -> TapeSpec:
+    """Fix wave item 4: the feed-cut fallback used by _open_feed_cut_close
+    above when resolve_tape can't match the printer-reported media width to
+    any known TapeSpec. The widest (max print_dots) known tape can never be
+    "too narrow" for whatever cassette is actually loaded -- and since
+    feed_cut_image's blank image has no black pixel anywhere (see that
+    function's own docstring), an oversized-relative-to-reality print_dots
+    changes nothing about what lands on tape, only how tall the meaningless
+    blank raster is. Never used by the normal print path, which always
+    needs the ACTUAL loaded tape to render real content correctly.
+    """
+    return max(all_tapes(), key=lambda t: t.print_dots)
 
 
 def _expand_and_render(

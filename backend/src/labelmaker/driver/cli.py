@@ -1,4 +1,4 @@
-"""Checkpoint CLI: `python -m labelmaker.driver.cli {probe,status,print-test,capture}`.
+"""Checkpoint CLI: `python -m labelmaker.driver.cli {probe,status,print-test,capture,feed-cut}`.
 
 This is the tool the physical-checkpoint procedure (docs/protocol-notes.md)
 runs against the real PT-E720BT to resolve every `# UNVERIFIED:` decision left
@@ -22,7 +22,14 @@ import sys
 from PIL import Image, ImageDraw
 
 from labelmaker.driver.geometry import MIN_FEED_MM, MediaFamily, TapeSpec, all_tapes, dots_to_mm
-from labelmaker.driver.job import JobOptions, JobStream, build_job
+from labelmaker.driver.job import (
+    JobOptions,
+    JobStream,
+    build_feed_cut_job,
+    build_job,
+    feed_cut_image,
+    feed_cut_options,
+)
 from labelmaker.driver.printer import (
     PrinterBusyError,
     TapeNotFoundError,
@@ -430,6 +437,88 @@ def _cmd_capture(args: argparse.Namespace) -> int:
     return _run_capture(args, args.out)
 
 
+def _run_feed_cut_capture(args: argparse.Namespace, out_path: str) -> int:
+    """`feed-cut --capture FILE`: same shape as `_run_capture` above, but
+    for build_feed_cut_job (fixed options, no --pattern/--chain-mode/
+    --margin-mm/--no-auto-cut/--bit-order/--flip-pins -- see
+    job.build_feed_cut_job's own docstring for why those are fixed, not
+    caller-configurable)."""
+    tape = _find_tze_by_nominal(args.tape_width)
+    strategy = get_strategy(args.strategy)
+    stream = build_feed_cut_job(tape, strategy)
+    with open(out_path, "wb") as f:
+        f.write(stream.data)
+    _print_job_summary(stream, tape)
+    print(f"file={out_path} size={len(stream.data)}bytes")
+    return 0
+
+
+def _run_feed_cut_usb(args: argparse.Namespace) -> int:
+    """`feed-cut` over real/monkeypatched USB: same transport/strategy
+    wiring as `_run_usb_print` (status once, resolve_tape, print_images,
+    same error handling/exit codes) -- the one difference is the image:
+    feed_cut_image(tape) instead of build_pattern(args.pattern, ...), and
+    feed_cut_options() instead of _resolve_job_inputs' CLI-args-derived
+    JobOptions.
+    """
+    try:
+        transport, status = _open_and_get_status()
+    except (PrinterNotFoundError, StatusTimeoutError, TransportError) as err:
+        return _handle_hardware_error(err)
+
+    try:
+        if status.has_error:
+            print(
+                f"error: printer reports error(s): {', '.join(status.errors)}",
+                file=sys.stderr,
+            )
+            return 1
+
+        tape, assumed_tze = resolve_tape(status)
+        if assumed_tze:
+            print(f"media type unknown (0x{status.media_type_raw:02x}) — assuming TZe geometry")
+        if tape is None:
+            print(
+                f"error: no TapeSpec for detected media width {status.media_width_mm}mm",
+                file=sys.stderr,
+            )
+            return 1
+
+        strategy = get_strategy(args.strategy)
+        result = print_images(
+            [feed_cut_image(tape)],
+            strategy=strategy,
+            options=feed_cut_options(),
+            transport=transport,
+            status_before=status,
+        )
+        _print_job_summary(result.job, result.tape)
+        _print_post_print_events(result.post_print_events, result.blocks_seen)
+        return 0
+    except PrinterBusyError as err:
+        # Structurally unreachable given the has_error check above (both use
+        # the same `status`) -- kept as a defensive fallback, mirroring
+        # _run_usb_print's own identical note.
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    except TapeNotFoundError as err:
+        # Structurally unreachable given the tape-is-None check above (both
+        # use the same `status`) -- kept as a defensive fallback, mirroring
+        # _run_usb_print's own identical note.
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    except TransportError as err:
+        return _handle_hardware_error(err)
+    finally:
+        transport.close()
+
+
+def _cmd_feed_cut(args: argparse.Namespace) -> int:
+    if args.capture:
+        return _run_feed_cut_capture(args, args.capture)
+    return _run_feed_cut_usb(args)
+
+
 # --- argparse wiring -------------------------------------------------------
 
 
@@ -483,6 +572,23 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_job_args(capture_parser)
     capture_parser.add_argument("--out", required=True, metavar="FILE")
     capture_parser.set_defaults(func=_cmd_capture)
+
+    feed_cut_parser = subparsers.add_parser(
+        "feed-cut",
+        help="trigger a feed-and-cut (advance tape past the cutter and cut, no label printed)",
+    )
+    feed_cut_parser.add_argument("--strategy", required=True, choices=sorted(STRATEGIES))
+    feed_cut_parser.add_argument(
+        "--tape-width",
+        type=float,
+        choices=_TAPE_WIDTH_CHOICES,
+        default=24,
+        help="TZe tape width in mm, used only for --capture geometry (default: 24)",
+    )
+    feed_cut_parser.add_argument(
+        "--capture", metavar="FILE", default=None, help="write the stream to FILE instead of USB"
+    )
+    feed_cut_parser.set_defaults(func=_cmd_feed_cut)
 
     return parser
 

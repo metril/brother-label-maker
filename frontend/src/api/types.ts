@@ -397,6 +397,16 @@ export interface ChainedPreviewResponse {
 
 export type JobStatus = "queued" | "printing" | "done" | "failed" | "canceled";
 
+/** Feed & cut design doc (2026-08-04): every job/history row's `kind` --
+ * `"print"` for an ordinary label job, `"feed_cut"` for a queued
+ * POST /api/printer/cut job (feeds ~24.5mm/MIN_FEED_MM past the cutter and
+ * cuts, no label content). Additive backend column, default `'print'` --
+ * marked optional here (not every mock/fixture in this codebase predates
+ * the field) rather than required, so an absent `kind` is read the same as
+ * `"print"` by every caller (see HistoryRow.tsx's own `item.kind ===
+ * "feed_cut"` check, which is false for `undefined` too). */
+export type JobKind = "print" | "feed_cut";
+
 export interface PrintJob {
   id: string;
   created_at: string;
@@ -410,6 +420,7 @@ export interface PrintJob {
   media_raw_byte: number | null;
   tape_used_mm: number | null;
   thumbnail_png_b64: string | null;
+  kind?: JobKind;
 }
 
 // --- Presets (task 2.8) -----------------------------------------------------
@@ -497,6 +508,9 @@ export interface HistoryItem {
   tape_width_mm: number | null;
   tape_used_mm: number | null;
   thumbnail_url: string | null;
+  /** See PrintJob's own `kind` doc -- same field, same optional-tolerant
+   * default-to-"print" reading. */
+  kind?: JobKind;
 }
 
 export interface HistoryListResponse {

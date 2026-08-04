@@ -90,6 +90,95 @@ describe("TrayPanel -- current === null (away from the Designer page)", () => {
  * + the optional `closeTrayDrawer` prop -- the deck's actual content
  * (PNG/segments/stats/mode tabs/zoom/focus/Escape) is covered end-to-end
  * by PrintPreviewDeck.test.tsx instead. */
+// Feed & cut design doc (2026-08-04): a compact secondary button, always
+// present next to Preview -- accessible name is "Feed & cut" (the full
+// phrase) via aria-label even though the visible text is the shorter "Cut"
+// (see TrayPanel.tsx's own comment on why), so every query below targets
+// that name regardless of which visible label is on screen.
+describe("TrayPanel -- Feed & cut button", () => {
+  it("is present and enabled even with an empty tray and no current design -- a printer action, never gated on tray contents", () => {
+    renderWithProviders(<TrayPanel current={null} />);
+    expect(screen.getByRole("button", { name: "Feed & cut" })).toBeEnabled();
+  });
+
+  it("clicking it POSTs /api/printer/cut", async () => {
+    const user = userEvent.setup();
+    let posted = false;
+    server.use(
+      http.post("/api/printer/cut", () => {
+        posted = true;
+        return HttpResponse.json({ job_id: "cut-job-1" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<TrayPanel current={null} />);
+    await user.click(screen.getByRole("button", { name: "Feed & cut" }));
+
+    await waitFor(() => expect(posted).toBe(true));
+  });
+
+  it("disables the button while the request is pending, and keeps it disabled immediately after the request settles (Item 3's cooldown)", async () => {
+    const user = userEvent.setup();
+    let resolveResponse!: () => void;
+    server.use(
+      http.post("/api/printer/cut", async () => {
+        await new Promise<void>((resolve) => {
+          resolveResponse = resolve;
+        });
+        return HttpResponse.json({ job_id: "cut-job-2" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<TrayPanel current={null} />);
+    const cutButton = screen.getByRole("button", { name: "Feed & cut" });
+    await user.click(cutButton);
+
+    await waitFor(() => expect(cutButton).toBeDisabled());
+
+    resolveResponse();
+    // Item 3 (fix wave): the pre-fix behavior re-enabled the instant the
+    // 202 landed (`disabled={feedCut.isPending}`) -- it now stays disabled
+    // through useFeedCut.ts's post-success cooldown instead, so a
+    // double-click can't queue a second physical cut. `waitFor` here polls
+    // past the moment the request itself settles (react-query flips
+    // `isPending` false) and confirms the button is STILL disabled at that
+    // point -- the exact window the pre-fix version would have re-enabled
+    // in. The cooldown eventually clearing (isBusy -> false) is covered by
+    // useFeedCut.test.tsx's own fake-timer test, not repeated here.
+    await waitFor(() => expect(cutButton).toBeDisabled());
+  });
+
+  it("re-enables once the post-success cooldown elapses (Item 3)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("/api/printer/cut", () => HttpResponse.json({ job_id: "cut-job-cooldown" }, { status: 202 })),
+    );
+
+    renderWithProviders(<TrayPanel current={null} />);
+    const cutButton = screen.getByRole("button", { name: "Feed & cut" });
+    await user.click(cutButton);
+
+    await waitFor(() => expect(cutButton).toBeDisabled());
+    // Real timers, bounded well past useFeedCut.ts's COOLDOWN_MS (2500ms) --
+    // an end-to-end check that the real constant is wired all the way
+    // through to the DOM, not just exercised via the hook's own fake-timer
+    // test.
+    await waitFor(() => expect(cutButton).toBeEnabled(), { timeout: 4000 });
+  }, 6000);
+
+  it("renders the server's error message inline below the row, role=alert", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("/api/printer/cut", () => HttpResponse.json({ detail: "cannot queue: printer busy" }, { status: 409 })),
+    );
+
+    renderWithProviders(<TrayPanel current={null} />);
+    await user.click(screen.getByRole("button", { name: "Feed & cut" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("cannot queue: printer busy");
+  });
+});
+
 describe("TrayPanel -- Preview button", () => {
   it("is disabled when the tray has nothing valid to print (mirrors the estimate/Print gate)", () => {
     renderWithProviders(<TrayPanel current={currentDesign({ canSubmit: false })} />);

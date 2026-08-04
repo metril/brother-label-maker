@@ -26,6 +26,7 @@ from pydantic import ValidationError
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
 from labelmaker.api.router_print import PrintRequest, _job_to_response, _validate_and_measure
+from labelmaker.api.router_printer import create_feed_cut_job
 from labelmaker.render.estimate import estimate
 
 router = APIRouter(prefix="/history", tags=["history"])
@@ -40,6 +41,10 @@ _LIGHT_ITEM_FIELDS = (
     "strategy",
     "tape_width_mm",
     "tape_used_mm",
+    # 0003_print_jobs_kind.sql (feed & cut trigger): "print" | "feed_cut" --
+    # see db.list_jobs' own SELECT column list, which this tuple's field
+    # names must stay a subset of.
+    "kind",
 )
 
 
@@ -116,10 +121,28 @@ async def reprint_job(
     referenced was since removed) is this SERVER-side resource having gone
     stale, hence 409, not 422 -- so a 422 raised by _validate_and_measure is
     caught and re-raised as 409 here, its detail message unchanged.
+
+    Fix wave item 1: `job["kind"] == "feed_cut"` branches FIRST, before any
+    of the above -- a feed-cut row's `definition` is router_printer.py's
+    OWN placeholder (`labels: []`, see _feed_cut_definition), never a real
+    PrintRequest, so `PrintRequest.model_validate` on it always fails
+    `labels`' `min_length=1` and used to 409 with a raw pydantic blob no
+    user could act on. Reprinting a feed-cut row instead means the exact
+    same thing POST /api/printer/cut means: queue a brand new feed-cut
+    trigger job. create_feed_cut_job (router_printer.py) is the SAME
+    create+persist+broadcast+enqueue helper that route calls, so a
+    reprinted feed-cut row is byte-for-byte indistinguishable from a fresh
+    POST /api/printer/cut -- and this returns the exact same `{"job_id":
+    ...}` shape the print-reprint path below returns, so callers don't
+    need to branch on what kind of row they reprinted.
     """
     job = await db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+
+    if job["kind"] == "feed_cut":
+        new_job = await create_feed_cut_job(db, queue, bus)
+        return {"job_id": new_job["id"]}
 
     try:
         print_request = PrintRequest.model_validate(job["definition"])

@@ -333,15 +333,25 @@ class Database:
         media_raw_byte: int | None = None,
         tape_used_mm: float | None = None,
         preview_png: bytes | None = None,
+        kind: str = "print",
     ) -> dict:
+        """`kind` (0003_print_jobs_kind.sql, feed & cut trigger): 'print'
+        (the default -- every pre-existing caller of this method is
+        creating a real print job) or 'feed_cut' -- a queued feed-and-cut
+        trigger job, api/router_printer.py's own only caller. Not
+        validated here (mirrors this method's existing `chain_mode`/
+        `strategy` string params, which are similarly unchecked at this
+        layer) -- the two literal values above are the only ones anything
+        in this codebase ever writes.
+        """
         job_id = uuid.uuid4().hex
         now = _utcnow()
         status = "queued"
         await self._conn.execute(
             "INSERT INTO print_jobs "
             "(id, created_at, status, error, definition, label_count, chain_mode, strategy, "
-            "tape_width_mm, media_raw_byte, tape_used_mm, preview_png) "
-            "VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "tape_width_mm, media_raw_byte, tape_used_mm, preview_png, kind) "
+            "VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 job_id,
                 now,
@@ -354,6 +364,7 @@ class Database:
                 media_raw_byte,
                 tape_used_mm,
                 preview_png,
+                kind,
             ),
         )
         return {
@@ -369,6 +380,7 @@ class Database:
             "media_raw_byte": media_raw_byte,
             "tape_used_mm": tape_used_mm,
             "preview_png": preview_png,
+            "kind": kind,
         }
 
     async def update_job(
@@ -525,7 +537,7 @@ class Database:
 
         cur = await self._conn.execute(
             "SELECT id, created_at, status, error, definition, label_count, chain_mode, "
-            "strategy, tape_width_mm, media_raw_byte, tape_used_mm, "
+            "strategy, tape_width_mm, media_raw_byte, tape_used_mm, kind, "
             # review fix-up: derive thumbnail presence from the BLOB column
             # itself (`preview_png IS NOT NULL`), not from `status == "done"`
             # -- the caller (api/router_history.py's light list items) used

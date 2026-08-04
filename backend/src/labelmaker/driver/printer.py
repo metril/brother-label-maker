@@ -182,6 +182,7 @@ def print_images(
     status_before: PrinterStatus | None = None,
     progress_cb: Callable[[int, int], None] | None = None,
     chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE,
+    tape_override: TapeSpec | None = None,
 ) -> PrintResult:
     """request_status -> raise PrinterBusyError if the printer reports
     error(s) -> resolve tape geometry (I4: TZe fallback on unknown media
@@ -209,15 +210,38 @@ def print_images(
     `progress_cb`, when given, is called after every chunk with
     (bytes_written_so_far, total) -- see jobs/worker.py for the throttled
     job.progress broadcast built on top of this.
+
+    `tape_override` (fix wave item 4, feed-cut widest-tape fallback --
+    jobs/worker.py's _open_feed_cut_close): when given, this function's OWN
+    resolve_tape() call -- and the TapeNotFoundError it would otherwise
+    raise for an unmatched media width -- is skipped entirely, and `images`
+    is built against this TapeSpec instead. The caller has already resolved
+    tape itself and, for a feed-cut job whose width matched no known
+    TapeSpec, substituted this fallback (nothing is ever actually printed
+    by a feed-cut job -- its image is pure white -- so tape geometry only
+    sizes a blank raster, never affects what lands on tape; refusing the
+    trigger over an unrecognized cassette would leave an operator unable to
+    do the one thing this trigger exists for, a manual cut, at exactly the
+    moment they most need it). `assumed_tze` on the returned PrintResult is
+    unconditionally True in this case -- the fallback path can't
+    distinguish which media-family assumption produced the unresolved
+    tape, and no caller of this override currently reads that field.
+    NEVER passed by the normal print path (worker.py's _open_print_close /
+    cli.py), which keeps relying on this function's own resolution +
+    TapeNotFoundError exactly as before -- I1's real height-mismatch
+    handling there still needs the ACTUAL loaded tape, not a guess.
     """
     if status_before is None:
         status_before = request_status(transport)
     if status_before.has_error:
         raise PrinterBusyError(status_before)
 
-    tape, assumed_tze = resolve_tape(status_before)
-    if tape is None:
-        raise TapeNotFoundError(status_before, assumed_tze=assumed_tze)
+    if tape_override is not None:
+        tape, assumed_tze = tape_override, True
+    else:
+        tape, assumed_tze = resolve_tape(status_before)
+        if tape is None:
+            raise TapeNotFoundError(status_before, assumed_tze=assumed_tze)
 
     stream = build_job(images, tape, strategy, options)
     _write_chunked(transport, stream.data, chunk_size, progress_cb)

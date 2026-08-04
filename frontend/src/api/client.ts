@@ -353,6 +353,17 @@ export function getPrinterStatus(): Promise<PrinterStatusResponse> {
   return request<PrinterStatusResponse>("/printer/status");
 }
 
+/** POST /api/printer/cut (feed & cut design doc, 2026-08-04): queues a REAL
+ * print job (`kind: "feed_cut"`, see api/types.ts's own doc) that feeds the
+ * tape ~24.5mm/MIN_FEED_MM past the cutter and cuts -- the P-touch raster
+ * protocol has no standalone cut opcode, so this is built the exact same
+ * way any job's own trailing cut is (one blank all-white line + auto-cut).
+ * Same 202 `{job_id}` contract, same job_id type, as POST /api/print --
+ * see hooks/useFeedCut.ts, the only intended caller. */
+export function postPrinterCut(): Promise<PrintJobResponse> {
+  return request<PrintJobResponse>("/printer/cut", { method: "POST" });
+}
+
 /** data: URL for a base64 PNG payload, as returned by /api/render/preview
  * (png_b64) or a print job's thumbnail_png_b64. */
 export function pngDataUrl(pngB64: string): string {

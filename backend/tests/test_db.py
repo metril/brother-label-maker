@@ -696,3 +696,61 @@ async def test_migration_runs_in_a_transaction_rolls_back_on_failure(tmp_path):
         conn.close()
     assert "foo" not in tables
     assert "schema_migrations" in tables
+
+
+# --- 7. 0003_print_jobs_kind.sql: additive `kind` column (feed & cut ---
+# trigger, docs/superpowers/specs/2026-08-04-feed-cut-trigger-design.md).
+
+
+async def test_migration_0003_adds_print_jobs_kind_column_applied_exactly_once(tmp_path):
+    db_path = tmp_path / "kind.db"
+    db = await Database.open(db_path)
+    try:
+        cur = await db._conn.execute("SELECT version FROM schema_migrations ORDER BY version")
+        versions = [row[0] for row in await cur.fetchall()]
+        assert 3 in versions  # 0003_print_jobs_kind.sql actually applied
+
+        cur = await db._conn.execute("PRAGMA table_info(print_jobs)")
+        columns = {row[1] for row in await cur.fetchall()}
+        assert "kind" in columns
+    finally:
+        await db.close()
+
+    # Re-opening the same file must not re-apply it (same idempotency every
+    # other migration in this suite is held to).
+    db2 = await Database.open(db_path)
+    try:
+        cur = await db2._conn.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 3"
+        )
+        (count,) = await cur.fetchone()
+        assert count == 1
+    finally:
+        await db2.close()
+
+
+async def test_print_jobs_kind_defaults_to_print_and_accepts_feed_cut():
+    db = await Database.open(":memory:")
+    try:
+        default_job = await db.create_print_job(
+            {"labels": []}, label_count=1, chain_mode="cut_each"
+        )
+        assert default_job["kind"] == "print"
+        assert (await db.get_job(default_job["id"]))["kind"] == "print"
+
+        feed_cut_job = await db.create_print_job(
+            {"labels": [], "options": {"chain_mode": "cut_each"}},
+            label_count=0,
+            chain_mode="cut_each",
+            kind="feed_cut",
+        )
+        assert feed_cut_job["kind"] == "feed_cut"
+        assert (await db.get_job(feed_cut_job["id"]))["kind"] == "feed_cut"
+
+        # list_jobs' own explicit SELECT column list must also surface it.
+        listed = await db.list_jobs(page_size=100)
+        kinds = {item["id"]: item["kind"] for item in listed["items"]}
+        assert kinds[default_job["id"]] == "print"
+        assert kinds[feed_cut_job["id"]] == "feed_cut"
+    finally:
+        await db.close()

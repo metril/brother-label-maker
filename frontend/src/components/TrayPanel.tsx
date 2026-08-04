@@ -1,3 +1,4 @@
+import { useFeedCut } from "../hooks/useFeedCut";
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { usePrintJob } from "../hooks/usePrintJob";
 import { useTrayPreviews } from "../hooks/useTrayPreviews";
@@ -10,7 +11,7 @@ import { TrayItemRow } from "./TrayItemRow";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { Switch } from "./ui/Switch";
-import { dashedAddButtonClass, eyebrow, helpText } from "./ui/styles";
+import { dashedAddButtonClass, errorText, eyebrow, helpText } from "./ui/styles";
 import type { LabelDefinition, PrintOptions } from "../api/types";
 
 // Re-exported for compat: every existing import site/test wrote
@@ -139,6 +140,11 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
   // fire anything itself.
   const bodyKey = JSON.stringify({ bodyLabels, options, bodySerialization });
   const job = usePrintJob(bodyKey);
+
+  // Feed & cut design doc: a PRINTER action (advances tape past the
+  // cutter), not a tray/design one -- deliberately never gated on
+  // `trayHasItems`/`canEstimate` below, unlike Preview/Print.
+  const feedCut = useFeedCut();
 
   const blockedBySerializationAndTray = current !== null && current.serializationEnabled && trayHasItems;
 
@@ -331,6 +337,34 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
             Preview
           </button>
 
+          {/* Feed & cut (design doc 2026-08-04): a compact secondary action,
+              styled identically to Preview above -- a printer action valid
+              even with an empty tray/no current design, so it's NEVER part
+              of the trayHasItems/canEstimate gates the other two buttons in
+              this row use. Visible text stays "Cut" to fit this row's
+              ~376px inner width alongside Preview + a count-bearing Print
+              label ("Print 100 labels (tray)") without wrapping -- the full
+              phrase lives in `title` (the design doc's own tooltip copy)
+              and `aria-label` instead, so it's still "Feed & cut" to a
+              screen reader and to any test/automation querying by
+              accessible name.
+
+              Item 3 (fix wave): `disabled` is `isBusy` (pending OR the
+              post-success cooldown -- see useFeedCut.ts's own COOLDOWN_MS
+              comment), not `isPending` alone -- the POST resolves in
+              milliseconds, so `isPending` alone leaves a wide-open window
+              for a double-click to queue a second physical cut. */}
+          <button
+            type="button"
+            onClick={feedCut.feedCut}
+            disabled={feedCut.isBusy}
+            title="Advances ~25mm to push the tape past the cutter"
+            aria-label="Feed & cut"
+            className="rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 text-[13px] font-medium text-deck-200 transition-colors hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Cut
+          </button>
+
           {/* The block message renders exactly ONCE, inside PrintButton itself
               (its own role="alert") -- a second, standalone copy here would be
               the exact kind of duplicate-error surfacing this task's own
@@ -353,6 +387,12 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
             />
           </div>
         </div>
+
+        {feedCut.error && (
+          <p role="alert" className={errorText}>
+            {feedCut.error}
+          </p>
+        )}
       </div>
     </>
   );

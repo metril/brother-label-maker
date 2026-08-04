@@ -63,6 +63,42 @@ describe("History page", () => {
     expect(within(table).getByAltText("")).toHaveAttribute("src", "/api/history/job-1/thumbnail");
   });
 
+  // Feed & cut design doc (2026-08-04): a feed_cut job has no real label
+  // content (label_count: 0) and a Mode column that must show the row's
+  // real identity ("Feed & cut"), not its always-"cut_each" chain_mode
+  // (which would otherwise read as an ordinary one-label print) -- see
+  // HistoryRow.tsx's own doc on this.
+  it("a feed_cut job's row shows the humanized 'Feed & cut' label and renders sanely with no label content", async () => {
+    server.use(
+      http.get("/api/history", () =>
+        HttpResponse.json({
+          items: [
+            item({
+              kind: "feed_cut",
+              label_count: 0,
+              chain_mode: "cut_each",
+              thumbnail_url: null,
+              tape_used_mm: 24.5,
+            }),
+          ],
+          page: 1,
+          page_size: 20,
+          total: 1,
+        }),
+      ),
+    );
+    renderWithProviders(<History />);
+
+    const table = await findTable();
+    const row = within(table).getByText("Feed & cut").closest("tr")!;
+    expect(within(row).getByText("Done")).toBeInTheDocument();
+    expect(within(row).getByText("0")).toBeInTheDocument();
+    expect(within(row).getByText("24mm")).toBeInTheDocument();
+    expect(within(row).getByText("24.5 mm")).toBeInTheDocument();
+    // No chain-mode text ("Cut each") leaks through for a feed_cut row.
+    expect(within(row).queryByText("Cut each")).not.toBeInTheDocument();
+  });
+
   it("shows the failure text for a failed job", async () => {
     server.use(
       http.get("/api/history", () =>

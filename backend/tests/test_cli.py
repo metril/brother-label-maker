@@ -698,6 +698,116 @@ def test_status_raw_prints_32_space_separated_hex_bytes(monkeypatch, capsys):
 
 
 # =====================================================================
+# 4b. `feed-cut` (task: feed & cut trigger, docs/superpowers/specs/
+# 2026-08-04-feed-cut-trigger-design.md) -- same transport/strategy wiring
+# as `print-test`, fixed options (no --pattern/--chain-mode/--margin-mm/
+# --no-auto-cut/--bit-order/--flip-pins -- see job.build_feed_cut_job's own
+# docstring for why those are fixed).
+# =====================================================================
+
+
+def test_capture_feed_cut_classic_stream_shape(tmp_path):
+    out = tmp_path / "feed_cut_classic.bin"
+    rc = cli.main(["feed-cut", "--capture", str(out), "--strategy", "classic"])
+
+    assert rc == 0
+    data = out.read_bytes()
+    assert data.startswith(b"\x00" * 100 + b"\x1b\x40")
+    assert data.endswith(b"Z\x1a")  # zero raster line ('Z' PackBits shorthand) + CTRL_Z
+    assert b"\x1b\x69\x4d\x40" in data  # auto-cut ON
+    assert b"\x1b\x69\x4b\x08" in data  # CUT_EACH -> no-chain bit SET
+
+
+def test_capture_feed_cut_e310bt_stream_shape(tmp_path):
+    out = tmp_path / "feed_cut_e310bt.bin"
+    rc = cli.main(["feed-cut", "--capture", str(out), "--strategy", "e310bt"])
+
+    assert rc == 0
+    data = out.read_bytes()
+    assert data.startswith(b"\x00" * 100 + b"\x1b\x40")
+    assert data.endswith(b"\x1a")
+    assert data[-20:] == b"\x47\x10\x00" + b"\x00" * 16 + b"\x1a"  # RAW zero-line frame + CTRL_Z
+    assert b"\x1b\x69\x64\x01\x00\x4d\x00" in data  # MAGIC
+    assert b"\x4d\x02" not in data  # no PackBits select on e310bt
+
+
+def test_capture_feed_cut_tape_width_12_esc_i_z_n3_byte(tmp_path):
+    out = tmp_path / "feed_cut_12mm.bin"
+    rc = cli.main(
+        ["feed-cut", "--capture", str(out), "--strategy", "classic", "--tape-width", "12"]
+    )
+    assert rc == 0
+    data = out.read_bytes()
+    assert b"\x1b\x69\x7a\x84\x00\x0c" in data
+
+
+def test_feed_cut_usb_success_writes_status_request_then_job(monkeypatch, capsys):
+    transport = CaptureTransport()
+    transport.queue_read(REFERENCE_STATUS_BLOCK)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["feed-cut", "--strategy", "classic"])
+
+    assert rc == 0
+    assert transport.written.startswith(STATUS_REQUEST_SEQUENCE)
+    assert len(transport.written) > len(STATUS_REQUEST_SEQUENCE)  # job stream also written
+    assert transport.written[len(STATUS_REQUEST_SEQUENCE) :].startswith(b"\x00" * 100 + b"\x1b\x40")
+    assert transport.written.endswith(b"Z\x1a")
+    printed = capsys.readouterr().out
+    assert "classic" in printed
+
+
+def test_feed_cut_usb_refuses_when_status_has_error(monkeypatch):
+    transport = CaptureTransport()
+    transport.queue_read(ERROR_STATUS_BLOCK)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["feed-cut", "--strategy", "classic"])
+
+    assert rc == 1
+    assert transport.written == STATUS_REQUEST_SEQUENCE  # nothing written after the request
+
+
+def test_feed_cut_usb_unknown_media_width_exits_1(monkeypatch):
+    block = _status_block({10: 99})  # no TapeSpec has status_width_mm == 99
+    transport = CaptureTransport()
+    transport.queue_read(block)
+    monkeypatch.setattr(cli, "_open_transport", lambda: transport)
+
+    rc = cli.main(["feed-cut", "--strategy", "classic"])
+
+    assert rc == 1
+    assert transport.written == STATUS_REQUEST_SEQUENCE
+
+
+def test_feed_cut_printer_not_found_exits_1_with_permissions_hint(monkeypatch, capsys):
+    def _raise():
+        raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
+
+    monkeypatch.setattr(cli, "_open_transport", _raise)
+
+    rc = cli.main(["feed-cut", "--strategy", "classic"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "permission" in err.lower()
+
+
+def test_feed_cut_bad_strategy_choice_exits_2(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            ["feed-cut", "--capture", str(tmp_path / "x.bin"), "--strategy", "bogus"]
+        )
+    assert exc.value.code == 2
+
+
+def test_feed_cut_missing_strategy_exits_2():
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["feed-cut"])
+    assert exc.value.code == 2
+
+
+# =====================================================================
 # 5. Bad args -> argparse exits 2
 # =====================================================================
 

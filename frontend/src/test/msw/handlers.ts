@@ -363,6 +363,15 @@ export const cancelPrintJobHandler = http.post("/api/print/jobs/:jobId/cancel", 
   HttpResponse.json({ status: "canceled" }),
 );
 
+/** Feed & cut design doc (2026-08-04): POST /api/printer/cut -- default
+ * handler assumes success (same 202 `{job_id}` shape as printHandler
+ * above); hooks/useFeedCut.test.tsx / TrayPanel.test.tsx / Diagnostics.test.tsx
+ * override with server.use(...) for the failure/pending scenarios they
+ * actually assert on, same convention as everywhere else in this file. */
+export const printerCutHandler = http.post("/api/printer/cut", () =>
+  HttpResponse.json({ job_id: "feed-cut-job-1" }, { status: 202 }),
+);
+
 export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ params }) =>
   HttpResponse.json({
     id: params.jobId,
@@ -595,6 +604,7 @@ export const defaultHandlers = [
   printHandler,
   printJobDoneHandler,
   cancelPrintJobHandler,
+  printerCutHandler,
   expandHandler,
   serializeCsvHandler,
   presetsListHandler,

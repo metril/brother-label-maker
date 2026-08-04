@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Diagnostics } from "./Diagnostics";
 import { renderWithProviders } from "../test/utils";
@@ -158,5 +159,37 @@ describe("Diagnostics page", () => {
     const printer = await screen.findByRole("heading", { name: "Printer" }).then((h) => h.closest("section")!);
     expect(await within(printer).findByText("Error")).toBeInTheDocument();
     expect(within(printer).getByText("USB error opening printer: no backend available")).toBeInTheDocument();
+  });
+
+  describe("Feed & cut", () => {
+    it("clicking it POSTs /api/printer/cut", async () => {
+      const user = userEvent.setup();
+      let posted = false;
+      server.use(
+        http.post("/api/printer/cut", () => {
+          posted = true;
+          return HttpResponse.json({ job_id: "cut-job-1" }, { status: 202 });
+        }),
+      );
+
+      renderWithProviders(<Diagnostics />, { route: "/diagnostics" });
+      const printer = await screen.findByRole("heading", { name: "Printer" }).then((h) => h.closest("section")!);
+      await user.click(within(printer).getByRole("button", { name: "Feed & cut" }));
+
+      await waitFor(() => expect(posted).toBe(true));
+    });
+
+    it("renders the server's error message inline near the raw status block, role=alert", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.post("/api/printer/cut", () => HttpResponse.json({ detail: "cannot queue: printer busy" }, { status: 409 })),
+      );
+
+      renderWithProviders(<Diagnostics />, { route: "/diagnostics" });
+      const printer = await screen.findByRole("heading", { name: "Printer" }).then((h) => h.closest("section")!);
+      await user.click(within(printer).getByRole("button", { name: "Feed & cut" }));
+
+      expect(await within(printer).findByRole("alert")).toHaveTextContent("cannot queue: printer busy");
+    });
   });
 });

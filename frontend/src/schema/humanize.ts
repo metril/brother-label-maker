@@ -54,6 +54,10 @@ const ENUM_OVERRIDES: Record<string, string> = {
   cut_each: "Cut each",
   chain_ff: "Cut at end",
   strip_marks: "One strip",
+  // api/types.ts's JobKind -- HistoryRow.tsx's Mode column shows this
+  // INSTEAD OF the (otherwise-misleading, always "cut_each") chain_mode
+  // value for a feed_cut job -- see that component's own doc.
+  feed_cut: "Feed & cut",
 };
 
 export function humanizeEnumValue(value: string): string {

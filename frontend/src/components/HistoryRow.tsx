@@ -96,7 +96,13 @@ export function HistoryRow({
         )}
       </td>
       <td className="py-2 pr-3 font-mono text-[12px] text-deck-200">{item.label_count}</td>
-      <td className="py-2 pr-3 text-[12px] text-deck-200">{humanizeEnumValue(item.chain_mode)}</td>
+      {/* Feed & cut design doc: a feed_cut job's own chain_mode is always
+          "cut_each" (build_feed_cut_job's fixed JobOptions) -- showing that
+          verbatim would read as an ordinary one-label print. `kind` is this
+          row's real identity here, so it wins over chain_mode for display. */}
+      <td className="py-2 pr-3 text-[12px] text-deck-200">
+        {item.kind === "feed_cut" ? humanizeEnumValue("feed_cut") : humanizeEnumValue(item.chain_mode)}
+      </td>
       <td className="py-2 pr-3 font-mono text-[12px] text-deck-200">{item.tape_width_mm != null ? `${item.tape_width_mm}mm` : "—"}</td>
       <td className="py-2 pr-3 font-mono text-[12px] text-deck-200">{item.tape_used_mm != null ? `${item.tape_used_mm.toFixed(1)} mm` : "—"}</td>
       <td className="py-2 pr-3">

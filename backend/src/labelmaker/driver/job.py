@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from labelmaker.driver.geometry import TapeSpec
+from labelmaker.driver.geometry import MARGIN_MIN_MM, TapeSpec
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.driver.raster import (
     BYTES_PER_LINE,
@@ -34,7 +34,15 @@ _DEFAULT_RASTER_CONFIG = RasterConfig()
 # ChainMode now lives in protocol.py (str-valued, Task 1.3a) -- re-exported
 # here so existing `from labelmaker.driver.job import ChainMode` imports
 # keep working.
-__all__ = ["ChainMode", "JobOptions", "JobStream", "build_job"]
+__all__ = [
+    "ChainMode",
+    "JobOptions",
+    "JobStream",
+    "build_feed_cut_job",
+    "build_job",
+    "feed_cut_image",
+    "feed_cut_options",
+]
 
 
 @dataclass(frozen=True)
@@ -170,3 +178,121 @@ def build_job(
     if options.chain_mode is ChainMode.STRIP_MARKS:
         return _build_strip_marks(images, tape, strategy, options)
     return _build_chained(images, tape, strategy, options)
+
+
+# --- Feed & cut trigger job ---------------------------------------------
+#
+# docs/superpowers/specs/2026-08-04-feed-cut-trigger-design.md: a manual
+# "advance tape past the cutter and cut" action for when a chained job (or
+# auto-cut off) leaves printed tape sitting inside the mechanism.
+
+
+def feed_cut_image(tape: TapeSpec) -> Image.Image:
+    """The blank "page" a feed-cut job prints: 1 dot wide, `tape.print_dots`
+    tall, ALL WHITE (PIL mode "1", pixel value 1 -- see raster.py's bit
+    semantics: pixel 0 is black, so an all-1 image has no black pixel
+    anywhere). Every raster line build_job/raster.py encodes for it is
+    therefore the raster layer's own all-zero ZERO_LINE -- nothing ever
+    prints, only the mechanical feed+cut happens.
+
+    Public (not `_`-prefixed) and separate from build_feed_cut_job below so
+    a caller that must resolve the tape from a LIVE printer status first
+    (jobs/worker.py's feed-cut branch, driver/cli.py's feed-cut USB path --
+    both mirror cli.py's existing _run_usb_print, which has this exact same
+    status-before-image-size constraint for its own test patterns) can
+    build this same image and hand it to printer.print_images directly,
+    instead of only being reachable through build_feed_cut_job's own
+    build_job call.
+    """
+    return Image.new("1", (1, tape.print_dots), 1)
+
+
+def feed_cut_options() -> JobOptions:
+    """The fixed JobOptions every feed-cut job uses -- see
+    build_feed_cut_job's docstring for why each value is what it is.
+    Exposed separately (mirrors feed_cut_image above) so callers that go
+    through printer.print_images directly, not build_feed_cut_job, still
+    use the exact same options build_feed_cut_job would have."""
+    return JobOptions(
+        auto_cut=True,
+        chain_mode=ChainMode.CUT_EACH,
+        margin_mm=MARGIN_MIN_MM,
+    )
+
+
+def build_feed_cut_job(tape: TapeSpec, strategy: InitStrategy) -> JobStream:
+    """Feed-and-cut trigger job: reuses build_job() unchanged (no new
+    protocol bytes -- the whole point of this function is that none are
+    needed) with a single blank page, producing preamble -> one-line
+    `ESC i z` -> one zero raster line -> `CTRL_Z`.
+
+    THE CONSTRAINT THAT DRIVES THIS (docs/superpowers/specs/
+    2026-08-04-feed-cut-trigger-design.md): the P-touch raster protocol has
+    no standalone "cut" opcode. A cut only ever happens at end-of-page
+    (`FF`/`CTRL_Z` -- strategies.InitStrategy.page_end) with the auto-cut
+    bit set (`ESC i M` 0x40) -- there is no way to trigger the blade
+    without also feeding a page through the print head first. Mechanically
+    the cutter sits ~24.5mm downstream of the head (`geometry.MIN_FEED_MM`,
+    geometry.py:17), so every cut inherently advances tape by at least that
+    much -- this job's image is deliberately the smallest build_job can
+    build (feed_cut_image: 1 dot wide, all white) so nothing ELSE gets
+    added to that inherent minimum.
+
+    Options, and why each is fixed (not caller-configurable -- this
+    function intentionally takes no `options` argument):
+      - `chain_mode=ChainMode.CUT_EACH`: cut once and stop -- CUT_EACH's
+        page_end for a single-image job is always CTRL_Z, never a chained
+        FF (see _build_chained).
+      - `auto_cut=True`: without the auto-cut bit, end-of-page feeds but
+        does NOT cut -- the one bit this whole job exists to set.
+      - `margin_mm=MARGIN_MIN_MM`: "minimized margins" (the design doc's
+        phrasing) resolves to exactly `geometry.MARGIN_MIN_MM` (2.0mm) --
+        `clamp_margin_mm` floors ANY smaller value up to this same 2.0mm
+        anyway (geometry.py), so this is the smallest margin the existing
+        JobOptions/strategies machinery allows, not an arbitrary pick.
+        `ClassicStrategy.preamble` encodes it as `mm_to_dots(2.0) == 14`
+        dots -- little-endian `\\x0e\\x00` in `ESC i d` -- the exact same
+        literal test_job.py's own golden tests already use for a 2.0mm
+        margin (JobOptions.margin_mm's own default, not a new value this
+        function introduces).
+      - `raster_config`: left at JobOptions' plain default. feed_cut_image
+        has no black pixel anywhere, so bit_order/flip_pins can never
+        change a single byte of the output -- there is nothing for a
+        non-default RasterConfig to affect here.
+
+    UNVERIFIED (repo convention -- see docs/protocol-notes.md): the EXACT
+    physical tape distance a real PT-E720BT advances for this job is not
+    yet measured against hardware. It is almost certainly `MIN_FEED_MM`
+    (~24.5mm, the mechanical head-to-cutter gap every cut inherently
+    requires -- see the design doc's own framing: that advance is either
+    the user's printed tape clearing the blade after a chained job, or a
+    blank ~24.5mm snippet when triggered with nothing pending), but this is
+    a software-level inference, not a physical measurement. Confirm at
+    physical checkpoint 2 (docs/project-handoff.md's checkpoint-2 list)
+    alongside every other UNVERIFIED byte-level decision this driver
+    package carries.
+
+    UNVERIFIED, and a bigger risk than the feed-distance question above --
+    e310bt strategy has no ESC i M at all: `E310BTStrategy.preamble`
+    (strategies.py) never emits the auto-cut byte the classic strategy's
+    preamble does (`\\x1b\\x69\\x4d` / 0x40); under `printer_init_strategy
+    ="e310bt"` this job's ability to actually CUT rests entirely on `ESC i
+    K`'s no-chain bit (set here via CUT_EACH -> `_no_chain`), with no
+    corroborating auto-cut bit anywhere in the stream. If the real e310bt
+    firmware needs BOTH bits (no-chain AND auto-cut) to fire the blade --
+    plausible, since the classic strategy always sets both together and
+    nothing has verified them independently -- a feed-cut job under this
+    strategy would silently FEED without CUTTING: no error, no exception,
+    tape advances ~24.5mm and the job reports "done", but the user's tape
+    is still uncut and the whole point of the trigger silently fails. This
+    is deliberately NOT fixed by adding bytes here: e310bt's preamble is
+    intentionally minimal and golden-tested (test_job.py/test_job_feed_cut.
+    py), and inventing an untested byte sequence for unverified hardware
+    risks making things WORSE than a known gap. Tracked instead as a
+    checkpoint-2 hardware question (docs/project-handoff.md's "Still
+    waiting on hardware" list) -- if hardware confirms the no-chain bit
+    alone doesn't cut under e310bt, feed-cut must either emit `ESC i M`
+    under that strategy too or be gated/warned against when
+    printer_init_strategy="e310bt", not before.
+    """
+    return build_job([feed_cut_image(tape)], tape, strategy, feed_cut_options())

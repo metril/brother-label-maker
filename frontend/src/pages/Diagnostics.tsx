@@ -6,6 +6,7 @@ import { StatusChip } from "../components/StatusChip";
 import { Pending } from "../components/ui/Pending";
 import { errorText, eyebrow, fieldLabelText, panel, panelHeading, typeHeading } from "../components/ui/styles";
 import { useAuth } from "../hooks/useAuth";
+import { useFeedCut } from "../hooks/useFeedCut";
 import { useHealth } from "../hooks/useHealth";
 import { useHistoryList } from "../hooks/useHistory";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
@@ -91,6 +92,7 @@ function KeepAliveRows({ keepAlive }: { keepAlive: KeepAliveStatus }) {
  * to the full History page. */
 export function Diagnostics() {
   const printer = usePrinterStatus();
+  const feedCut = useFeedCut();
   const homebox = useHomeboxStatus();
   const health = useHealth();
   const auth = useAuth();
@@ -149,6 +151,35 @@ export function Diagnostics() {
                 {printer.data.error}
               </p>
             )}
+
+            {/* Feed & cut design doc: a printer action independent of media
+                detection -- shown whenever printer status itself loaded,
+                not gated on `status` (an unreachable printer's own error is
+                already shown above; a click here just surfaces its own
+                error the same way). Sits right above the raw status block
+                below, the same section this hook's other caller
+                (TrayPanel.tsx) keeps compact ("Cut") -- full "Feed & cut"
+                label here since this page has no row-width budget to mind.
+
+                Item 3 (fix wave): `disabled` is `isBusy`, not `isPending`
+                alone -- see useFeedCut.ts's own COOLDOWN_MS comment and
+                TrayPanel.tsx's identical note on this same hook. */}
+            <div className="flex flex-col items-start gap-1">
+              <button
+                type="button"
+                onClick={feedCut.feedCut}
+                disabled={feedCut.isBusy}
+                title="Advances ~25mm to push the tape past the cutter"
+                className="rounded-md border border-deck-600 px-3 py-1.5 text-[13px] font-medium text-deck-200 hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Feed & cut
+              </button>
+              {feedCut.error && (
+                <p role="alert" className={errorText}>
+                  {feedCut.error}
+                </p>
+              )}
+            </div>
 
             {status && (
               <>
