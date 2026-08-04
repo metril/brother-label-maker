@@ -1,28 +1,35 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { PrintPreviewDeck } from "./PrintPreviewDeck";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
+import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import { usePrintPreviewStore } from "../stores/printPreview";
+import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
 import { TINY_PNG_B64 } from "../test/msw/handlers";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { setMediaQueryMatches } from "../test/setup";
 import type { LabelDefinition } from "../api/types";
 
 const INITIAL_TRAY_STATE = useTrayStore.getState();
 const INITIAL_CHAIN_PREVIEW_STATE = usePrintPreviewStore.getState();
+const INITIAL_TRAY_DRAWER_STATE = useTrayDrawerStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
-  // Full reset (not just `open`) -- `docked`/`selectedIndex` are shared
+  // Full reset (not just `open`) -- `open`/`selectedIndex` are shared
   // module-level state (the latter session-only, the former persisted via
   // zustand's own `persist` middleware), so a test that touches either must
   // not leak into the next one via the in-memory store singleton (test/
   // setup.ts's own `localStorage.clear()` only covers the localStorage side
-  // of `docked`, not this module's already-hydrated state).
+  // of `open`, not this module's already-hydrated state).
   usePrintPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
+  // Same reasoning as usePrintPreviewStore above -- the mutual-exclusion
+  // tests below touch this store's `open` directly.
+  useTrayDrawerStore.setState(INITIAL_TRAY_DRAWER_STATE, true);
 });
 
 function def(text: string): LabelDefinition {
@@ -71,7 +78,13 @@ describe("PrintPreviewDeck", () => {
     expect(within(drawer).queryByTestId("segment-chip-2")).not.toBeInTheDocument();
 
     expect(within(drawer).getByTestId("preview-total-mm")).toHaveTextContent("60.0 mm");
-    expect(within(drawer).getByText(/UNVERIFIED estimate/)).toBeInTheDocument();
+    // The UNVERIFIED disclaimer now lives behind the notes disclosure
+    // (collapsed by default, rendered via the `hidden` attribute rather
+    // than unmounted -- see PrintPreviewDeck.tsx's own comment on why: the
+    // "Notes" button's aria-controls must always point at a real element)
+    // -- see the dedicated "notes disclosure" describe block below for the
+    // expand/collapse contract itself.
+    expect(within(drawer).getByText(/UNVERIFIED estimate/)).not.toBeVisible();
   });
 
   it("switching chain mode from the Tray refetches the preview with the new chain_mode, and the deck's read-only label reflects it", async () => {
@@ -252,6 +265,10 @@ describe("PrintPreviewDeck", () => {
     await within(drawer).findByAltText("Print preview strip");
 
     expect(within(drawer).getByRole("alert")).toHaveTextContent("label 1: text may be cramped at this tape width");
+    // Warnings stay unconditionally visible even though the notes/
+    // disclaimer disclosure is collapsed by default (see PrintPreviewDeck's
+    // own Group C docstring) -- a warning must never hide behind a click.
+    expect(within(drawer).getByRole("button", { name: "Notes" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("shows the request's error detail in an alert, and recovers without a permanent spinner (M14)", async () => {
@@ -319,6 +336,79 @@ describe("PrintPreviewDeck", () => {
     // the print preview deck opened, not the (now hidden) "Preview" button
     // nested inside the tray drawer's own panel.
     await waitFor(() => expect(trayTrigger).toHaveFocus());
+  });
+});
+
+/** Stacked-modal fix: two `aria-modal` overlays (the tray drawer and this
+ * deck) must never coexist below `xl`. TrayPanel's own "Preview" button
+ * already prevents one path (covered by the test just above -- opening the
+ * deck from that button closes the tray first) -- these cover the other
+ * two paths a click-time guard alone can't reach: rehydrating with BOTH
+ * stores' `open` persisted true, and shrinking the window below `xl` while
+ * both happened to be open at `xl` (where coexisting is fine, see
+ * PrintPreviewDeck.tsx's own docstring). Both are handled by this deck's
+ * own reconciliation effect, which always wins in favor of the deck -- see
+ * that effect's own comment for why it's deliberately one-directional. */
+describe("PrintPreviewDeck -- mutual exclusion with the tray drawer below `xl`", () => {
+  it("both stores persisted open + a fresh mount below xl: the deck stays open, the tray closes itself", async () => {
+    seedTrayItems(1);
+    useTrayDrawerStore.setState({ open: true });
+    usePrintPreviewStore.setState({ open: true });
+
+    renderWithProviders(
+      <>
+        <GlobalTrayDrawer />
+        <PrintPreviewDeck />
+      </>,
+    );
+
+    await screen.findByRole("dialog", { name: "Print preview" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Print tray" })).not.toBeInTheDocument());
+    expect(useTrayDrawerStore.getState().open).toBe(false);
+    expect(usePrintPreviewStore.getState().open).toBe(true);
+  });
+
+  it("shrinking below xl while both panels are open at xl closes the tray, keeps the deck open", async () => {
+    seedTrayItems(1);
+    setMediaQueryMatches(DESKTOP_QUERY, true);
+    useTrayDrawerStore.setState({ open: true });
+    usePrintPreviewStore.setState({ open: true });
+
+    renderWithProviders(
+      <>
+        <GlobalTrayDrawer />
+        <PrintPreviewDeck />
+      </>,
+    );
+
+    await screen.findByRole("complementary", { name: "Print preview" });
+    await screen.findByRole("complementary", { name: "Print tray" });
+
+    act(() => setMediaQueryMatches(DESKTOP_QUERY, false));
+
+    await waitFor(() => expect(useTrayDrawerStore.getState().open).toBe(false));
+    expect(usePrintPreviewStore.getState().open).toBe(true);
+  });
+
+  it("opening the tray from the header while the deck overlay is open (below xl) closes the deck", async () => {
+    seedTrayItems(1);
+    usePrintPreviewStore.setState({ open: true });
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <>
+        <GlobalTrayDrawer />
+        <PrintPreviewDeck />
+      </>,
+    );
+
+    await screen.findByRole("dialog", { name: "Print preview" });
+    const trayTrigger = await screen.findByRole("button", { name: /^Tray · 1/ });
+    await user.click(trayTrigger);
+
+    await screen.findByRole("dialog", { name: "Print tray" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Print preview" })).not.toBeInTheDocument());
+    expect(usePrintPreviewStore.getState().open).toBe(false);
   });
 });
 
@@ -551,25 +641,10 @@ describe("PrintPreviewDeck -- cycling through queued labels", () => {
   });
 });
 
-describe("PrintPreviewDeck -- dockable preview", () => {
-  it("the dock toggle flips the store's `docked` flag, and its accessible name flips with it", async () => {
+describe("PrintPreviewDeck -- responsive deck (xl in-flow band vs. below-xl modal overlay)", () => {
+  it("at `xl`, an open deck swaps in a complementary landmark -- no scrim, no aria-modal, no dialog role", async () => {
     seedTrayItems(1);
-    const user = userEvent.setup();
-    renderWithProviders(<Harness />);
-
-    await user.click(screen.getByRole("button", { name: "Open" }));
-    await screen.findByRole("dialog", { name: "Print preview" });
-
-    const dockButton = screen.getByRole("button", { name: "Dock preview" });
-    await user.click(dockButton);
-
-    expect(usePrintPreviewStore.getState().docked).toBe(true);
-    expect(screen.getByRole("button", { name: "Undock preview" })).toBeInTheDocument();
-  });
-
-  it("docked + open swaps in a complementary landmark -- no scrim, no aria-modal, no dialog role", async () => {
-    seedTrayItems(1);
-    usePrintPreviewStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
 
@@ -579,9 +654,13 @@ describe("PrintPreviewDeck -- dockable preview", () => {
     expect(panel).not.toHaveAttribute("aria-modal");
     expect(document.querySelector('[aria-hidden][class*="bg-scrim/70"]')).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Print preview" })).not.toBeInTheDocument();
+    // At `xl` the panel drops the slide transition entirely (this
+    // component's own docstring) -- nothing to animate once it's back in
+    // normal flow.
+    expect(panel.className).not.toContain("transition-transform");
   });
 
-  it("undocked + open keeps today's dialog semantics and scrim, unchanged", async () => {
+  it("below `xl` (jsdom default), open keeps today's dialog semantics and scrim, unchanged", async () => {
     seedTrayItems(1);
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
@@ -593,9 +672,9 @@ describe("PrintPreviewDeck -- dockable preview", () => {
     expect(document.querySelector('[aria-hidden][class*="bg-scrim/70"]')).not.toBeNull();
   });
 
-  it("close still works while docked, without stealing focus onto the close button", async () => {
+  it("close still works at `xl`, without stealing focus onto the close button", async () => {
     seedTrayItems(1);
-    usePrintPreviewStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
 
@@ -603,9 +682,9 @@ describe("PrintPreviewDeck -- dockable preview", () => {
     await user.click(trigger);
     await screen.findByRole("complementary", { name: "Print preview" });
 
-    // Docked mode skips the focus-steal contract entirely (see this
+    // At `xl` the panel skips the focus-steal contract entirely (see this
     // component's own docstring) -- the close button never gets
-    // programmatic focus the way it does when undocked.
+    // programmatic focus the way it does below `xl`.
     expect(screen.getByRole("button", { name: "Close print preview" })).not.toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "Close print preview" }));
@@ -613,14 +692,31 @@ describe("PrintPreviewDeck -- dockable preview", () => {
       expect(screen.queryByRole("complementary", { name: "Print preview" })).not.toBeInTheDocument(),
     );
     expect(usePrintPreviewStore.getState().open).toBe(false);
-    // `docked` itself is untouched by closing -- remembered for next open
-    // (stores/printPreview.ts's own persisted preference).
-    expect(usePrintPreviewStore.getState().docked).toBe(true);
   });
 
-  it("Escape does nothing while docked -- no Escape-to-close", async () => {
+  // Focus-to-<body> fix: below `xl` the modal effect captures the trigger
+  // itself, but at `xl` that effect is skipped entirely (it's a landmark,
+  // not a modal) -- without the always-on capture/restore effect
+  // (PrintPreviewDeck.tsx's own docstring), the × button here found nothing
+  // captured and silently dropped focus onto <body> instead of restoring it
+  // to the trigger.
+  it("returns focus to the trigger when the close button is clicked at `xl`", async () => {
     seedTrayItems(1);
-    usePrintPreviewStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    const trigger = screen.getByRole("button", { name: "Open" });
+    await user.click(trigger);
+    await screen.findByRole("complementary", { name: "Print preview" });
+
+    await user.click(screen.getByRole("button", { name: "Close print preview" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("Escape does nothing at `xl` -- no Escape-to-close", async () => {
+    seedTrayItems(1);
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
 
@@ -632,14 +728,18 @@ describe("PrintPreviewDeck -- dockable preview", () => {
     expect(usePrintPreviewStore.getState().open).toBe(true);
   });
 
-  it("carries the xl:static in-flow bottom-deck class contract only while docked AND open", async () => {
+  it("carries the xl:static in-flow bottom-deck class contract whenever the deck is open, independent of viewport (docking removed)", async () => {
     seedTrayItems(1);
-    usePrintPreviewStore.setState({ docked: true });
     const user = userEvent.setup();
     renderWithProviders(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    await screen.findByRole("complementary", { name: "Print preview" });
+    // jsdom default (below `xl`) -- role is "dialog", but the `xl:` class
+    // contract itself is no longer gated on a `docked` flag, only on
+    // `open`, so it's present in the class string regardless of viewport
+    // (the actual breakpoint match is left to real CSS, which jsdom never
+    // evaluates).
+    await screen.findByRole("dialog", { name: "Print preview" });
 
     const panel = screen.getByTestId("print-preview-deck-panel");
     expect(panel.className).toContain("xl:static");
@@ -649,17 +749,13 @@ describe("PrintPreviewDeck -- dockable preview", () => {
     // frame is viewport-bound (`h-screen` root), so this panel only needs
     // to be a plain in-flow block to land at the viewport bottom on its own.
     expect(panel.className).not.toContain("xl:sticky");
-    // The old right-hand-column contract is gone entirely (docked-deck
-    // reshape) -- this is a full-width bottom deck now, not a 26rem-wide
-    // side column.
+    // The old right-hand-column contract is gone entirely -- this is a
+    // full-width bottom deck now, not a 26rem-wide side column.
     expect(panel.className).not.toContain("xl:w-[26rem]");
-    // Docked mode drops the slide transition entirely (this component's
-    // own docstring) -- nothing to animate once it's back in normal flow.
-    expect(panel.className).not.toContain("transition-transform");
   });
 
-  it("a closed docked panel is hidden exactly like an undocked one -- no xl: override leaks through while closed", () => {
-    usePrintPreviewStore.setState({ docked: true });
+  it("a closed panel is hidden the same way regardless of viewport -- no xl: override leaks through while closed", () => {
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     renderWithProviders(<Harness />);
 
     const panel = screen.getByTestId("print-preview-deck-panel");
@@ -668,5 +764,66 @@ describe("PrintPreviewDeck -- dockable preview", () => {
     expect(panel.className).toContain("translate-x-full");
     expect(panel.className).not.toContain("xl:sticky");
     expect(panel.className).not.toContain("xl:static");
+  });
+});
+
+describe("PrintPreviewDeck -- notes disclosure", () => {
+  function serveWithNotes() {
+    server.use(
+      http.post("/api/print/preview", () =>
+        HttpResponse.json({
+          png_b64: TINY_PNG_B64,
+          chain_mode: "cut_each",
+          total_mm: 30,
+          content_mm: 25,
+          feed_overhead_mm: 5,
+          per_label_mm: 30,
+          notes: ["label 1: trimmed to fit the tape width"],
+          segments: [{ index: 0, start_mm: 0, end_mm: 25, length_mm: 25 }],
+          warnings: [],
+        }),
+      ),
+    );
+  }
+
+  it("is collapsed by default -- the notes region is present (aria-controls has a real target) but hidden until expanded", async () => {
+    seedTrayItems(1);
+    serveWithNotes();
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Print preview strip");
+
+    const notesButton = within(drawer).getByRole("button", { name: "Notes" });
+    expect(notesButton).toHaveAttribute("aria-expanded", "false");
+    // The region itself always renders now (dangling aria-controls IDREF
+    // fix) -- collapsed means hidden via the `hidden` attribute, not absent
+    // from the DOM.
+    const notesRegion = drawer.querySelector("#print-preview-notes");
+    expect(notesRegion).not.toBeNull();
+    expect(notesRegion).toHaveAttribute("hidden");
+    expect(document.getElementById(notesButton.getAttribute("aria-controls")!)).toBe(notesRegion);
+    expect(within(drawer).getByText(/trimmed to fit the tape width/)).not.toBeVisible();
+    expect(within(drawer).getByText(/UNVERIFIED estimate/)).not.toBeVisible();
+  });
+
+  it("clicking Notes reveals the notes list and the UNVERIFIED disclaimer", async () => {
+    seedTrayItems(1);
+    serveWithNotes();
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Print preview" });
+    await within(drawer).findByAltText("Print preview strip");
+
+    const notesButton = within(drawer).getByRole("button", { name: "Notes" });
+    await user.click(notesButton);
+
+    expect(notesButton).toHaveAttribute("aria-expanded", "true");
+    expect(within(drawer).getByText(/trimmed to fit the tape width/)).toBeInTheDocument();
+    expect(within(drawer).getByText(/UNVERIFIED estimate/)).toBeInTheDocument();
   });
 });

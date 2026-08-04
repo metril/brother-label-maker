@@ -139,6 +139,27 @@ export class MockIntersectionObserver implements IntersectionObserver {
   }
 }
 
+/** Per-query matchMedia state for the reactive stub below -- `matches`
+ * defaults to `false` for any query a test hasn't opted into (see
+ * setMediaQueryMatches), and `mediaQueryListeners` holds every `change`
+ * listener currently registered, keyed by the query STRING rather than by
+ * MediaQueryList object identity (each `window.matchMedia(query)` call
+ * below returns a fresh object, so identity-keying would silently drop
+ * listeners). Both cleared after every test. */
+const mediaQueryState = new Map<string, boolean>();
+const mediaQueryListeners = new Map<string, Set<() => void>>();
+
+/** Flip a media query's stubbed `matches` value and notify every listener
+ * currently registered for that exact query string (e.g. a hook's
+ * `mql.addEventListener("change", ...)`). Call this after a hook has
+ * already mounted and wrap it in `act(...)` -- same reasoning as this
+ * file's MockWebSocket.emit: it synchronously drives a React state update
+ * outside of React's own event handling. */
+export function setMediaQueryMatches(query: string, matches: boolean): void {
+  mediaQueryState.set(query, matches);
+  for (const listener of mediaQueryListeners.get(query) ?? []) listener();
+}
+
 beforeAll(() => {
   // msw's own WebSocketInterceptor patches globalThis.WebSocket too (not
   // just fetch/XHR) the moment the server starts listening, and errors on
@@ -150,18 +171,32 @@ beforeAll(() => {
   vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 
   // jsdom doesn't implement matchMedia at all -- usePrefersReducedMotion
-  // (FeedDeck/Designer) needs SOME implementation to avoid throwing.
-  // Always reports "no preference" (matches: false); tests that care about
-  // the reduced-motion branch specifically stub window.matchMedia
-  // themselves for that one case.
+  // and useIsDesktop need SOME implementation to avoid throwing. Each call
+  // returns a fresh object backed by the shared mediaQueryState/
+  // mediaQueryListeners maps above, keyed by the query string: `matches` is
+  // a live getter (not a snapshot) so a test's setMediaQueryMatches(...)
+  // after mount is visible on every outstanding MediaQueryList for that
+  // query, and addEventListener/removeEventListener register/unregister
+  // real listeners instead of no-ops. Defaults to `false` (e.g. "no
+  // reduced-motion preference", "not desktop-width") unless a test opts in
+  // via setMediaQueryMatches.
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockImplementation((query: string) => ({
-      matches: false,
+      get matches() {
+        return mediaQueryState.get(query) ?? false;
+      },
       media: query,
       onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: (type: string, fn: () => void) => {
+        if (type !== "change") return;
+        if (!mediaQueryListeners.has(query)) mediaQueryListeners.set(query, new Set());
+        mediaQueryListeners.get(query)!.add(fn);
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        if (type !== "change") return;
+        mediaQueryListeners.get(query)?.delete(fn);
+      },
       addListener: vi.fn(),
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
@@ -174,6 +209,8 @@ afterEach(() => {
   server.resetHandlers();
   mockWebSocketInstances.length = 0;
   mockIntersectionObserverInstances.length = 0;
+  mediaQueryState.clear();
+  mediaQueryListeners.clear();
   // stores/tray.ts persists to localStorage (zustand's persist middleware),
   // and hooks/useTheme.ts persists `lm-theme` -- clear it after every test
   // so one test's tray/theme state can never leak into the next via a

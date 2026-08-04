@@ -22,43 +22,38 @@ describe("useTrayDrawerStore", () => {
     useTrayDrawerStore.getState().toggle();
     expect(useTrayDrawerStore.getState().open).toBe(false);
   });
-
-  it("toggleDocked flips `docked` only, defaulting to false", () => {
-    expect(useTrayDrawerStore.getState().docked).toBe(false);
-
-    useTrayDrawerStore.getState().toggleDocked();
-    expect(useTrayDrawerStore.getState().docked).toBe(true);
-    expect(useTrayDrawerStore.getState().open).toBe(false);
-
-    useTrayDrawerStore.getState().toggleDocked();
-    expect(useTrayDrawerStore.getState().docked).toBe(false);
-  });
 });
 
-/** `docked` alone is persisted (zustand's `persist` middleware, key
- * "lm-tray-drawer-v1") -- see the store's own docstring for why: it's a
- * standing layout preference, unlike `open`, which stays purely
- * in-memory/session-only. */
+/** `open` alone is persisted (zustand's `persist` middleware, key
+ * "lm-tray-drawer-v1") -- see the store's own docstring for why: at desktop
+ * widths the tray is a real in-flow column, so "is it shown" is a standing
+ * workspace preference now, unlike before this refactor when `open` stayed
+ * purely in-memory/session-only. */
 describe("useTrayDrawerStore persistence (zustand persist middleware)", () => {
-  it("partialize writes `docked` (and only `docked`) to localStorage", () => {
-    useTrayDrawerStore.getState().toggleDocked();
+  it("partialize writes `open` (and only `open`) to localStorage", () => {
+    useTrayDrawerStore.getState().openDrawer();
 
     const raw = localStorage.getItem("lm-tray-drawer-v1");
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw!) as { state: Record<string, unknown> };
-    expect(persisted.state).toEqual({ docked: true });
+    expect(persisted.state).toEqual({ open: true });
   });
 
-  it("`open` never reaches localStorage, even while true", () => {
-    useTrayDrawerStore.getState().openDrawer();
-    useTrayDrawerStore.getState().toggleDocked();
+  it("rehydrates `open` from a previously persisted snapshot", async () => {
+    localStorage.setItem(
+      "lm-tray-drawer-v1",
+      JSON.stringify({ state: { open: true }, version: 2 }),
+    );
 
-    const raw = localStorage.getItem("lm-tray-drawer-v1");
-    const persisted = JSON.parse(raw!) as { state: Record<string, unknown> };
-    expect(persisted.state).not.toHaveProperty("open");
+    await useTrayDrawerStore.persist.rehydrate();
+
+    const state = useTrayDrawerStore.getState();
+    expect(state.open).toBe(true);
   });
+});
 
-  it("rehydrates `docked` from a previously persisted snapshot, leaving `open` at its own default", async () => {
+describe("v1 -> v2 migration", () => {
+  it("a previously-docked (v1) tray rehydrates as open", async () => {
     localStorage.setItem(
       "lm-tray-drawer-v1",
       JSON.stringify({ state: { docked: true }, version: 1 }),
@@ -66,8 +61,25 @@ describe("useTrayDrawerStore persistence (zustand persist middleware)", () => {
 
     await useTrayDrawerStore.persist.rehydrate();
 
-    const state = useTrayDrawerStore.getState();
-    expect(state.docked).toBe(true);
-    expect(state.open).toBe(false);
+    expect(useTrayDrawerStore.getState().open).toBe(true);
+  });
+
+  it("a previously-undocked (v1) tray rehydrates as closed", async () => {
+    localStorage.setItem(
+      "lm-tray-drawer-v1",
+      JSON.stringify({ state: { docked: false }, version: 1 }),
+    );
+
+    await useTrayDrawerStore.persist.rehydrate();
+
+    expect(useTrayDrawerStore.getState().open).toBe(false);
+  });
+
+  it("an empty v1 snapshot rehydrates as closed, without throwing", async () => {
+    localStorage.setItem("lm-tray-drawer-v1", JSON.stringify({ state: {}, version: 1 }));
+
+    await expect(useTrayDrawerStore.persist.rehydrate()).resolves.not.toThrow();
+
+    expect(useTrayDrawerStore.getState().open).toBe(false);
   });
 });

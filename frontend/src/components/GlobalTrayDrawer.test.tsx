@@ -7,8 +7,10 @@ import { usePrintPreviewStore } from "../stores/printPreview";
 import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
+import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
+import { setMediaQueryMatches } from "../test/setup";
 import { TINY_PNG_B64 } from "../test/msw/handlers";
 import type { LabelDefinition, PrintEstimateResponse } from "../api/types";
 
@@ -19,13 +21,12 @@ const INITIAL_CHAIN_PREVIEW_STATE = usePrintPreviewStore.getState();
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
   useCurrentDesignStore.setState({ current: null });
-  // `docked` (dockable-tray feature) is persisted via zustand's own
-  // `persist` middleware, so a test that toggles it must not leak into the
-  // next one via the in-memory store singleton (test/setup.ts's own
-  // `localStorage.clear()` only covers the localStorage side of that, not
-  // this module's already-hydrated state) -- same reasoning
-  // PrintPreviewDeck.test.tsx's own afterEach already documents for
-  // stores/printPreview.ts.
+  // `open` is persisted via zustand's own `persist` middleware, so a test
+  // that opens the panel must not leak that into the next one via the
+  // in-memory store singleton (test/setup.ts's own `localStorage.clear()`
+  // only covers the localStorage side of that, not this module's
+  // already-hydrated state) -- same reasoning PrintPreviewDeck.test.tsx's
+  // own afterEach already documents for stores/printPreview.ts.
   useTrayDrawerStore.setState(INITIAL_TRAY_DRAWER_STATE, true);
   usePrintPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
 });
@@ -70,13 +71,13 @@ function seedTrayItems(n: number) {
 }
 
 describe("GlobalTrayDrawer -- hidden while the tray is empty", () => {
-  // Dockable-tray feature: unlike the pre-split component (which returned
-  // null outright, gating the panel too), GlobalTrayPanel now stays
-  // permanently mounted -- see GlobalTrayDrawer.tsx's own top-of-file
-  // docstring for why (an in-flight print job's state must survive) -- so
-  // an empty tray with no current design hides only the trigger BUTTON;
-  // the panel itself renders present-but-hidden, the exact resting state
-  // PrintPreviewDeck's own panel already has with nothing to preview.
+  // GlobalTrayPanel stays permanently mounted (unlike the pre-split
+  // component, which returned null outright, gating the panel too) -- see
+  // GlobalTrayDrawer.tsx's own top-of-file docstring for why (an in-flight
+  // print job's state must survive) -- so an empty tray with no current
+  // design hides only the trigger BUTTON; the panel itself renders
+  // present-but-hidden, the exact resting state PrintPreviewDeck's own
+  // panel already has with nothing to preview.
   it("hides the trigger button, but keeps the panel mounted and hidden, when there's nothing queued", () => {
     renderWithProviders(<GlobalTrayDrawer />);
     expect(screen.queryByRole("button", { name: /^Tray/ })).not.toBeInTheDocument();
@@ -85,6 +86,17 @@ describe("GlobalTrayDrawer -- hidden while the tray is empty", () => {
     expect(panel).not.toHaveAttribute("role");
     expect(panel.className).toContain("invisible");
     expect(panel.className).toContain("translate-x-full");
+  });
+
+  it('keeps the trigger visible, with aria-expanded="true", when the panel is open, even with nothing queued', () => {
+    // `open` is persisted (stores/trayDrawer.ts), so it can survive into an
+    // empty-tray state (e.g. printing empties the tray while the panel is
+    // still open) -- the trigger must stay reachable to close it from.
+    useTrayDrawerStore.setState({ open: true });
+    renderWithProviders(<GlobalTrayDrawer />);
+
+    const trigger = screen.getByRole("button", { name: "Tray" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 });
 
@@ -136,6 +148,23 @@ describe("GlobalTrayDrawer -- header button, open/close, and focus management", 
     expect(scrim).not.toBeNull();
     await user.click(scrim!);
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("is a toggle: clicking the header button again while open closes the panel", async () => {
+    seedTrayItems(1);
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    const user = userEvent.setup();
+
+    renderWithProviders(<GlobalTrayDrawer />);
+    const trigger = await screen.findByRole("button", { name: /^Tray · 1/ });
+
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close print tray" })).toHaveFocus());
+
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("global-tray-drawer-panel")).not.toHaveAttribute("role");
   });
 });
 
@@ -305,32 +334,17 @@ describe("GlobalTrayDrawer -- adding from the current design, and item controls"
   });
 });
 
-/** Dockable-tray feature -- mirrors PrintPreviewDeck.test.tsx's own
- * "dockable preview" block precisely (same store shape, same class/
- * semantics contract, just tray-flavored names/labels): stores/trayDrawer.ts
- * instead of stores/printPreview.ts, "Dock tray"/"Undock tray" instead of
- * "Dock preview"/"Undock preview", "Print tray" instead of "Print preview". */
-describe("GlobalTrayDrawer -- dockable tray", () => {
-  it("the dock toggle flips the store's `docked` flag, and its accessible name flips with it", async () => {
+/** At `xl` and up, an open tray always renders as an in-flow, non-modal
+ * `role="complementary"` column; below `xl` it's always today's modal
+ * overlay -- see GlobalTrayDrawer.tsx's own docstring. Driven by
+ * `setMediaQueryMatches(DESKTOP_QUERY, ...)` (test/setup.ts) rather than
+ * any store flag -- there is no more dock/undock choice, just the `open`
+ * boolean stores/trayDrawer.ts already had. */
+describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", () => {
+  it("at xl + open swaps in a complementary landmark -- no scrim, no aria-modal, no dialog role", async () => {
     seedTrayItems(1);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
-    const user = userEvent.setup();
-    renderWithProviders(<GlobalTrayDrawer />);
-
-    await user.click(await screen.findByRole("button", { name: /^Tray · 1/ }));
-    await screen.findByRole("dialog", { name: "Print tray" });
-
-    const dockButton = screen.getByRole("button", { name: "Dock tray" });
-    await user.click(dockButton);
-
-    expect(useTrayDrawerStore.getState().docked).toBe(true);
-    expect(screen.getByRole("button", { name: "Undock tray" })).toBeInTheDocument();
-  });
-
-  it("docked + open swaps in a complementary landmark -- no scrim, no aria-modal, no dialog role", async () => {
-    seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
-    useTrayDrawerStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
@@ -342,7 +356,7 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     expect(screen.queryByRole("dialog", { name: "Print tray" })).not.toBeInTheDocument();
   });
 
-  it("undocked + open keeps today's dialog semantics and scrim, unchanged", async () => {
+  it("below xl + open keeps today's dialog semantics and scrim, unchanged", async () => {
     seedTrayItems(1);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
@@ -355,10 +369,10 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     expect(document.querySelector('[aria-hidden][class*="bg-scrim/70"]')).not.toBeNull();
   });
 
-  it("close still works while docked, without stealing focus onto the close button", async () => {
+  it("close still works at xl, without stealing focus onto the close button", async () => {
     seedTrayItems(1);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
-    useTrayDrawerStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
@@ -366,23 +380,41 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     await user.click(trigger);
     await screen.findByRole("complementary", { name: "Print tray" });
 
-    // Docked mode skips the focus-steal contract entirely (see
+    // At `xl` the focus-steal contract is skipped entirely (see
     // GlobalTrayDrawer.tsx's own docstring) -- the close button never gets
-    // programmatic focus the way it does when undocked.
+    // programmatic focus the way it does below `xl`.
     expect(screen.getByRole("button", { name: "Close print tray" })).not.toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "Close print tray" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Print tray" })).not.toBeInTheDocument());
     expect(useTrayDrawerStore.getState().open).toBe(false);
-    // `docked` itself is untouched by closing -- remembered for next open
-    // (stores/trayDrawer.ts's own persisted preference).
-    expect(useTrayDrawerStore.getState().docked).toBe(true);
   });
 
-  it("Escape does nothing while docked -- no Escape-to-close", async () => {
+  // Focus-to-<body> fix: below `xl` the modal effect captures the trigger
+  // itself, but at `xl` that effect is skipped entirely (it's a landmark,
+  // not a modal) -- without the always-on capture/restore effect
+  // (GlobalTrayDrawer.tsx's own docstring), the × button here found nothing
+  // captured and silently dropped focus onto <body> instead of restoring it
+  // to the header trigger.
+  it("returns focus to the trigger when the close button is clicked at xl", async () => {
     seedTrayItems(1);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
-    useTrayDrawerStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
+    const user = userEvent.setup();
+    renderWithProviders(<GlobalTrayDrawer />);
+
+    const trigger = await screen.findByRole("button", { name: /^Tray · 1/ });
+    await user.click(trigger);
+    await screen.findByRole("complementary", { name: "Print tray" });
+
+    await user.click(screen.getByRole("button", { name: "Close print tray" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("Escape does nothing at xl -- no Escape-to-close", async () => {
+    seedTrayItems(1);
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
@@ -394,45 +426,50 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     expect(useTrayDrawerStore.getState().open).toBe(true);
   });
 
-  it("carries the unconditional xl:static in-flow-column class contract while docked AND open, regardless of the preview deck's own state", async () => {
+  it("carries the xl:static in-flow-column class contract whenever open, regardless of viewport or the preview deck's own state", async () => {
     seedTrayItems(1);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
-    useTrayDrawerStore.setState({ docked: true });
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
     await user.click(await screen.findByRole("button", { name: /^Tray · 1/ }));
-    await screen.findByRole("complementary", { name: "Print tray" });
+    await screen.findByRole("dialog", { name: "Print tray" });
 
     const panel = screen.getByTestId("global-tray-drawer-panel");
+    // The `xl:` class group is gated on `open` alone now, not on any
+    // breakpoint/JS state -- it's present in the class string here even
+    // though this test never opts into the desktop viewport (default
+    // jsdom, below `xl`), left for the browser's own `xl:` media query to
+    // actually switch on. See GlobalTrayDrawer.tsx's own docstring.
     expect(panel.className).toContain("xl:static");
     expect(panel.className).toContain("xl:inset-auto");
     expect(panel.className).toContain("xl:w-[26rem]");
+    // xl:max-w-none (M-review fix): the base `max-w-sm` (24rem) otherwise
+    // clamps the xl:-only width override above, so the desktop column
+    // rendered 24rem instead of the intended 26rem.
+    expect(panel.className).toContain("xl:max-w-none");
     expect(panel.className).toContain("xl:border-l");
     expect(panel.className).toContain("xl:min-h-0");
     // NOT xl:shrink-0 (viewport-bound-frame fix): this panel has no
-    // explicit height of its own, so it must be allowed to shrink to the
-    // dock rail's actual (viewport-bound) height, letting its own base
-    // `overflow-y-auto` scroll a tall tray internally instead of
-    // overflowing the rail and growing the page past the viewport.
+    // explicit height of its own, so it must be allowed to shrink to
+    // whatever its wrapping subtree's actual (viewport-bound) height is,
+    // letting its own base `overflow-y-auto` scroll a tall tray internally
+    // instead of overflowing and growing the page past the viewport.
     expect(panel.className).not.toContain("xl:shrink-0");
     // The tray panel no longer knows or cares about the preview deck's own
-    // docked/open state (Task 5 restructure moved the deck to a root-level
-    // sibling, its own full-width bottom band) -- there is no state where
-    // `xl:max-h-[50%]` should appear anymore.
+    // open state (the two panels are fully decoupled, each mounted at its
+    // own root-level spot) -- there is no state where `xl:max-h-[50%]`
+    // should appear anymore.
     expect(panel.className).not.toContain("xl:max-h-[50%]");
-    // Docked mode drops the slide transition entirely -- nothing to
-    // animate once it's back in normal flow.
-    expect(panel.className).not.toContain("transition-transform");
 
-    // Docking the preview deck too must NOT change the tray panel's own
+    // Opening the preview deck too must NOT change the tray panel's own
     // class string -- confirms the two panels are fully decoupled now.
-    usePrintPreviewStore.setState({ docked: true, open: true });
+    usePrintPreviewStore.setState({ open: true });
     expect(panel.className).not.toContain("xl:max-h-[50%]");
   });
 
-  it("a closed docked panel is hidden exactly like an undocked one -- no xl: override leaks through while closed", () => {
-    useTrayDrawerStore.setState({ docked: true });
+  it("a closed panel is hidden regardless of viewport -- no xl: override leaks through while closed", () => {
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     renderWithProviders(<GlobalTrayDrawer />);
 
     const panel = screen.getByTestId("global-tray-drawer-panel");
@@ -442,10 +479,10 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     expect(panel.className).not.toContain("xl:static");
   });
 
-  it("a docked tray does not close itself when 'Preview' opens the chain preview drawer -- only an UNDOCKED tray does that", async () => {
+  it("an at-xl tray does not close itself when 'Preview' opens the chain preview panel -- only a below-xl tray does that", async () => {
     seedTrayItems(2);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))));
-    useTrayDrawerStore.setState({ docked: true });
+    setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
@@ -455,11 +492,11 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     await user.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(usePrintPreviewStore.getState().open).toBe(true);
-    // Unlike the undocked case (PrintPreviewDeck.test.tsx's own
-    // "opening the chain preview... closes the GlobalTrayDrawer slide-over"
-    // test), a docked tray stays open -- see TrayPanel.tsx's own
+    // Unlike the below-xl case (PrintPreviewDeck.test.tsx's own
+    // "opening the chain preview... closes the GlobalTrayDrawer overlay"
+    // test), an at-xl tray stays open -- see TrayPanel.tsx's own
     // `closeTrayDrawer` prop doc and GlobalTrayDrawer.tsx's own docstring
-    // for why `closeTrayDrawer` is only ever passed while undocked.
+    // for why `closeTrayDrawer` is only ever passed below `xl`.
     expect(useTrayDrawerStore.getState().open).toBe(true);
     expect(screen.getByRole("complementary", { name: "Print tray" })).toBeInTheDocument();
   });

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { pngDataUrl } from "../api/client";
+import { useIsDesktop } from "../hooks/useIsDesktop";
 import { usePrintPreview } from "../hooks/usePrintPreview";
 import { useTapes } from "../hooks/useTapes";
 import { usePrintPreviewStore } from "../stores/printPreview";
+import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
 import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
 import { computeFeedDeckGeometry, DEFAULT_PX_PER_MM } from "../lib/feedDeckGeometry";
@@ -45,8 +47,8 @@ const cyclerButtonClass =
  * viewport, which is exactly the bug the old Dialog component sidestepped
  * by portalling to `document.body` (ui/Dialog.tsx's own docstring).
  * Mounting here at AppShell level gets the same correctness a body portal
- * would, without one. (Below `xl` -- and whenever undocked -- this remains
- * the ENTIRE story: a fixed-overlay slide-over, unchanged from Track C2.)
+ * would, without one. (Below `xl` this remains the ENTIRE story: a
+ * fixed-overlay slide-over, unchanged from Track C2.)
  *
  * Because it's mounted once, independent of whichever TrayPanel happens to
  * be visible, its own body/options are read directly off stores/tray.ts --
@@ -72,7 +74,7 @@ const cyclerButtonClass =
  * own radiogroup is now the ONLY control that can change it, anywhere in
  * the app; this deck only ever shows a read-only label of the current
  * selection (`data-testid="deck-mode-label"`, next to the "Print preview"
- * eyebrow) so a docked deck stays self-describing even though the actual
+ * eyebrow) so the in-flow deck stays self-describing even though the actual
  * control lives in a different subtree entirely. Switching modes from the
  * Tray still live-refetches this deck's own preview exactly as before --
  * `options.chain_mode` reads off the same store value, and that flows into
@@ -97,51 +99,53 @@ const cyclerButtonClass =
  * own docstring describes, just for a query instead of a WS-tracked print
  * job.
  *
- * Dockable-preview feature: `docked` (stores/printPreview.ts, persisted)
- * switches this SAME panel between that fixed-overlay behavior (unchanged
- * above) and a real in-flow FULL-WIDTH BOTTOM DECK. No `position: sticky`
- * involved -- AppShell.tsx's own frame is viewport-bound (`h-screen` on its
- * root column; `<main>` scrolls internally instead), so this component,
- * mounted as the LAST child of that root column (below the header and the
+ * Responsive deck (docking removed): `useIsDesktop()` (hooks/useIsDesktop.ts)
+ * switches this SAME panel between the fixed-overlay behavior below `xl`
+ * (modal overlay drawer) and a real in-flow FULL-WIDTH BOTTOM DECK at `xl`
+ * and up (in-flow bottom band, non-modal) -- panels no longer carry a
+ * `docked` toggle; whether an open deck is in-flow or an overlay is purely
+ * a function of viewport width. No `position: sticky` involved --
+ * AppShell.tsx's own frame is viewport-bound (`h-screen` on its root
+ * column; `<main>` scrolls internally instead), so this component, mounted
+ * as the LAST child of that root column (below the header and the
  * `<main>`/dock-rail content row), is simply the root column's own last
- * in-flow child once docked+open makes it `xl:static`. Fixed at `xl:h-64`
+ * in-flow child once `open` makes it `xl:static`. Fixed at `xl:h-64`
  * (16rem) tall -- that figure is this component's own height alone now; no
  * other file needs to know it (AppShell.tsx's dock rail used to reserve a
  * matching `calc()` height for the tray, but that mechanism is gone --
  * flexbox alone sizes the rail now, see AppShell.tsx's own docstring).
  *
  * Only the panel's own classes/attributes switch (a single DOM node, no
- * conditional unmount) -- `docked`/`open` are both ordinary component
- * state, not viewport-dependent, so THOSE branches are plain JS
- * conditionals; only the actual per-breakpoint sizing stays Tailwind
- * `xl:`-prefixed classes (jsdom can't evaluate media queries, so any
- * viewport-dependent behavior has to stay class-based to be testable at
- * all -- the same rule this app's other responsive panels, e.g.
- * symbols/SymbolBrowser.tsx's own sidebar switch, already follow). Docked
- * mode swaps dialog semantics for a landmark (`role="complementary"`, no
- * `aria-modal`), drops the backdrop scrim entirely, and skips the
+ * conditional unmount) -- `open` is ordinary component state, not
+ * viewport-dependent, so THAT branch is a plain JS conditional; only the
+ * actual per-breakpoint sizing stays Tailwind `xl:`-prefixed classes
+ * (jsdom can't evaluate media queries, so any viewport-dependent behavior
+ * has to stay class-based to be testable at all -- the same rule this
+ * app's other responsive panels, e.g. symbols/SymbolBrowser.tsx's own
+ * sidebar switch, already follow). At `xl` (in-flow bottom band, non-modal)
+ * the panel swaps dialog semantics for a landmark (`role="complementary"`,
+ * no `aria-modal`), drops the backdrop scrim entirely, and skips the
  * focus-steal/Escape-close/trigger-restore contract below (see the
- * dedicated effect's own comment for why `docked` sits in its dependency
- * array) -- none of that modal machinery belongs to an in-flow landmark a
- * user can otherwise ignore. The close
- * button still works in every mode; below `xl` a docked panel simply falls
- * back to the same fixed-overlay positioning as undocked (just without the
- * scrim/modality), so docking is never a no-op even on a narrow viewport
- * that can't actually fit a bottom deck.
+ * dedicated effect's own comment for why `isDesktop` sits in its
+ * dependency array) -- none of that modal machinery belongs to an in-flow
+ * landmark a user can otherwise ignore. Below `xl` (modal overlay drawer)
+ * the close button still works exactly the same; closing never depends on
+ * breakpoint.
  *
- * Three-group internal layout (docked-deck reshape): the panel's children
- * are wrapped into three sibling groups -- A (header + zoom), B (cycler +
- * strip), C (stats/notes/warnings/disclaimer) -- so that once `docked &&
- * open` flips the panel itself to `xl:flex-row`, A and C can take fixed
- * side columns (`xl:w-56`/`xl:w-72`) and B (the strip, the whole point of a
- * docked deck) gets the leftover width via `xl:flex-1`. Undocked/below-xl,
- * all three groups stack exactly as their un-grouped predecessors did.
+ * Three-group internal layout: the panel's children are wrapped into three
+ * sibling groups -- A (header + zoom), B (cycler + strip), C (stats/
+ * warnings/notes/disclaimer) -- so that once `open` flips the panel itself
+ * to `xl:flex-row` (at `xl`), A and C can take fixed side columns
+ * (`xl:w-56`/`xl:w-72`) and B (the strip, the whole point of the in-flow
+ * bottom band) gets the leftover width via `xl:flex-1`. Below `xl`, all
+ * three groups stack exactly as their un-grouped predecessors did.
  *
  * Cycling through queued labels: once a preview with 2+ segments is
  * loaded, a small previous/next row appears above the strip
  * (stores/printPreview.ts's own `selectedIndex`, shared the same way
- * `open`/`docked` are -- session-only, never persisted) and the currently
- * selected segment gets an amber highlight overlay on the strip itself,
+ * `open` is (same store) -- though unlike `open`, `selectedIndex` itself
+ * stays session-only, never persisted) and the currently selected segment
+ * gets an amber highlight overlay on the strip itself,
  * positioned from the SAME mm-derived left/width math the segment
  * chips/boundary lines below already use (never the PNG's own pixel
  * dimensions -- see ChainedPreviewResponse's own UNIT TRAP doc). A single-
@@ -153,8 +157,7 @@ const cyclerButtonClass =
 export function PrintPreviewDeck() {
   const open = usePrintPreviewStore((s) => s.open);
   const closeDrawer = usePrintPreviewStore((s) => s.closeDrawer);
-  const docked = usePrintPreviewStore((s) => s.docked);
-  const toggleDocked = usePrintPreviewStore((s) => s.toggleDocked);
+  const isDesktop = useIsDesktop();
   const selectedIndex = usePrintPreviewStore((s) => s.selectedIndex);
   const setSelectedIndex = usePrintPreviewStore((s) => s.setSelectedIndex);
 
@@ -175,6 +178,15 @@ export function PrintPreviewDeck() {
   // chosen default.
   const [zoom, setZoom] = useState<ZoomLevel>(String(DEFAULT_PX_PER_MM) as ZoomLevel);
 
+  // Group C's notes/disclaimer disclosure (collapsed by default, see that
+  // group's own comment below) -- deliberately NOT reset by the
+  // selectedIndex-reset effect below (that effect fires on every tray
+  // edit/mode switch/reopen, which would otherwise re-collapse a user's
+  // already-expanded disclosure mid-session): this panel never unmounts, so
+  // a user's choice to expand it just sticks for as long as the app stays
+  // open.
+  const [notesExpanded, setNotesExpanded] = useState(false);
+
   const triggerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   // The strip's own horizontal-scroll container (cycling through queued
@@ -188,22 +200,43 @@ export function PrintPreviewDeck() {
     triggerRef.current = null;
   }
 
-  // Focus/Escape modal contract: capture whatever triggered the open
-  // (`document.activeElement` at the moment `open` flips true -- nothing
-  // else moves focus between a trigger's own click handler and this effect
-  // running, so it's reliably still the clicked button here), move focus
-  // onto the close button, and wire Escape. Skipped entirely while `docked`
-  // (dockable-preview feature): a docked panel is a landmark
-  // (`role="complementary"` below), not a modal dialog, so it must never
-  // steal focus off whatever the user's doing elsewhere on the page, or
-  // swallow their Escape key. `docked` sits in this effect's own dependency
-  // array (not just `open`) so that toggling dock mid-open tears down (or
-  // re-arms) the Escape listener immediately, rather than leaving a stale
-  // listener from before the toggle -- GlobalTrayDrawer.tsx's own
-  // focus/Escape effect follows this identical shape for the same reason.
+  // Always-on focus capture/restore (M-review focus-to-<body> fix): runs at
+  // EVERY breakpoint, unlike the modal-only effect below (which early-
+  // returns at desktop) -- without this, an in-flow (`xl`) panel's own
+  // trigger was never captured at all, so its × button (`close()` above)
+  // found `triggerRef.current` still null and silently dropped focus onto
+  // <body> instead of restoring it. Keyed on the open TRANSITION: the
+  // false->true edge captures `document.activeElement` (nothing else moves
+  // focus between a trigger's own click handler and this effect running, so
+  // it's reliably still the clicked button here), regardless of breakpoint;
+  // the true->false edge restores focus to it (if still `isConnected` --
+  // covers `open` being closed by something OTHER than this component's own
+  // `close()`, e.g. the mutual-exclusion effect below closing the sibling
+  // tray drawer) and clears the ref either way, so a later close with no
+  // matching open can't re-focus a stale element.
   useEffect(() => {
-    if (!open || docked) return;
-    triggerRef.current = document.activeElement as HTMLElement | null;
+    if (open) {
+      triggerRef.current = document.activeElement as HTMLElement | null;
+      return;
+    }
+    if (triggerRef.current?.isConnected) triggerRef.current.focus();
+    triggerRef.current = null;
+  }, [open]);
+
+  // Focus/Escape modal contract: move focus onto the close button, and wire
+  // Escape. Trigger capture/restore itself now lives in the always-on
+  // effect above (so it isn't duplicated here) -- this effect owns ONLY the
+  // modal-specific machinery. Skipped entirely at `xl` (in-flow bottom
+  // band, non-modal): an in-flow panel is a landmark (`role="complementary"`
+  // below), not a modal dialog, so it must never steal focus off whatever
+  // the user's doing elsewhere on the page, or swallow their Escape key.
+  // `isDesktop` sits in this effect's own dependency array (not just
+  // `open`) so that crossing the `xl` breakpoint mid-open tears down (or
+  // re-arms) the Escape listener immediately, rather than leaving a stale
+  // listener from before the resize -- GlobalTrayDrawer.tsx's own focus/
+  // Escape effect follows this identical shape for the same reason.
+  useEffect(() => {
+    if (!open || isDesktop) return;
     closeButtonRef.current?.focus();
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") close();
@@ -211,7 +244,29 @@ export function PrintPreviewDeck() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, docked]);
+  }, [open, isDesktop]);
+
+  // Mutual exclusion (below `xl`): TrayPanel's own "Preview" button already
+  // closes the sibling tray drawer the instant IT opens this deck
+  // (`closeTrayDrawer`, TrayPanel.tsx's own prop) -- but that's a click-time
+  // guard, so it can't reach the two OTHER ways both overlays can end up
+  // open below `xl` at once: rehydrating with BOTH stores' `open` persisted
+  // true, and shrinking the window below 1280px while both happened to be
+  // open at `xl` (where they occupy entirely different screen regions, see
+  // this component's own docstring, and coexisting there is fine). This
+  // effect extends that SAME mutual-exclusion invariant to those two paths:
+  // two `aria-modal` dialogs, two scrims, and two Escape listeners must
+  // never stack. Deliberately one-directional -- see GlobalTrayButton's own
+  // click handler (components/GlobalTrayDrawer.tsx) for why a second,
+  // symmetric reconciliation effect over there would fight this one (a pair
+  // of effects each closing the other on a both-open reload, back and
+  // forth, rather than settling). Net priority: on a both-open reload below
+  // `xl`, THIS deck wins (stays open, closes the tray); interactively
+  // opening either one closes the other (this effect covers the deck
+  // opening; GlobalTrayButton's own guard covers the tray opening).
+  useEffect(() => {
+    if (open && !isDesktop) useTrayDrawerStore.getState().closeDrawer();
+  }, [open, isDesktop]);
 
   // Labels come ONLY from the tray's own queued items -- this deck
   // previews the QUEUED PRINT JOB, never the Designer's in-progress,
@@ -305,52 +360,52 @@ export function PrintPreviewDeck() {
 
   return (
     <>
-      {/* No scrim in docked mode (dockable-preview feature) -- a docked
-          panel is an in-flow landmark, not a modal overlay, so nothing
-          behind it should dim or click-to-close. */}
-      {open && !docked && <div aria-hidden onClick={close} className="fixed inset-0 z-40 bg-scrim/70" />}
+      {/* No scrim at `xl` (in-flow bottom band, non-modal) -- an in-flow
+          panel is a landmark, not a modal overlay, so nothing behind it
+          should dim or click-to-close. */}
+      {open && !isDesktop && <div aria-hidden onClick={close} className="fixed inset-0 z-40 bg-scrim/70" />}
 
       {/* Always mounted (visibility/translate-toggled below) -- see this
-          component's own docstring. Below `xl`, docked and undocked render
-          IDENTICALLY (same fixed/translate overlay classes, just without
-          the scrim/dialog semantics above/below when docked); the
-          `docked && open` class group only kicks in at `xl:` and up, where
-          it overrides position/translate/visibility/flow-direction back
-          into a full-width, in-flow row that settles at the viewport
-          bottom on its own (no sticky/fixed positioning involved) -- see
-          this component's own docstring for the full contract. `transition-
-          transform` is dropped while `docked` so that override never
-          animates as a slide (there's nothing to slide once the panel's
-          back in normal flow). */}
+          component's own docstring. Below `xl` (modal overlay drawer) this
+          is the fixed/translate overlay together with the scrim/dialog
+          semantics above/below; the `open` class group only kicks in at
+          `xl:` and up (in-flow bottom band, non-modal), where it overrides
+          position/translate/visibility/flow-direction back into a
+          full-width, in-flow row that settles at the viewport bottom on its
+          own (no sticky/fixed positioning involved) -- see this component's
+          own docstring for the full contract. `transition-transform` is
+          dropped at `xl` so that override never animates as a slide
+          (there's nothing to slide once the panel's back in normal
+          flow). */}
       <div
         data-testid="print-preview-deck-panel"
-        role={open ? (docked ? "complementary" : "dialog") : undefined}
-        aria-modal={open && !docked ? true : undefined}
+        role={open ? (isDesktop ? "complementary" : "dialog") : undefined}
+        aria-modal={open && !isDesktop ? true : undefined}
         aria-label={open ? "Print preview" : undefined}
         className={`fixed inset-y-0 right-0 z-50 flex w-[min(94vw,56rem)] flex-col gap-4 overflow-y-auto border-l border-deck-800 bg-deck-900 p-5 shadow-lg ${
-          docked ? "" : "transition-transform duration-150 motion-reduce:transition-none"
+          isDesktop ? "" : "transition-transform duration-150 motion-reduce:transition-none"
         } ${open ? "visible translate-x-0" : "invisible translate-x-full"} ${
-          docked && open
+          open
             ? // No sticky, no calc() -- AppShell.tsx's own frame is
               // viewport-bound (`h-screen` root column), so this panel just
               // needs to be a plain in-flow block (`xl:static`) to land at
               // the viewport bottom on its own, the same shape the tray's
-              // own docked contract (GlobalTrayDrawer.tsx) already uses.
+              // own in-flow contract (GlobalTrayDrawer.tsx) already uses.
               // `xl:h-64` is this component's own height alone now -- no
               // other file needs to know the figure.
               "xl:static xl:inset-auto xl:z-auto xl:h-64 xl:w-full xl:translate-x-0 xl:visible xl:shrink-0 xl:border-l-0 xl:border-t xl:flex-row xl:items-stretch xl:overflow-hidden xl:gap-5"
             : ""
         }`}
       >
-        {/* Group A: header row (eyebrow + read-only mode label + dock/
-            close buttons) + the zoom control row -- a fixed narrow column
-            at `xl` while docked (this group never needs the strip's own
-            width). `flex flex-col gap-4` internally reproduces the 1rem
-            gap these two rows got for free as top-level panel children
-            before this wrapper existed -- the panel's own `gap-4` now only
-            separates the three top-level groups from each other, not the
-            rows within them. */}
-        <div className={`flex flex-col gap-4 ${docked && open ? "xl:w-56 xl:shrink-0" : ""}`}>
+        {/* Group A: header row (eyebrow + read-only mode label + close
+            button) + the zoom control row -- a fixed narrow column at `xl`
+            once open (this group never needs the strip's own width). `flex
+            flex-col gap-4` internally reproduces the 1rem gap these two
+            rows got for free as top-level panel children before this
+            wrapper existed -- the panel's own `gap-4` now only separates
+            the three top-level groups from each other, not the rows within
+            them. */}
+        <div className={`flex flex-col gap-4 ${open ? "xl:w-56 xl:shrink-0" : ""}`}>
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className={eyebrow}>Print preview</span>
@@ -358,7 +413,7 @@ export function PrintPreviewDeck() {
                   longer owns a mode control of its own; TrayPanel.tsx's
                   own radiogroup is the ONLY place chain mode can be
                   changed (see useTrayStore.chainMode above). This just
-                  keeps a docked deck self-describing about which mode
+                  keeps the in-flow deck self-describing about which mode
                   it's currently rendering, without duplicating the
                   control itself. */}
               <span className="font-mono text-[11px] text-deck-400" data-testid="deck-mode-label">
@@ -366,20 +421,6 @@ export function PrintPreviewDeck() {
               </span>
             </div>
             <div className="flex items-center gap-1.5">
-              {/* Dock/undock toggle (dockable-preview feature) -- house
-                  icon-button styling (iconButtonClass, same as the close
-                  button beside it), accessible name flips with the current
-                  state rather than describing the click (same convention as
-                  AppShell's own ThemeCycleButton). */}
-              <button
-                type="button"
-                onClick={toggleDocked}
-                aria-label={docked ? "Undock preview" : "Dock preview"}
-                title={docked ? "Undock preview" : "Dock preview"}
-                className={iconButtonClass}
-              >
-                <span aria-hidden="true">{docked ? "▣" : "▢"}</span>
-              </button>
               <button
                 type="button"
                 ref={closeButtonRef}
@@ -405,20 +446,20 @@ export function PrintPreviewDeck() {
 
         {/* Group B: the cycler row + the strip itself (or, before a
             preview exists, whichever placeholder state applies) -- the
-            strip is the whole point of a docked bottom deck, so it's the
-            one group that actually grows (`xl:flex-1`) to fill the
+            strip is the whole point of the in-flow bottom band, so it's
+            the one group that actually grows (`xl:flex-1`) to fill the
             leftover width once A and C take their fixed columns.
-            `xl:min-h-0 xl:overflow-y-auto` (review fix): the docked deck's
-            own inner height is fixed (`xl:h-64`, 16rem, minus Group A/C's
+            `xl:min-h-0 xl:overflow-y-auto` (review fix): the band's own
+            inner height is fixed (`xl:h-64`, 16rem, minus Group A/C's
             padding leaves ~216px), and at high zoom (8x) the cycler row +
             strip can exceed that -- without `xl:min-h-0` this flex child
             would refuse to shrink below its content's intrinsic height, and
             the overflow gets clipped by the panel's own `xl:overflow-hidden`
-            (the outer docked class group) with no way to reach the clipped
+            (the outer in-flow class group) with no way to reach the clipped
             part; `xl:overflow-y-auto` gives Group B its own scroll escape
             instead of silently clipping content. */}
         <div
-          className={`flex flex-col ${docked && open ? "xl:min-w-0 xl:flex-1 xl:flex xl:flex-col xl:min-h-0 xl:overflow-y-auto" : ""}`}
+          className={`flex flex-col ${open ? "xl:min-w-0 xl:flex-1 xl:flex xl:flex-col xl:min-h-0 xl:overflow-y-auto" : ""}`}
         >
           {!renderable ? (
             <div className="flex flex-col gap-1">
@@ -527,17 +568,26 @@ export function PrintPreviewDeck() {
           )}
         </div>
 
-        {/* Group C: stats + notes + warnings + disclaimer -- only ever
-            rendered alongside the strip (same three-part guard as Group
-            B's own ternary), so it gets its own top-level conditional
-            rather than living inside Group B. `mt-3` dropped from the
-            `<dl>` below (it used to supply the gap between the strip and
-            the stats when both lived in one unwrapped block container) --
-            the panel's own top-level `gap-4` now supplies that same gap
-            between Group B and Group C directly, so keeping `mt-3` too
-            would double it. */}
+        {/* Group C: stats + warnings (always visible) + notes/disclaimer
+            (collapsed by default behind a disclosure) -- only ever rendered
+            alongside the strip (same three-part guard as Group B's own
+            ternary), so it gets its own top-level conditional rather than
+            living inside Group B. `mt-3` dropped from the `<dl>` below (it
+            used to supply the gap between the strip and the stats when both
+            lived in one unwrapped block container) -- the panel's own
+            top-level `gap-4` now supplies that same gap between Group B and
+            Group C directly, so keeping `mt-3` too would double it.
+
+            Notes disclosure: the notes `<ul>` and the UNVERIFIED disclaimer
+            `<p>` are low-priority, rarely-actionable copy -- unlike the
+            warnings `<ul>` below, which stays unconditionally visible
+            (`role="alert"` items are exactly the thing a user must never
+            have to click through to see). Collapsing them by default keeps
+            Group C's own collapsed height inside the `xl:h-64` band, so the
+            column virtually never needs its own `xl:overflow-y-auto` scroll
+            escape in the common case. */}
         {renderable && !error && preview && (
-          <div className={`flex flex-col ${docked && open ? "xl:w-72 xl:shrink-0 xl:overflow-y-auto" : ""}`}>
+          <div className={`flex flex-col ${open ? "xl:w-72 xl:shrink-0 xl:overflow-y-auto" : ""}`}>
             <dl className="flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px] text-deck-200">
               <div className="flex flex-col">
                 <dt className="text-[11px] text-deck-400">Total</dt>
@@ -555,14 +605,6 @@ export function PrintPreviewDeck() {
               </div>
             </dl>
 
-            {preview.notes.length > 0 && (
-              <ul className="mt-2 flex flex-col gap-0.5 text-[11px] leading-snug text-deck-400">
-                {preview.notes.map((note, i) => (
-                  <li key={i}>· {note}</li>
-                ))}
-              </ul>
-            )}
-
             {preview.warnings.length > 0 && (
               <ul className="mt-2 flex flex-col gap-1">
                 {preview.warnings.map((w, i) => (
@@ -573,10 +615,36 @@ export function PrintPreviewDeck() {
               </ul>
             )}
 
-            <p className={helpText}>
-              Tape usage shown here is an UNVERIFIED estimate pending the physical print checkpoint — actual
-              feed/margin behavior on real hardware may differ.
-            </p>
+            <button
+              type="button"
+              onClick={() => setNotesExpanded((v) => !v)}
+              aria-expanded={notesExpanded}
+              aria-controls="print-preview-notes"
+              className="mt-2 flex items-center gap-1 self-start font-mono text-[11px] text-deck-400 transition-colors hover:text-deck-200"
+            >
+              Notes <span aria-hidden="true">{notesExpanded ? "▾" : "▸"}</span>
+            </button>
+
+            {/* Always rendered (M-review dangling-IDREF fix), visibility
+                toggled via the `hidden` attribute instead of a conditional
+                mount -- the "Notes" button's `aria-controls` above points at
+                this id unconditionally, so the target must always exist in
+                the DOM, collapsed or not. Inner conditionals (the notes
+                `<ul>`) are unchanged. */}
+            <div id="print-preview-notes" hidden={!notesExpanded}>
+              {preview.notes.length > 0 && (
+                <ul className="mt-2 flex flex-col gap-0.5 text-[11px] leading-snug text-deck-400">
+                  {preview.notes.map((note, i) => (
+                    <li key={i}>· {note}</li>
+                  ))}
+                </ul>
+              )}
+
+              <p className={helpText}>
+                Tape usage shown here is an UNVERIFIED estimate pending the physical print checkpoint — actual
+                feed/margin behavior on real hardware may differ.
+              </p>
+            </div>
           </div>
         )}
       </div>

@@ -280,6 +280,49 @@ body {
   }
 }
 
+/* Thin, themed scrollbars everywhere -- every scrolling region in this app
+   (<main>, the TypeRail, the tray panel, PrintPreviewDeck's internal
+   columns) is a narrow content column/rail where the platform default
+   15-17px bar reads disproportionately heavy, and with several regions
+   visible at once the defaults compound into visual noise. --color-deck-600
+   (the existing hairline/border tone) is reused for the thumb rather than
+   inventing a token -- it already re-themes via the same
+   @theme/:root[data-theme] custom properties every other utility keys off,
+   so no scrollbar-specific per-theme override is needed. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-deck-600) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-deck-600);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-deck-400);
+}
+
+/* <main> is the one scroller wide enough -- and crossed often enough by its
+   own content growing/shrinking mid-session -- that the scrollbar's
+   reserved width toggling on/off would nudge the rails beside it;
+   scrollbar-gutter reserves the gutter unconditionally. The other scrollers
+   are fixed-width columns/overlays with nothing beside them to shift. */
+main {
+  scrollbar-gutter: stable;
+}
+
 /* Quality floor: "No skeleton-shimmer everywhere: use a quiet mono ···
    placeholder for pending values" -- see components/ui/Pending.tsx, the
    one place this class is used. */

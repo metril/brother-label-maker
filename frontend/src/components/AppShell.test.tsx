@@ -9,6 +9,8 @@ import { usePrintPreviewStore } from "../stores/printPreview";
 import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
+import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
+import { setMediaQueryMatches } from "../test/setup";
 import type { LabelDefinition } from "../api/types";
 
 const INITIAL_TRAY_STATE = useTrayStore.getState();
@@ -250,27 +252,26 @@ describe("AppShell -- compact theme control", () => {
   });
 });
 
-/** Dockable-tray + dockable-preview features (Task 5 restructure): the two
- * panels no longer share one dock-rail column. GlobalTrayDrawer.tsx's own
+/** The two panels don't share one rail column. GlobalTrayDrawer.tsx's own
  * `xl:static` in-flow-column class contract still needs the tray panel to
  * be an actual flex ITEM of a column that is ITSELF a flex item of
  * AppShell's content row (the div holding TypeRail + `<main>`) -- a sibling
  * of that row could never reflow `<main>` beside it no matter what classes
- * the panel itself carried. PrintPreviewDeck.tsx, by contrast, now mounts
- * as a root-level sibling AFTER the content row entirely, so its own
+ * the panel itself carried. PrintPreviewDeck.tsx, by contrast, mounts as a
+ * root-level sibling AFTER the content row entirely, so its own
  * `xl:static xl:h-64` bottom-deck contract can span the FULL viewport
  * width instead of being squeezed into a right-hand column. This proves the
  * DOM shape AppShell.tsx's own docstring documents, independent of either
- * panel's own docked/undocked rendering (covered by
+ * panel's own in-flow-vs-modal rendering (covered by
  * GlobalTrayDrawer.test.tsx/PrintPreviewDeck.test.tsx themselves). */
-describe("AppShell -- tray-only dock rail, and the preview deck as a root-level sibling", () => {
+describe("AppShell -- tray-only rail, and the preview deck as a root-level sibling", () => {
   afterEach(() => {
     useTrayStore.setState(INITIAL_TRAY_STATE, true);
     usePrintPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
     useTrayDrawerStore.setState(INITIAL_TRAY_DRAWER_STATE, true);
   });
 
-  it("mounts the tray panel inside a dock rail that is a child of the content row, sharing a parent with <main>, holding no other panel", async () => {
+  it("mounts the tray panel inside a rail that is a child of the content row, sharing a parent with <main>, holding no other panel", async () => {
     renderWithProviders(
       <AppShell>
         <div>designer content</div>
@@ -281,7 +282,7 @@ describe("AppShell -- tray-only dock rail, and the preview deck as a root-level 
 
     // GlobalTrayPanel returns a Fragment (no wrapping DOM node of its own),
     // so its real DOM parent is whichever element renders it as JSX --
-    // AppShell's own dock-rail div.
+    // AppShell's own rail div.
     const trayPanel = screen.getByTestId("global-tray-drawer-panel");
     const dockRail = trayPanel.parentElement;
     expect(dockRail).not.toBeNull();
@@ -292,11 +293,11 @@ describe("AppShell -- tray-only dock rail, and the preview deck as a root-level 
     // height, sticky, or calc() of its own anymore -- the ROOT column below
     // is `h-screen`, and the content row's own `items-stretch` sizes this
     // wrapper to match exactly, regardless of the header's own (variable)
-    // height or whether the preview deck is docked (see the next test).
+    // height or whether the preview deck is open (see the next test).
     expect(dockRail?.className).toBe("flex min-h-0 flex-col");
     // No transform/filter of its own -- see AppShell.tsx's own inline
     // comment at this mount point for why that matters to the tray panel's
-    // undocked `position: fixed` overlay.
+    // below-`xl` `position: fixed` overlay.
     expect(dockRail?.className).not.toMatch(/transform|filter/);
 
     const contentRow = dockRail?.parentElement;
@@ -319,7 +320,7 @@ describe("AppShell -- tray-only dock rail, and the preview deck as a root-level 
     expect(main?.parentElement).toBe(contentRow);
   });
 
-  it("mounts the preview deck panel OUTSIDE the dock rail, as the root column's own last child, after the content row", async () => {
+  it("mounts the preview deck panel OUTSIDE the rail, as the root column's own last child, after the content row", async () => {
     renderWithProviders(
       <AppShell>
         <div>designer content</div>
@@ -341,7 +342,7 @@ describe("AppShell -- tray-only dock rail, and the preview deck as a root-level 
     expect(rootChildren.indexOf(contentRow)).toBeLessThan(rootChildren.indexOf(deckPanel));
   });
 
-  it("the tray rail's class contract does not change when the preview deck is pinned (docked+open) -- the two panels are fully decoupled now", async () => {
+  it("the tray rail's class contract does not change when the preview deck is open -- the two panels are fully decoupled now", async () => {
     renderWithProviders(
       <AppShell>
         <div>designer content</div>
@@ -361,13 +362,14 @@ describe("AppShell -- tray-only dock rail, and the preview deck as a root-level 
     // made the reserved figure wrong) and this fix removed entirely. The
     // rail's class string must stay untouched by the preview deck's own
     // store state now that flexbox (not calc) owns the geometry.
-    usePrintPreviewStore.setState({ docked: true, open: true });
+    usePrintPreviewStore.setState({ open: true });
     await waitFor(() => expect(usePrintPreviewStore.getState().open).toBe(true));
     expect(dockRail.className).toBe(beforeClassName);
   });
 
-  it("docked and open, the preview deck panel carries the in-flow bottom-deck class contract (static/h-64/full-width), not sticky and not the old right-column width", async () => {
-    usePrintPreviewStore.setState({ docked: true, open: true });
+  it("open at `xl`, the preview deck panel carries the in-flow bottom-deck class contract (static/h-64/full-width), not sticky and not the old right-column width", async () => {
+    setMediaQueryMatches(DESKTOP_QUERY, true);
+    usePrintPreviewStore.setState({ open: true });
 
     renderWithProviders(
       <AppShell>
