@@ -450,10 +450,19 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
     expect(panel.className).toContain("xl:max-w-none");
     expect(panel.className).toContain("xl:border-l");
     expect(panel.className).toContain("xl:min-h-0");
+    // xl:overflow-hidden (fixed-panel fix): overrides the base
+    // `overflow-y-auto` so the panel itself never scrolls at `xl` --
+    // components/TrayPanel.tsx's own items list is the ONE region that
+    // scrolls there (see the structural test below); the panel must fit its
+    // available height instead of growing/scrolling as a whole.
+    expect(panel.className).toContain("xl:overflow-hidden");
+    // xl:gap-3 (height-budget squeeze): tightens the base `gap-4` between
+    // this div's own header/TrayPanel children, at `xl` only -- part of the
+    // same live-measured fix as TrayPanel.tsx's own compactions.
+    expect(panel.className).toContain("xl:gap-3");
     // NOT xl:shrink-0 (viewport-bound-frame fix): this panel has no
     // explicit height of its own, so it must be allowed to shrink to
-    // whatever its wrapping subtree's actual (viewport-bound) height is,
-    // letting its own base `overflow-y-auto` scroll a tall tray internally
+    // whatever its wrapping subtree's actual (viewport-bound) height is
     // instead of overflowing and growing the page past the viewport.
     expect(panel.className).not.toContain("xl:shrink-0");
     // The tray panel no longer knows or cares about the preview deck's own
@@ -466,6 +475,35 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
     // class string -- confirms the two panels are fully decoupled now.
     usePrintPreviewStore.setState({ open: true });
     expect(panel.className).not.toContain("xl:max-h-[50%]");
+  });
+
+  // Fixed-panel requirement: at `xl`, the panel itself must fit its
+  // available height with NO panel-level scrolling -- only
+  // components/TrayPanel.tsx's own items list scrolls. This pins the actual
+  // desktop viewport shape (unlike the test above, which only checks the
+  // class string is present regardless of viewport).
+  it("at xl + open: the panel carries xl:overflow-hidden and only the items list's own wrapper is the scrolling region", async () => {
+    seedTrayItems(1);
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    setMediaQueryMatches(DESKTOP_QUERY, true);
+    const user = userEvent.setup();
+    renderWithProviders(<GlobalTrayDrawer />);
+
+    await user.click(await screen.findByRole("button", { name: /^Tray · 1/ }));
+    await screen.findByRole("complementary", { name: "Print tray" });
+
+    const panel = screen.getByTestId("global-tray-drawer-panel");
+    expect(panel.className).toContain("xl:overflow-hidden");
+
+    // The items <ul> (implicit role "list") is wrapped in a div that's the
+    // ONE flexible, scrolling region at `xl` -- everything else in the
+    // panel (header, add-to-tray/Mode/Auto-cut/estimate/Preview/Print) is
+    // `xl:shrink-0` instead.
+    const itemsList = screen.getByRole("list");
+    const scroller = itemsList.parentElement!;
+    expect(scroller.className).toContain("xl:flex-1");
+    expect(scroller.className).toContain("xl:min-h-0");
+    expect(scroller.className).toContain("xl:overflow-y-auto");
   });
 
   it("a closed panel is hidden regardless of viewport -- no xl: override leaks through while closed", () => {

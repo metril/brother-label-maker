@@ -172,7 +172,8 @@ describe("TrayPanel -- chain mode picker changes the estimate and shows the delt
 });
 
 describe("TrayPanel -- estimate panel", () => {
-  it("renders total_mm, per-label, notes, and a usage bar proportional to content/overhead", async () => {
+  it("renders total_mm and a usage bar proportional to content/overhead unconditionally, and per-label/notes behind the Details disclosure", async () => {
+    const user = userEvent.setup();
     server.use(
       http.post("/api/print/estimate", () =>
         HttpResponse.json(
@@ -184,10 +185,15 @@ describe("TrayPanel -- estimate panel", () => {
     renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId("estimate-total-mm")).toHaveTextContent("40.0 mm"));
-    expect(screen.getByText("22.0 mm")).toBeInTheDocument(); // "Per label"
-    expect(screen.getByText("· a leader allowance applies")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("estimate-usage-content")).toHaveStyle({ width: "75%" }));
     expect(screen.getByTestId("estimate-usage-overhead")).toHaveStyle({ width: "25%" });
+    // Details disclosure: collapsed by default (present in the DOM, hidden
+    // via the `hidden` attribute) -- expand it to see per-label and the
+    // note.
+    expect(screen.getByText("22.0 mm")).not.toBeVisible(); // "Per label"
+    await user.click(screen.getByRole("button", { name: "Estimate details" }));
+    expect(screen.getByText("22.0 mm")).toBeVisible(); // "Per label"
+    expect(screen.getByText("· a leader allowance applies")).toBeVisible();
   });
 
   // Carry-forward fix: a settled over-cap (or otherwise server-rejected)
@@ -209,6 +215,80 @@ describe("TrayPanel -- estimate panel", () => {
 
     expect(await screen.findByText("Fix the serialization run in the Serialize panel to see a tape estimate.")).toBeInTheDocument();
     expect(screen.queryByText(/exceeds the 1000 maximum/)).not.toBeInTheDocument();
+  });
+});
+
+// Mirrors PrintPreviewDeck.test.tsx's own "notes disclosure" describe block
+// (components/PrintPreviewDeck.tsx has the identical pattern this one was
+// extended from), extended to also cover the Per-label/Content-overhead
+// `<dl>` moving inside -- the accessible name here is "Estimate details" (an
+// `aria-label`, not the button's own "Details" text), distinct from that
+// deck's own "Notes" button since GlobalTrayDrawer and PrintPreviewDeck can
+// both be mounted (and both open) at once. Unlike the deck's own Notes
+// disclosure (gated on `notes.length > 0`), this one renders whenever
+// there's an estimate at all -- the dl is always there, regardless of notes.
+describe("TrayPanel -- estimate details disclosure", () => {
+  function serveWithNotes() {
+    // Distinct total_mm/per_label_mm -- the shared-fixture default has both
+    // at 35.4 for a one-label body, which "35.4 mm" as plain text can't
+    // disambiguate (see estimate-total-mm's own data-testid comment in
+    // TrayPanel.tsx).
+    server.use(
+      http.post("/api/print/estimate", () =>
+        HttpResponse.json(estimateBody({ total_mm: 40, per_label_mm: 22, notes: ["a leader allowance applies"] })),
+      ),
+    );
+  }
+
+  it("is collapsed by default -- the region (dl + notes) is present (aria-controls has a real target) but hidden until expanded", async () => {
+    serveWithNotes();
+    renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId("estimate-total-mm")).toHaveTextContent("40.0 mm"));
+    const detailsButton = screen.getByRole("button", { name: "Estimate details" });
+    expect(detailsButton).toHaveAttribute("aria-expanded", "false");
+    // The region itself always renders alongside the button (dangling
+    // aria-controls IDREF fix) -- collapsed means hidden via the `hidden`
+    // attribute, not absent from the DOM.
+    const detailsRegion = document.getElementById("tray-estimate-details");
+    expect(detailsRegion).not.toBeNull();
+    expect(detailsRegion).toHaveAttribute("hidden");
+    expect(document.getElementById(detailsButton.getAttribute("aria-controls")!)).toBe(detailsRegion);
+    expect(screen.getByText("22.0 mm")).not.toBeVisible(); // "Per label"
+    expect(screen.getByText(/a leader allowance applies/)).not.toBeVisible();
+  });
+
+  it("clicking Estimate details reveals per-label/content-overhead and the notes list", async () => {
+    const user = userEvent.setup();
+    serveWithNotes();
+    renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId("estimate-total-mm")).toHaveTextContent("40.0 mm"));
+    const detailsButton = screen.getByRole("button", { name: "Estimate details" });
+    await user.click(detailsButton);
+
+    expect(detailsButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("22.0 mm")).toBeVisible(); // "Per label"
+    expect(screen.getByText(/a leader allowance applies/)).toBeVisible();
+  });
+
+  it("still renders the button/region (dl only, no notes ul) when the estimate has no notes", async () => {
+    const user = userEvent.setup();
+    // Distinct total_mm/per_label_mm (unlike the shared-fixture default,
+    // where both happen to be 35.4 for a one-label body) -- see
+    // estimate-total-mm's own data-testid comment in TrayPanel.tsx for why
+    // a plain text query can't disambiguate the two when they collide.
+    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ total_mm: 40, per_label_mm: 22 }))));
+    renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId("estimate-total-mm")).toHaveTextContent("40.0 mm"));
+    const detailsButton = screen.getByRole("button", { name: "Estimate details" });
+    await user.click(detailsButton);
+
+    expect(screen.getByText("22.0 mm")).toBeVisible(); // "Per label"
+    // No notes ul renders inside the region -- nothing to assert its
+    // presence against beyond the absence of any "· " bullet text.
+    expect(screen.queryByText(/^·/)).not.toBeInTheDocument();
   });
 });
 

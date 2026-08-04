@@ -260,11 +260,18 @@ export function GlobalTrayPanel() {
           `xl:shrink-0` (unlike PrintPreviewDeck's own `xl:` contract, which
           correctly IS shrink-0 -- it has an explicit `xl:h-64`): this panel
           has no explicit height of its own, so in the viewport-bound frame
-          it must be allowed to shrink to whatever that subtree actually is,
-          letting its own base `overflow-y-auto` scroll a tall tray
-          internally -- `xl:shrink-0` here would instead let it overflow and
-          grow the page past the viewport, defeating the whole point of
-          `h-screen`. */}
+          it must be allowed to shrink to whatever that subtree actually is.
+
+          `xl:overflow-hidden` (overriding the base `overflow-y-auto`) --
+          unlike below `xl`, where the WHOLE panel scrolling as one modal
+          drawer is correct and unchanged, at `xl` the panel must fit its
+          available height with NO panel-level scrolling: components/
+          TrayPanel.tsx's own items list is the ONE region that scrolls
+          there (`xl:min-h-0 xl:flex-1 xl:overflow-y-auto` on its scroller
+          div), while its header and fixed-controls block (`xl:shrink-0`
+          each) stay pinned. `xl:overflow-hidden` here is what stops THIS
+          div from ALSO scrolling and fighting that inner scroller for the
+          gesture. */}
       <div
         data-testid="global-tray-drawer-panel"
         role={open ? (isDesktop ? "complementary" : "dialog") : undefined}
@@ -277,7 +284,16 @@ export function GlobalTrayPanel() {
             ? // xl:max-w-none (M-review fix): the base `max-w-sm` (24rem)
               // above otherwise clamps this xl:-only width override, so the
               // desktop column rendered 24rem instead of the intended 26rem.
-              "xl:static xl:inset-auto xl:z-auto xl:translate-x-0 xl:visible xl:w-[26rem] xl:max-w-none xl:border-l xl:min-h-0"
+              // xl:overflow-hidden (fixed-panel fix): see this div's own
+              // comment above -- overrides the base `overflow-y-auto` so the
+              // panel itself never scrolls at `xl`; TrayPanel's own items
+              // list is the only region that does. xl:gap-3 (height-budget
+              // squeeze, tightens the base `gap-4` between this div's own
+              // header/TrayPanel children) is part of the same live-measured
+              // fix as TrayPanel.tsx's own `xl:gap-3`/disclosure/Mode-
+              // description/Preview+Print compactions -- see that file's own
+              // comment for the measured numbers.
+              "xl:static xl:inset-auto xl:z-auto xl:translate-x-0 xl:visible xl:w-[26rem] xl:max-w-none xl:border-l xl:min-h-0 xl:overflow-hidden xl:gap-3"
             : ""
         }`}
       >
