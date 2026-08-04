@@ -1,7 +1,7 @@
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
 import { usePrintJob } from "../hooks/usePrintJob";
 import { useTrayPreviews } from "../hooks/useTrayPreviews";
-import { useChainPreviewStore } from "../stores/chainPreview";
+import { usePrintPreviewStore } from "../stores/printPreview";
 import type { CurrentDesign } from "../stores/currentDesign";
 import { useTrayStore } from "../stores/tray";
 import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
@@ -30,17 +30,17 @@ interface TrayPanelProps {
   /** components/GlobalTrayDrawer.tsx's own `dialog.close` (hooks/
    * useDialogController.ts) -- passed down so THIS instance's "Preview
    * chain" button can close that slide-over the instant it opens
-   * components/ChainPreviewDrawer.tsx, since both occupy the right edge of
+   * components/PrintPreviewDeck.tsx, since both occupy the right edge of
    * the viewport at once otherwise. Called synchronously, in the same
-   * click handler, before stores/chainPreview.ts's own `openDrawer()` --
+   * click handler, before stores/printPreview.ts's own `openDrawer()` --
    * `useDialogController`'s own `close()` moves focus back to
    * GlobalTrayDrawer's trigger ("Tray · N") synchronously too, which is
-   * what lets ChainPreviewDrawer's own open effect (document.activeElement
+   * what lets PrintPreviewDeck's own open effect (document.activeElement
    * at the moment it opens) capture the RIGHT thing to restore focus to
    * later, instead of a button that's about to become invisible. Never
    * passed by JobTray.tsx (task 2.12's Designer-page sidebar/sheet) --
    * there's no sibling drawer of its own to close there, so the button
-   * just opens ChainPreviewDrawer directly. */
+   * just opens PrintPreviewDeck directly. */
   closeTrayDrawer?: () => void;
 }
 
@@ -65,7 +65,7 @@ function deltaText(deltaMm: number | null): string | null {
  * with a `current` design prints that design; a non-empty tray prints the
  * tray's own items instead (the current design is never silently included
  * -- it must be added first); an empty tray with `current === null` has
- * nothing to print at all. Chain mode/auto-cut apply to whichever body is
+ * nothing to print at all. Mode/auto-cut apply to whichever body is
  * being printed, and drive both the live tape estimate and the actual
  * request so the number shown is always the number that would get used. */
 export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelProps) {
@@ -81,10 +81,10 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
   const moveDown = useTrayStore((s) => s.moveDown);
   const clearTray = useTrayStore((s) => s.clear);
 
-  // Track C2: components/ChainPreviewDrawer.tsx's own open flag -- shared
+  // Track C2: components/PrintPreviewDeck.tsx's own open flag -- shared
   // (not local state) since that drawer mounts once, in AppShell.tsx, well
   // outside this component's own subtree. See that store's own docstring.
-  const openChainPreview = useChainPreviewStore((s) => s.openDrawer);
+  const openChainPreview = usePrintPreviewStore((s) => s.openDrawer);
 
   // Items added with no captured preview (png: null, e.g. pages/Homebox.tsx's
   // "Add to tray") get one fetched here, keyed by item id -- see
@@ -200,8 +200,8 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
       )}
 
       <div className="border-t border-deck-800 pt-4">
-        <span className={`${eyebrow} mb-1.5 block`}>Chain mode</span>
-        <SegmentedControl ariaLabel="Chain mode" value={chainMode} options={CHAIN_MODE_OPTIONS} onChange={setChainMode} />
+        <span className={`${eyebrow} mb-1.5 block`}>Mode</span>
+        <SegmentedControl ariaLabel="Mode" value={chainMode} options={CHAIN_MODE_OPTIONS} onChange={setChainMode} />
         <p className={helpText}>{CHAIN_MODE_OPTIONS.find((o) => o.value === chainMode)?.description}</p>
       </div>
 
@@ -276,11 +276,13 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
         )}
       </div>
 
-      {/* Track C2: opens components/ChainPreviewDrawer.tsx, a wide
-          right-side slide-over composing the WHOLE tray body as one strip
-          under any of the three chain modes, independent of the tray's own
-          chainMode above. UNLIKE the estimate panel/Print button below,
-          this button previews the QUEUED JOB ONLY -- ChainPreviewDrawer.tsx
+      {/* Track C2: opens components/PrintPreviewDeck.tsx, a wide preview
+          deck composing the WHOLE tray body as one strip under whichever
+          chain mode is currently selected -- the deck always previews the
+          tray's own current Mode above (mode unification: a single source
+          of truth, see PrintPreviewDeck.tsx's own docstring). UNLIKE the
+          estimate panel/Print button below,
+          this button previews the QUEUED JOB ONLY -- PrintPreviewDeck.tsx
           dropped its own current-design fallback entirely (see that
           component's own docstring), so `!trayHasItems` disables this one
           even while a current design makes `canEstimate` true (the

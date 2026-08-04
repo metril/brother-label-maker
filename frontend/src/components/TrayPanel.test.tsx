@@ -3,7 +3,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { TrayPanel, type CurrentDesign } from "./TrayPanel";
-import { useChainPreviewStore } from "../stores/chainPreview";
+import { usePrintPreviewStore } from "../stores/printPreview";
 import { useTrayStore } from "../stores/tray";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
@@ -14,7 +14,7 @@ const INITIAL_TRAY_STATE = useTrayStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
-  useChainPreviewStore.setState({ open: false });
+  usePrintPreviewStore.setState({ open: false });
 });
 
 function def(text: string): LabelDefinition {
@@ -82,21 +82,21 @@ describe("TrayPanel -- current === null (away from the Designer page)", () => {
   });
 });
 
-/** Track C2 rework: components/ChainPreviewDrawer.tsx no longer renders
+/** Track C2 rework: components/PrintPreviewDeck.tsx no longer renders
  * through TrayPanel at all -- it's mounted once, at AppShell level, and
  * reads its own content straight off stores/tray.ts (see that component's
  * own docstring). TrayPanel's own responsibility for "Preview" is
- * now just the button: disabled gating, and wiring stores/chainPreview.ts
- * + the optional `closeTrayDrawer` prop -- the drawer's actual content
+ * now just the button: disabled gating, and wiring stores/printPreview.ts
+ * + the optional `closeTrayDrawer` prop -- the deck's actual content
  * (PNG/segments/stats/mode tabs/zoom/focus/Escape) is covered end-to-end
- * by ChainPreviewDrawer.test.tsx instead. */
+ * by PrintPreviewDeck.test.tsx instead. */
 describe("TrayPanel -- Preview button", () => {
   it("is disabled when the tray has nothing valid to print (mirrors the estimate/Print gate)", () => {
     renderWithProviders(<TrayPanel current={currentDesign({ canSubmit: false })} />);
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
   });
 
-  // ChainPreviewDrawer.tsx dropped its own current-design fallback (task:
+  // PrintPreviewDeck.tsx dropped its own current-design fallback (task:
   // "Print preview vs. FeedDeck" split) -- it previews the QUEUED JOB only,
   // so "Preview" must stay disabled with an empty tray even though a
   // current design would happily satisfy canEstimate/Print's OWN fallback.
@@ -113,11 +113,11 @@ describe("TrayPanel -- Preview button", () => {
     renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
     const previewButton = screen.getByRole("button", { name: "Preview" });
     expect(previewButton).toBeEnabled();
-    expect(useChainPreviewStore.getState().open).toBe(false);
+    expect(usePrintPreviewStore.getState().open).toBe(false);
 
     await user.click(previewButton);
 
-    expect(useChainPreviewStore.getState().open).toBe(true);
+    expect(usePrintPreviewStore.getState().open).toBe(true);
     // Opening the drawer does not touch the tray's own chainMode.
     expect(useTrayStore.getState().chainMode).toBe(INITIAL_TRAY_STATE.chainMode);
   });
@@ -133,7 +133,7 @@ describe("TrayPanel -- Preview button", () => {
     await user.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(closeTrayDrawer).toHaveBeenCalledTimes(1);
-    expect(useChainPreviewStore.getState().open).toBe(true);
+    expect(usePrintPreviewStore.getState().open).toBe(true);
   });
 });
 
@@ -164,7 +164,7 @@ describe("TrayPanel -- chain mode picker changes the estimate and shows the delt
 
     await waitFor(() => expect(totalReadout).toHaveTextContent("100.0 mm"));
 
-    await user.click(screen.getByRole("radio", { name: "Chain" }));
+    await user.click(screen.getByRole("radio", { name: "Cut at end" }));
 
     await waitFor(() => expect(totalReadout).toHaveTextContent("37.5 mm"));
     expect(await screen.findByText("saves 62.5 mm vs cut each")).toBeInTheDocument();

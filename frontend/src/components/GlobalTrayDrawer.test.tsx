@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { GlobalTrayDrawer } from "./GlobalTrayDrawer";
-import { useChainPreviewStore } from "../stores/chainPreview";
+import { usePrintPreviewStore } from "../stores/printPreview";
 import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
@@ -14,7 +14,7 @@ import type { LabelDefinition, PrintEstimateResponse } from "../api/types";
 
 const INITIAL_TRAY_STATE = useTrayStore.getState();
 const INITIAL_TRAY_DRAWER_STATE = useTrayDrawerStore.getState();
-const INITIAL_CHAIN_PREVIEW_STATE = useChainPreviewStore.getState();
+const INITIAL_CHAIN_PREVIEW_STATE = usePrintPreviewStore.getState();
 
 afterEach(() => {
   useTrayStore.setState(INITIAL_TRAY_STATE, true);
@@ -24,10 +24,10 @@ afterEach(() => {
   // next one via the in-memory store singleton (test/setup.ts's own
   // `localStorage.clear()` only covers the localStorage side of that, not
   // this module's already-hydrated state) -- same reasoning
-  // ChainPreviewDrawer.test.tsx's own afterEach already documents for
-  // stores/chainPreview.ts.
+  // PrintPreviewDeck.test.tsx's own afterEach already documents for
+  // stores/printPreview.ts.
   useTrayDrawerStore.setState(INITIAL_TRAY_DRAWER_STATE, true);
-  useChainPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
+  usePrintPreviewStore.setState(INITIAL_CHAIN_PREVIEW_STATE, true);
 });
 
 function def(text: string): LabelDefinition {
@@ -76,7 +76,7 @@ describe("GlobalTrayDrawer -- hidden while the tray is empty", () => {
   // docstring for why (an in-flight print job's state must survive) -- so
   // an empty tray with no current design hides only the trigger BUTTON;
   // the panel itself renders present-but-hidden, the exact resting state
-  // ChainPreviewDrawer's own panel already has with nothing to preview.
+  // PrintPreviewDeck's own panel already has with nothing to preview.
   it("hides the trigger button, but keeps the panel mounted and hidden, when there's nothing queued", () => {
     renderWithProviders(<GlobalTrayDrawer />);
     expect(screen.queryByRole("button", { name: /^Tray/ })).not.toBeInTheDocument();
@@ -305,10 +305,10 @@ describe("GlobalTrayDrawer -- adding from the current design, and item controls"
   });
 });
 
-/** Dockable-tray feature -- mirrors ChainPreviewDrawer.test.tsx's own
+/** Dockable-tray feature -- mirrors PrintPreviewDeck.test.tsx's own
  * "dockable preview" block precisely (same store shape, same class/
  * semantics contract, just tray-flavored names/labels): stores/trayDrawer.ts
- * instead of stores/chainPreview.ts, "Dock tray"/"Undock tray" instead of
+ * instead of stores/printPreview.ts, "Dock tray"/"Undock tray" instead of
  * "Dock preview"/"Undock preview", "Print tray" instead of "Print preview". */
 describe("GlobalTrayDrawer -- dockable tray", () => {
   it("the dock toggle flips the store's `docked` flag, and its accessible name flips with it", async () => {
@@ -394,7 +394,7 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     expect(useTrayDrawerStore.getState().open).toBe(true);
   });
 
-  it("carries the xl:static in-flow-column class contract only while docked AND open, capped to half height only when the preview is ALSO docked+open", async () => {
+  it("carries the unconditional xl:static in-flow-column class contract while docked AND open, regardless of the preview deck's own state", async () => {
     seedTrayItems(1);
     server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
     useTrayDrawerStore.setState({ docked: true });
@@ -408,22 +408,27 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
     expect(panel.className).toContain("xl:static");
     expect(panel.className).toContain("xl:inset-auto");
     expect(panel.className).toContain("xl:w-[26rem]");
-    expect(panel.className).toContain("xl:shrink-0");
     expect(panel.className).toContain("xl:border-l");
     expect(panel.className).toContain("xl:min-h-0");
-    // Nothing else is docked+open, so this panel alone gets the whole rail
-    // -- no `xl:max-h-[50%]` cap for a sibling panel that isn't there (see
-    // GlobalTrayDrawer.tsx's own `bothDocked` doc).
+    // NOT xl:shrink-0 (viewport-bound-frame fix): this panel has no
+    // explicit height of its own, so it must be allowed to shrink to the
+    // dock rail's actual (viewport-bound) height, letting its own base
+    // `overflow-y-auto` scroll a tall tray internally instead of
+    // overflowing the rail and growing the page past the viewport.
+    expect(panel.className).not.toContain("xl:shrink-0");
+    // The tray panel no longer knows or cares about the preview deck's own
+    // docked/open state (Task 5 restructure moved the deck to a root-level
+    // sibling, its own full-width bottom band) -- there is no state where
+    // `xl:max-h-[50%]` should appear anymore.
     expect(panel.className).not.toContain("xl:max-h-[50%]");
     // Docked mode drops the slide transition entirely -- nothing to
     // animate once it's back in normal flow.
     expect(panel.className).not.toContain("transition-transform");
 
-    // Now dock the chain preview too -- the tray panel's own class string
-    // must react (it reads stores/chainPreview.ts's own `docked`/`open`
-    // directly), capping itself to leave the preview panel room below it.
-    useChainPreviewStore.setState({ docked: true, open: true });
-    await waitFor(() => expect(panel.className).toContain("xl:max-h-[50%]"));
+    // Docking the preview deck too must NOT change the tray panel's own
+    // class string -- confirms the two panels are fully decoupled now.
+    usePrintPreviewStore.setState({ docked: true, open: true });
+    expect(panel.className).not.toContain("xl:max-h-[50%]");
   });
 
   it("a closed docked panel is hidden exactly like an undocked one -- no xl: override leaks through while closed", () => {
@@ -449,8 +454,8 @@ describe("GlobalTrayDrawer -- dockable tray", () => {
 
     await user.click(screen.getByRole("button", { name: "Preview" }));
 
-    expect(useChainPreviewStore.getState().open).toBe(true);
-    // Unlike the undocked case (ChainPreviewDrawer.test.tsx's own
+    expect(usePrintPreviewStore.getState().open).toBe(true);
+    // Unlike the undocked case (PrintPreviewDeck.test.tsx's own
     // "opening the chain preview... closes the GlobalTrayDrawer slide-over"
     // test), a docked tray stays open -- see TrayPanel.tsx's own
     // `closeTrayDrawer` prop doc and GlobalTrayDrawer.tsx's own docstring

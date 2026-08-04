@@ -219,7 +219,7 @@ export function History() {
                         Labels
                       </th>
                       <th scope="col" className="py-2 pr-3 font-normal">
-                        Chain
+                        Mode
                       </th>
                       <th scope="col" className="py-2 pr-3 font-normal">
                         Tape

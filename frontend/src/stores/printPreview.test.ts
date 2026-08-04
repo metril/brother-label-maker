@@ -1,49 +1,49 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { useChainPreviewStore } from "./chainPreview";
+import { usePrintPreviewStore } from "./printPreview";
 
-const INITIAL_STATE = useChainPreviewStore.getState();
+const INITIAL_STATE = usePrintPreviewStore.getState();
 
 afterEach(() => {
-  useChainPreviewStore.setState(INITIAL_STATE, true);
+  usePrintPreviewStore.setState(INITIAL_STATE, true);
 });
 
-describe("useChainPreviewStore", () => {
+describe("usePrintPreviewStore", () => {
   it("openDrawer/closeDrawer/toggle flip `open` only", () => {
-    expect(useChainPreviewStore.getState().open).toBe(false);
+    expect(usePrintPreviewStore.getState().open).toBe(false);
 
-    useChainPreviewStore.getState().openDrawer();
-    expect(useChainPreviewStore.getState().open).toBe(true);
+    usePrintPreviewStore.getState().openDrawer();
+    expect(usePrintPreviewStore.getState().open).toBe(true);
 
-    useChainPreviewStore.getState().closeDrawer();
-    expect(useChainPreviewStore.getState().open).toBe(false);
+    usePrintPreviewStore.getState().closeDrawer();
+    expect(usePrintPreviewStore.getState().open).toBe(false);
 
-    useChainPreviewStore.getState().toggle();
-    expect(useChainPreviewStore.getState().open).toBe(true);
-    useChainPreviewStore.getState().toggle();
-    expect(useChainPreviewStore.getState().open).toBe(false);
+    usePrintPreviewStore.getState().toggle();
+    expect(usePrintPreviewStore.getState().open).toBe(true);
+    usePrintPreviewStore.getState().toggle();
+    expect(usePrintPreviewStore.getState().open).toBe(false);
   });
 
   it("toggleDocked flips `docked` only, defaulting to false", () => {
-    expect(useChainPreviewStore.getState().docked).toBe(false);
+    expect(usePrintPreviewStore.getState().docked).toBe(false);
 
-    useChainPreviewStore.getState().toggleDocked();
-    expect(useChainPreviewStore.getState().docked).toBe(true);
-    expect(useChainPreviewStore.getState().open).toBe(false);
+    usePrintPreviewStore.getState().toggleDocked();
+    expect(usePrintPreviewStore.getState().docked).toBe(true);
+    expect(usePrintPreviewStore.getState().open).toBe(false);
 
-    useChainPreviewStore.getState().toggleDocked();
-    expect(useChainPreviewStore.getState().docked).toBe(false);
+    usePrintPreviewStore.getState().toggleDocked();
+    expect(usePrintPreviewStore.getState().docked).toBe(false);
   });
 
   it("setSelectedIndex updates `selectedIndex` only, defaulting to 0", () => {
-    expect(useChainPreviewStore.getState().selectedIndex).toBe(0);
+    expect(usePrintPreviewStore.getState().selectedIndex).toBe(0);
 
-    useChainPreviewStore.getState().setSelectedIndex(2);
-    expect(useChainPreviewStore.getState().selectedIndex).toBe(2);
-    expect(useChainPreviewStore.getState().open).toBe(false);
-    expect(useChainPreviewStore.getState().docked).toBe(false);
+    usePrintPreviewStore.getState().setSelectedIndex(2);
+    expect(usePrintPreviewStore.getState().selectedIndex).toBe(2);
+    expect(usePrintPreviewStore.getState().open).toBe(false);
+    expect(usePrintPreviewStore.getState().docked).toBe(false);
 
-    useChainPreviewStore.getState().setSelectedIndex(0);
-    expect(useChainPreviewStore.getState().selectedIndex).toBe(0);
+    usePrintPreviewStore.getState().setSelectedIndex(0);
+    expect(usePrintPreviewStore.getState().selectedIndex).toBe(0);
   });
 });
 
@@ -51,9 +51,9 @@ describe("useChainPreviewStore", () => {
  * "lm-chain-preview-v1") -- see the store's own docstring for why: it's a
  * standing layout preference, unlike `open`, which stays purely
  * in-memory/session-only the same way it always has. */
-describe("useChainPreviewStore persistence (zustand persist middleware)", () => {
+describe("usePrintPreviewStore persistence (zustand persist middleware)", () => {
   it("partialize writes `docked` (and only `docked`) to localStorage", () => {
-    useChainPreviewStore.getState().toggleDocked();
+    usePrintPreviewStore.getState().toggleDocked();
 
     const raw = localStorage.getItem("lm-chain-preview-v1");
     expect(raw).not.toBeNull();
@@ -62,8 +62,8 @@ describe("useChainPreviewStore persistence (zustand persist middleware)", () => 
   });
 
   it("`open` never reaches localStorage, even while true", () => {
-    useChainPreviewStore.getState().openDrawer();
-    useChainPreviewStore.getState().toggleDocked();
+    usePrintPreviewStore.getState().openDrawer();
+    usePrintPreviewStore.getState().toggleDocked();
 
     const raw = localStorage.getItem("lm-chain-preview-v1");
     const persisted = JSON.parse(raw!) as { state: Record<string, unknown> };
@@ -76,9 +76,9 @@ describe("useChainPreviewStore persistence (zustand persist middleware)", () => 
       JSON.stringify({ state: { docked: true }, version: 1 }),
     );
 
-    await useChainPreviewStore.persist.rehydrate();
+    await usePrintPreviewStore.persist.rehydrate();
 
-    const state = useChainPreviewStore.getState();
+    const state = usePrintPreviewStore.getState();
     expect(state.docked).toBe(true);
     expect(state.open).toBe(false);
   });
@@ -87,8 +87,8 @@ describe("useChainPreviewStore persistence (zustand persist middleware)", () => 
   // same category as `open` -- which label within the CURRENT job someone's
   // looking at has no business surviving a reload.
   it("`selectedIndex` never reaches localStorage, even set to a nonzero value", () => {
-    useChainPreviewStore.getState().setSelectedIndex(2);
-    useChainPreviewStore.getState().toggleDocked();
+    usePrintPreviewStore.getState().setSelectedIndex(2);
+    usePrintPreviewStore.getState().toggleDocked();
 
     const raw = localStorage.getItem("lm-chain-preview-v1");
     const persisted = JSON.parse(raw!) as { state: Record<string, unknown> };

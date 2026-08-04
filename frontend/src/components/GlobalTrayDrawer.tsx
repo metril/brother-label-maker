@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { usePrintEstimate } from "../hooks/usePrintEstimate";
-import { useChainPreviewStore } from "../stores/chainPreview";
 import { useCurrentDesignStore } from "../stores/currentDesign";
 import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
@@ -22,27 +21,27 @@ import type { LabelDefinition, PrintOptions } from "../api/types";
  *
  * Dockable-tray feature: this file now exports the trigger button and the
  * panel SEPARATELY (`GlobalTrayButton` / `GlobalTrayPanel`) instead of one
- * combined component, the same split components/ChainPreviewDrawer.tsx's
+ * combined component, the same split components/PrintPreviewDeck.tsx's
  * own docking work established -- AppShell.tsx mounts the button in the
  * header and the panel inside its own dock rail (a different subtree
  * entirely once docked), so a single component gating both behind one
  * `useDialogController` no longer fits. Open/close/dock state lives in
  * stores/trayDrawer.ts (module-level, shared the same way
- * stores/chainPreview.ts already is) instead of that hook's local state --
+ * stores/printPreview.ts already is) instead of that hook's local state --
  * see that store's own docstring. `GlobalTrayDrawer` below stays exported
  * as a compat wrapper rendering both, unchanged, for every call site that
  * doesn't care about the split (the Designer page's test harnesses, the
- * integration test inside ChainPreviewDrawer.test.tsx).
+ * integration test inside PrintPreviewDeck.test.tsx).
  *
  * The panel stays permanently MOUNTED (visibility/transform-toggled, not
- * conditionally unmounted) -- exactly like ChainPreviewDrawer's own panel,
+ * conditionally unmounted) -- exactly like PrintPreviewDeck's own panel,
  * and for the same reason: an in-flight print job's hooks/usePrintJob.ts
  * state (WS-tracked progress) must survive the drawer closing. Unlike the
  * OLD combined component, this means the panel itself no longer disappears
  * just because the tray is empty and there's no current design -- only the
  * BUTTON hides in that case now (see GlobalTrayButton below); the panel
  * simply renders hidden (`invisible`/`translate-x-full`), the same resting
- * state ChainPreviewDrawer's own panel already has with nothing to preview. */
+ * state PrintPreviewDeck's own panel already has with nothing to preview. */
 
 /** The header trigger -- unchanged behavior from the pre-split component:
  * label text, the brief amber "tick" on a just-added item
@@ -52,7 +51,7 @@ import type { LabelDefinition, PrintOptions } from "../api/types";
  * `useDialogController` -- opening no longer needs to capture "what was
  * focused" itself: GlobalTrayPanel's own open effect below reads
  * `document.activeElement` at the moment it runs, the same decoupled
- * trigger-capture ChainPreviewDrawer.tsx already relies on (nothing moves
+ * trigger-capture PrintPreviewDeck.tsx already relies on (nothing moves
  * focus between this button's click and that effect running). */
 export function GlobalTrayButton() {
   const items = useTrayStore((s) => s.items);
@@ -115,7 +114,7 @@ export function GlobalTrayButton() {
 
 /** The panel -- reads stores/trayDrawer.ts directly instead of a
  * `dialog`/`useDialogController` prop. Overlay/docked semantics and the
- * focus/Escape contract are a direct port of ChainPreviewDrawer.tsx's own
+ * focus/Escape contract are a direct port of PrintPreviewDeck.tsx's own
  * (see that component's own docstring for the full reasoning): undocked +
  * open is today's modal slide-over (scrim, `role="dialog"`, `aria-modal`,
  * focus steal onto the close button, Escape closes, focus restores to the
@@ -123,17 +122,20 @@ export function GlobalTrayButton() {
  * with none of that modal machinery, in-flow at `xl:` and up
  * (`xl:static ...`) and still a fixed non-modal overlay below it; closed is
  * hidden in both modes. `docked` sits in the focus/Escape effect's own
- * dependency array for the same reason ChainPreviewDrawer's does: toggling
+ * dependency array for the same reason PrintPreviewDeck's does: toggling
  * dock mid-open must tear down (or re-arm) the Escape listener immediately.
  *
  * `closeTrayDrawer` is only ever passed into TrayPanel while UNDOCKED --
  * see TrayPanel's own prop doc for why it exists at all (closing this panel
- * the instant "Preview" opens ChainPreviewDrawer, since both would
- * otherwise occupy the right edge at once). A DOCKED tray has nowhere to
- * "stack on top of" a docked preview -- see AppShell.tsx's own dock-rail
- * docstring -- and even against an UNDOCKED preview, a pinned tray should
- * simply stay put while the user looks at a preview overlay, not vanish
- * out from under them. */
+ * the instant "Preview" opens PrintPreviewDeck, since both would
+ * otherwise occupy the right edge at once). A DOCKED tray has nothing to
+ * stack against in the first place: the preview deck docks as a full-width
+ * band at the very bottom of the page (see AppShell.tsx's own docstring
+ * and PrintPreviewDeck.tsx's own), while a docked tray stays a right-hand
+ * column in the dock rail above it -- the two occupy entirely different
+ * regions of the screen. And even against an UNDOCKED preview, a pinned
+ * tray should simply stay put while the user looks at a preview overlay,
+ * not vanish out from under them. */
 export function GlobalTrayPanel() {
   const open = useTrayDrawerStore((s) => s.open);
   const closeDrawer = useTrayDrawerStore((s) => s.closeDrawer);
@@ -141,15 +143,6 @@ export function GlobalTrayPanel() {
   const toggleDocked = useTrayDrawerStore((s) => s.toggleDocked);
   const current = useCurrentDesignStore((s) => s.current);
   const addItem = useTrayStore((s) => s.addItem);
-
-  // Dockable-tray feature: whether stores/chainPreview.ts's own panel is
-  // ALSO currently docked and open -- the one thing that decides whether
-  // this panel needs to share the dock rail's height with a second panel
-  // below it (see the `xl:max-h-[50%]` class group below, and AppShell's
-  // own dock-rail docstring for the fuller "why").
-  const previewDocked = useChainPreviewStore((s) => s.docked);
-  const previewOpen = useChainPreviewStore((s) => s.open);
-  const bothDocked = docked && open && previewDocked && previewOpen;
 
   const triggerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -161,7 +154,7 @@ export function GlobalTrayPanel() {
   }
 
   // Focus/Escape modal contract -- ported verbatim from
-  // ChainPreviewDrawer.tsx's own effect (see that file's docstring for the
+  // PrintPreviewDeck.tsx's own effect (see that file's docstring for the
   // full reasoning): capture whatever triggered the open, move focus onto
   // the close button, wire Escape, all skipped while `docked` (a landmark,
   // not a modal, must never steal focus or swallow Escape).
@@ -202,11 +195,22 @@ export function GlobalTrayPanel() {
           file's own top-of-file docstring. Below `xl`, docked and undocked
           render IDENTICALLY; the `docked && open` class group only kicks in
           at `xl:` and up, where it switches this back to an in-flow column
-          -- see ChainPreviewDrawer.tsx's own docstring for the full
-          contract this mirrors. `xl:max-h-[50%]` only while `bothDocked`
-          (see that field's own doc above): a lone docked tray (preview
-          undocked/closed) gets the WHOLE dock rail's height instead of
-          being capped for a sibling panel that isn't actually there. */}
+          -- see PrintPreviewDeck.tsx's own docstring for the closest
+          analogous contract (that panel becomes a bottom deck instead of a
+          column, since it docks independently now). This panel always gets
+          the dock rail's full height while docked: AppShell.tsx's own frame
+          is viewport-bound (`h-screen` on its root column), so the rail
+          itself carries no explicit height -- the content row's own
+          `items-stretch` plus the root's definite height size it exactly,
+          regardless of whether the preview deck below is separately
+          docked. Deliberately NOT `xl:shrink-0` (unlike PrintPreviewDeck's
+          own docked contract, which correctly IS shrink-0 -- it has an
+          explicit `xl:h-64`): this panel has no explicit height of its own,
+          so in the viewport-bound frame it must be allowed to shrink to
+          whatever the rail actually is, letting its own base
+          `overflow-y-auto` scroll a tall tray internally -- `xl:shrink-0`
+          here would instead let it overflow the rail and grow the page
+          past the viewport, defeating the whole point of `h-screen`. */}
       <div
         data-testid="global-tray-drawer-panel"
         role={open ? (docked ? "complementary" : "dialog") : undefined}
@@ -215,11 +219,7 @@ export function GlobalTrayPanel() {
         className={`fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col gap-4 overflow-y-auto border-l border-deck-800 bg-deck-900 p-5 shadow-lg ${
           docked ? "" : "transition-transform duration-150 motion-reduce:transition-none"
         } ${open ? "visible translate-x-0" : "invisible translate-x-full"} ${
-          docked && open
-            ? `xl:static xl:inset-auto xl:z-auto xl:translate-x-0 xl:visible xl:w-[26rem] xl:shrink-0 xl:border-l xl:min-h-0${
-                bothDocked ? " xl:max-h-[50%]" : ""
-              }`
-            : ""
+          docked && open ? "xl:static xl:inset-auto xl:z-auto xl:translate-x-0 xl:visible xl:w-[26rem] xl:border-l xl:min-h-0" : ""
         }`}
       >
         <div className="flex items-center justify-between gap-2">
@@ -227,7 +227,7 @@ export function GlobalTrayPanel() {
           <div className="flex items-center gap-1.5">
             {/* Dock/undock toggle -- house icon-button styling
                 (iconButtonClass, same as the close button beside it),
-                mirroring ChainPreviewDrawer's own dock button exactly. */}
+                mirroring PrintPreviewDeck's own dock button exactly. */}
             <button
               type="button"
               onClick={toggleDocked}
@@ -258,7 +258,7 @@ export function GlobalTrayPanel() {
 
 /** Compat wrapper -- every call site that doesn't need the button/panel
  * split separately (Designer's own test harnesses, the integration test
- * inside ChainPreviewDrawer.test.tsx) keeps rendering this unchanged.
+ * inside PrintPreviewDeck.test.tsx) keeps rendering this unchanged.
  * AppShell.tsx itself mounts `GlobalTrayButton`/`GlobalTrayPanel`
  * separately instead, in different subtrees (header vs. dock rail). */
 export function GlobalTrayDrawer() {

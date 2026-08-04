@@ -50,9 +50,10 @@ const ENUM_OVERRIDES: Record<string, string> = {
   tze: "TZe",
   hse_2_1: "HSe 2:1",
   hse_3_1: "HSe 3:1",
+  // Kept word-for-word in sync with lib/chainModes.ts's CHAIN_MODE_OPTIONS labels.
   cut_each: "Cut each",
-  chain_ff: "Chain (form-feed)",
-  strip_marks: "Chain (strip marks)",
+  chain_ff: "Cut at end",
+  strip_marks: "One strip",
 };
 
 export function humanizeEnumValue(value: string): string {

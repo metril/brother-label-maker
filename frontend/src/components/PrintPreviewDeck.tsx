@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { pngDataUrl } from "../api/client";
-import { useChainedPreview } from "../hooks/useChainedPreview";
+import { usePrintPreview } from "../hooks/usePrintPreview";
 import { useTapes } from "../hooks/useTapes";
-import { useChainPreviewStore } from "../stores/chainPreview";
+import { usePrintPreviewStore } from "../stores/printPreview";
 import { useTrayStore } from "../stores/tray";
 import { CHAIN_MODE_OPTIONS } from "../lib/chainModes";
 import { computeFeedDeckGeometry, DEFAULT_PX_PER_MM } from "../lib/feedDeckGeometry";
 import { Pending } from "./ui/Pending";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { errorText, eyebrow, helpText, iconButtonClass } from "./ui/styles";
-import type { ChainMode, LabelDefinition, PrintOptions } from "../api/types";
+import type { LabelDefinition, PrintOptions } from "../api/types";
 
 /** track C3-style zoom control -- unchanged from the old ChainedPreviewDialog
  * (see that component's own removed docstring in git history): the option's
@@ -37,36 +37,48 @@ const cyclerButtonClass =
 /** Track C2 rework: a WIDE right-side slide-over (not a centered modal --
  * see the deleted components/ChainedPreviewDialog.tsx) previewing the WHOLE
  * chained job as a single composited strip, reachable from every route
- * (including Design) via either components/TrayPanel.tsx instance's own
- * "Preview chain" button. Mounted exactly ONCE, in AppShell.tsx, outside
- * every translated ancestor (JobTray's own sidebar/sheet wrapper,
- * GlobalTrayDrawer's own slide-over wrapper both carry a CSS `translate`) --
- * `position: fixed` descendants of a translated ancestor are contained by
- * THAT ancestor's box instead of the viewport, which is exactly the bug the
- * old Dialog component sidestepped by portalling to `document.body`
- * (ui/Dialog.tsx's own docstring). Mounting here at AppShell level gets the
- * same correctness a body portal would, without one.
+ * (including Design) via TrayPanel.tsx's own "Preview" button.
+ * Mounted exactly ONCE, in AppShell.tsx, outside every translated ancestor
+ * (JobTray's own sidebar/sheet wrapper, GlobalTrayDrawer's own slide-over
+ * wrapper both carry a CSS `translate`) -- `position: fixed` descendants of
+ * a translated ancestor are contained by THAT ancestor's box instead of the
+ * viewport, which is exactly the bug the old Dialog component sidestepped
+ * by portalling to `document.body` (ui/Dialog.tsx's own docstring).
+ * Mounting here at AppShell level gets the same correctness a body portal
+ * would, without one. (Below `xl` -- and whenever undocked -- this remains
+ * the ENTIRE story: a fixed-overlay slide-over, unchanged from Track C2.)
  *
  * Because it's mounted once, independent of whichever TrayPanel happens to
- * be visible, its own body/options/chain-mode are read directly off
- * stores/tray.ts -- exactly the same way components/GlobalTrayDrawer.tsx's
- * own header estimate already does -- rather than threaded down as props
- * the way the old dialog's `labels`/`options`/`serialization`/`isRenderable`
- * were.
+ * be visible, its own body/options are read directly off stores/tray.ts --
+ * exactly the same way components/GlobalTrayDrawer.tsx's own header
+ * estimate already does -- rather than threaded down as props the way the
+ * old dialog's `labels`/`options`/`serialization`/`isRenderable` were.
  *
- * This drawer previews the QUEUED PRINT JOB -- stores/tray.ts's own items,
+ * This deck previews the QUEUED PRINT JOB -- stores/tray.ts's own items,
  * and NOTHING else. It deliberately has no fallback to the Designer page's
  * "current, unsaved design" (stores/currentDesign.ts): that design-time
  * preview is pages/Designer.tsx's own embedded FeedDeck instead, the thing
  * a user is actively shaping before it's ever added to the tray. (TrayPanel
  * itself keeps that fallback for its estimate/Print button -- an empty tray
- * still prints/estimates the current design there -- this drawer alone
+ * still prints/estimates the current design there -- this deck alone
  * stopped consuming it.) An EMPTY tray therefore always shows "Nothing
  * queued to print." here, on every route, regardless of what the Designer
  * page's own current design happens to be at the moment -- see the render
  * below.
  *
- * Open/close is stores/chainPreview.ts's `open` (shared with every
+ * Mode unification: chain mode itself is read straight off
+ * `useTrayStore.chainMode` -- no local copy, no re-seed-on-open effect.
+ * TrayPanel.tsx's
+ * own radiogroup is now the ONLY control that can change it, anywhere in
+ * the app; this deck only ever shows a read-only label of the current
+ * selection (`data-testid="deck-mode-label"`, next to the "Print preview"
+ * eyebrow) so a docked deck stays self-describing even though the actual
+ * control lives in a different subtree entirely. Switching modes from the
+ * Tray still live-refetches this deck's own preview exactly as before --
+ * `options.chain_mode` reads off the same store value, and that flows into
+ * usePrintPreview's own query key same as any other tray edit.
+ *
+ * Open/close is stores/printPreview.ts's `open` (shared with every
  * TrayPanel instance), not hooks/useDialogController.ts -- that hook owns
  * `isOpen` itself as local state, which can't react to a sibling subtree's
  * click. The focus/Escape contract below reimplements that hook's own
@@ -77,19 +89,28 @@ const cyclerButtonClass =
  * Permanently MOUNTED (visibility/translate-toggled below), not
  * conditionally unmounted -- same convention GlobalTrayDrawer's own panel
  * uses, and required here for the SAME reason `enabled: open && ...` in
- * hooks/useChainedPreview.ts still works right: staying mounted means
- * editing the tray while this drawer is open (add/remove/reorder) changes
- * `labels` on every render, which changes useChainedPreview's own query
- * key and live-refetches the preview -- exactly the same "in-flight state
- * survives" property GlobalTrayDrawer's own docstring describes, just for
- * a query instead of a WS-tracked print job.
+ * hooks/usePrintPreview.ts still works right: staying mounted means editing
+ * the tray while this deck is open (add/remove/reorder, or switching chain
+ * mode from the Tray) changes `labels`/`options` on every render, which
+ * changes usePrintPreview's own query key and live-refetches the preview --
+ * exactly the same "in-flight state survives" property GlobalTrayDrawer's
+ * own docstring describes, just for a query instead of a WS-tracked print
+ * job.
  *
- * Dockable-preview feature: `docked` (stores/chainPreview.ts, persisted)
+ * Dockable-preview feature: `docked` (stores/printPreview.ts, persisted)
  * switches this SAME panel between that fixed-overlay behavior (unchanged
- * above) and a real in-flow right-hand column -- AppShell.tsx now mounts
- * this component as the LAST child of its content row specifically so a
- * docked panel has somewhere to sit in normal flow, beside `<main>`. Only
- * the panel's own classes/attributes switch (a single DOM node, no
+ * above) and a real in-flow FULL-WIDTH BOTTOM DECK. No `position: sticky`
+ * involved -- AppShell.tsx's own frame is viewport-bound (`h-screen` on its
+ * root column; `<main>` scrolls internally instead), so this component,
+ * mounted as the LAST child of that root column (below the header and the
+ * `<main>`/dock-rail content row), is simply the root column's own last
+ * in-flow child once docked+open makes it `xl:static`. Fixed at `xl:h-64`
+ * (16rem) tall -- that figure is this component's own height alone now; no
+ * other file needs to know it (AppShell.tsx's dock rail used to reserve a
+ * matching `calc()` height for the tray, but that mechanism is gone --
+ * flexbox alone sizes the rail now, see AppShell.tsx's own docstring).
+ *
+ * Only the panel's own classes/attributes switch (a single DOM node, no
  * conditional unmount) -- `docked`/`open` are both ordinary component
  * state, not viewport-dependent, so THOSE branches are plain JS
  * conditionals; only the actual per-breakpoint sizing stays Tailwind
@@ -100,17 +121,25 @@ const cyclerButtonClass =
  * mode swaps dialog semantics for a landmark (`role="complementary"`, no
  * `aria-modal`), drops the backdrop scrim entirely, and skips the
  * focus-steal/Escape-close/trigger-restore contract below (see the
- * dedicated effect for why `docked` sits in ITS OWN dependency array,
- * separate from the mode-resync effect) -- none of that modal machinery
- * belongs to an in-flow landmark a user can otherwise ignore. The close
+ * dedicated effect's own comment for why `docked` sits in its dependency
+ * array) -- none of that modal machinery belongs to an in-flow landmark a
+ * user can otherwise ignore. The close
  * button still works in every mode; below `xl` a docked panel simply falls
  * back to the same fixed-overlay positioning as undocked (just without the
  * scrim/modality), so docking is never a no-op even on a narrow viewport
- * that can't actually fit an in-flow column.
+ * that can't actually fit a bottom deck.
+ *
+ * Three-group internal layout (docked-deck reshape): the panel's children
+ * are wrapped into three sibling groups -- A (header + zoom), B (cycler +
+ * strip), C (stats/notes/warnings/disclaimer) -- so that once `docked &&
+ * open` flips the panel itself to `xl:flex-row`, A and C can take fixed
+ * side columns (`xl:w-56`/`xl:w-72`) and B (the strip, the whole point of a
+ * docked deck) gets the leftover width via `xl:flex-1`. Undocked/below-xl,
+ * all three groups stack exactly as their un-grouped predecessors did.
  *
  * Cycling through queued labels: once a preview with 2+ segments is
  * loaded, a small previous/next row appears above the strip
- * (stores/chainPreview.ts's own `selectedIndex`, shared the same way
+ * (stores/printPreview.ts's own `selectedIndex`, shared the same way
  * `open`/`docked` are -- session-only, never persisted) and the currently
  * selected segment gets an amber highlight overlay on the strip itself,
  * positioned from the SAME mm-derived left/width math the segment
@@ -118,27 +147,29 @@ const cyclerButtonClass =
  * dimensions -- see ChainedPreviewResponse's own UNIT TRAP doc). A single-
  * segment job renders neither row nor highlight; there's nothing to cycle
  * through. `selectedIndex` resets to 0 whenever the loaded preview's own
- * identity changes (a tray edit or mode switch changes the underlying
- * request, which can change which/how-many segments come back) or the
- * drawer opens fresh -- see the dedicated effect below. */
-export function ChainPreviewDrawer() {
-  const open = useChainPreviewStore((s) => s.open);
-  const closeDrawer = useChainPreviewStore((s) => s.closeDrawer);
-  const docked = useChainPreviewStore((s) => s.docked);
-  const toggleDocked = useChainPreviewStore((s) => s.toggleDocked);
-  const selectedIndex = useChainPreviewStore((s) => s.selectedIndex);
-  const setSelectedIndex = useChainPreviewStore((s) => s.setSelectedIndex);
+ * identity changes (a tray edit or a mode switch from the Tray changes the
+ * underlying request, which can change which/how-many segments come back)
+ * or the deck opens fresh -- see the dedicated effect below. */
+export function PrintPreviewDeck() {
+  const open = usePrintPreviewStore((s) => s.open);
+  const closeDrawer = usePrintPreviewStore((s) => s.closeDrawer);
+  const docked = usePrintPreviewStore((s) => s.docked);
+  const toggleDocked = usePrintPreviewStore((s) => s.toggleDocked);
+  const selectedIndex = usePrintPreviewStore((s) => s.selectedIndex);
+  const setSelectedIndex = usePrintPreviewStore((s) => s.setSelectedIndex);
 
   const items = useTrayStore((s) => s.items);
-  const trayChainMode = useTrayStore((s) => s.chainMode);
+  // Mode unification: the Tray's own chainMode is the ONLY mode state left
+  // anywhere in the app (see this component's own docstring) -- no local
+  // copy, no re-seed-on-open effect.
+  const mode = useTrayStore((s) => s.chainMode);
   const autoCut = useTrayStore((s) => s.autoCut);
   // /api/tapes' full geometry catalog -- needed below (M10) to size the
   // strip off the tape's PRINT height, not its nominal width. Same source
   // Designer.tsx's own FeedDeck usage reads.
   const { data: tapes } = useTapes();
 
-  const [mode, setMode] = useState<ChainMode>(trayChainMode);
-  // DEFAULT_PX_PER_MM (4) as the drawer's opening zoom level -- reusing the
+  // DEFAULT_PX_PER_MM (4) as the deck's opening zoom level -- reusing the
   // SAME constant feedDeckGeometry.ts's own "never derive mm from PNG
   // pixels" contract is built on, rather than a second, independently
   // chosen default.
@@ -157,19 +188,6 @@ export function ChainPreviewDrawer() {
     triggerRef.current = null;
   }
 
-  // Re-seed `mode` from the tray's own chain mode whenever the drawer
-  // opens -- guarded on `open` alone (not `trayChainMode`), same "never
-  // clobber a tab the user already clicked mid-comparison" semantics the
-  // old ChainedPreviewDialog's own effect had. Split out from the
-  // focus/Escape effect below (dockable-preview feature) specifically so
-  // toggling `docked` mid-open can never re-run THIS effect and stomp a
-  // mode the user already picked.
-  useEffect(() => {
-    if (!open) return;
-    setMode(trayChainMode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   // Focus/Escape modal contract: capture whatever triggered the open
   // (`document.activeElement` at the moment `open` flips true -- nothing
   // else moves focus between a trigger's own click handler and this effect
@@ -178,11 +196,11 @@ export function ChainPreviewDrawer() {
   // (dockable-preview feature): a docked panel is a landmark
   // (`role="complementary"` below), not a modal dialog, so it must never
   // steal focus off whatever the user's doing elsewhere on the page, or
-  // swallow their Escape key. `docked` deliberately sits in this effect's
-  // OWN dependency array (unlike the mode-resync effect above) -- toggling
-  // dock mid-open needs this effect to tear down (remove the Escape
-  // listener) the instant `docked` flips true, and re-arm itself if the
-  // user undocks again while still open.
+  // swallow their Escape key. `docked` sits in this effect's own dependency
+  // array (not just `open`) so that toggling dock mid-open tears down (or
+  // re-arms) the Escape listener immediately, rather than leaving a stale
+  // listener from before the toggle -- GlobalTrayDrawer.tsx's own
+  // focus/Escape effect follows this identical shape for the same reason.
   useEffect(() => {
     if (!open || docked) return;
     triggerRef.current = document.activeElement as HTMLElement | null;
@@ -195,11 +213,11 @@ export function ChainPreviewDrawer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, docked]);
 
-  // Labels come ONLY from the tray's own queued items -- this drawer
+  // Labels come ONLY from the tray's own queued items -- this deck
   // previews the QUEUED PRINT JOB, never the Designer's in-progress,
   // unsaved design (see this component's own docstring). Tray items never
   // carry a serialization run (a Designer-page, single-design concept), so
-  // there's no `serialization` to thread into useChainedPreview at all.
+  // there's no `serialization` to thread into usePrintPreview at all.
   const labels: LabelDefinition[] = items.map((i) => i.definition);
   const options: PrintOptions = { chain_mode: mode, margin_mm: 2.0, auto_cut: autoCut };
 
@@ -207,17 +225,17 @@ export function ChainPreviewDrawer() {
     return ls.length > 0;
   }
 
-  const { preview, isFetching, error } = useChainedPreview(labels, options, isRenderable, open);
+  const { preview, isFetching, error } = usePrintPreview(labels, options, isRenderable, open);
 
   // Cycling through queued labels: `selectedIndex` always starts back at 0
   // for a freshly loaded preview -- reset it whenever the thing actually
   // being previewed changes identity (a tray edit or chain-mode switch
-  // changes `bodyKey`, which changes what comes back) or the drawer opens
+  // changes `bodyKey`, which changes what comes back) or the deck opens
   // fresh (re-opening after leaving a PREVIOUS job on label 3 must not
   // silently reopen on label 3 of a different job). `preview?.segments
   // .length` rides along as a belt-and-braces signal alongside `bodyKey`
   // itself. `setSelectedIndex` is a stable zustand action reference, safe
-  // to omit -- same convention the mode-resync effect above already uses.
+  // to omit.
   const bodyKey = JSON.stringify({ labels, options });
   useEffect(() => {
     setSelectedIndex(0);
@@ -249,7 +267,7 @@ export function ChainPreviewDrawer() {
   // tape), not the tape's full nominal width -- so sizing the strip off
   // nominal (as this used to) stretched the image ~1.33x vertically vs.
   // FeedDeck's own (correct) strip. `minFeedMm: 0` is a throwaway: this
-  // drawer has no feed-waste indicator, only `printableHeightPx` below is
+  // deck has no feed-waste indicator, only `printableHeightPx` below is
   // read off the result. Falls back to the nominal width for printMm while
   // `tapeInfo` is still null (the brief pre-/api/tapes window above).
   const geo = computeFeedDeckGeometry(contentWidthMm, tapeWidthMm, tapeInfo?.print_mm ?? tapeWidthMm, 0, pxPerMm);
@@ -297,13 +315,15 @@ export function ChainPreviewDrawer() {
           IDENTICALLY (same fixed/translate overlay classes, just without
           the scrim/dialog semantics above/below when docked); the
           `docked && open` class group only kicks in at `xl:` and up, where
-          it overrides position/translate/visibility back to an in-flow
-          column -- see this component's own docstring for the full
-          contract. `transition-transform` is dropped while `docked` so
-          that override never animates as a slide (there's nothing to slide
-          once the panel's back in normal flow). */}
+          it overrides position/translate/visibility/flow-direction back
+          into a full-width, in-flow row that settles at the viewport
+          bottom on its own (no sticky/fixed positioning involved) -- see
+          this component's own docstring for the full contract. `transition-
+          transform` is dropped while `docked` so that override never
+          animates as a slide (there's nothing to slide once the panel's
+          back in normal flow). */}
       <div
-        data-testid="chain-preview-drawer-panel"
+        data-testid="print-preview-deck-panel"
         role={open ? (docked ? "complementary" : "dialog") : undefined}
         aria-modal={open && !docked ? true : undefined}
         aria-label={open ? "Print preview" : undefined}
@@ -311,57 +331,95 @@ export function ChainPreviewDrawer() {
           docked ? "" : "transition-transform duration-150 motion-reduce:transition-none"
         } ${open ? "visible translate-x-0" : "invisible translate-x-full"} ${
           docked && open
-            ? "xl:static xl:inset-auto xl:z-auto xl:translate-x-0 xl:visible xl:w-[26rem] xl:shrink-0 xl:border-l"
+            ? // No sticky, no calc() -- AppShell.tsx's own frame is
+              // viewport-bound (`h-screen` root column), so this panel just
+              // needs to be a plain in-flow block (`xl:static`) to land at
+              // the viewport bottom on its own, the same shape the tray's
+              // own docked contract (GlobalTrayDrawer.tsx) already uses.
+              // `xl:h-64` is this component's own height alone now -- no
+              // other file needs to know the figure.
+              "xl:static xl:inset-auto xl:z-auto xl:h-64 xl:w-full xl:translate-x-0 xl:visible xl:shrink-0 xl:border-l-0 xl:border-t xl:flex-row xl:items-stretch xl:overflow-hidden xl:gap-5"
             : ""
         }`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className={eyebrow}>Print preview</span>
-          <div className="flex items-center gap-1.5">
-            {/* Dock/undock toggle (dockable-preview feature) -- house
-                icon-button styling (iconButtonClass, same as the close
-                button beside it), accessible name flips with the current
-                state rather than describing the click (same convention as
-                AppShell's own ThemeCycleButton). */}
-            <button
-              type="button"
-              onClick={toggleDocked}
-              aria-label={docked ? "Undock preview" : "Dock preview"}
-              title={docked ? "Undock preview" : "Dock preview"}
-              className={iconButtonClass}
-            >
-              <span aria-hidden="true">{docked ? "▣" : "▢"}</span>
-            </button>
-            <button
-              type="button"
-              ref={closeButtonRef}
-              onClick={close}
-              aria-label="Close chain preview"
-              className={iconButtonClass}
-            >
-              ×
-            </button>
+        {/* Group A: header row (eyebrow + read-only mode label + dock/
+            close buttons) + the zoom control row -- a fixed narrow column
+            at `xl` while docked (this group never needs the strip's own
+            width). `flex flex-col gap-4` internally reproduces the 1rem
+            gap these two rows got for free as top-level panel children
+            before this wrapper existed -- the panel's own `gap-4` now only
+            separates the three top-level groups from each other, not the
+            rows within them. */}
+        <div className={`flex flex-col gap-4 ${docked && open ? "xl:w-56 xl:shrink-0" : ""}`}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className={eyebrow}>Print preview</span>
+              {/* Read-only mode label (mode unification) -- this deck no
+                  longer owns a mode control of its own; TrayPanel.tsx's
+                  own radiogroup is the ONLY place chain mode can be
+                  changed (see useTrayStore.chainMode above). This just
+                  keeps a docked deck self-describing about which mode
+                  it's currently rendering, without duplicating the
+                  control itself. */}
+              <span className="font-mono text-[11px] text-deck-400" data-testid="deck-mode-label">
+                {CHAIN_MODE_OPTIONS.find((o) => o.value === mode)?.label}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {/* Dock/undock toggle (dockable-preview feature) -- house
+                  icon-button styling (iconButtonClass, same as the close
+                  button beside it), accessible name flips with the current
+                  state rather than describing the click (same convention as
+                  AppShell's own ThemeCycleButton). */}
+              <button
+                type="button"
+                onClick={toggleDocked}
+                aria-label={docked ? "Undock preview" : "Dock preview"}
+                title={docked ? "Undock preview" : "Dock preview"}
+                className={iconButtonClass}
+              >
+                <span aria-hidden="true">{docked ? "▣" : "▢"}</span>
+              </button>
+              <button
+                type="button"
+                ref={closeButtonRef}
+                onClick={close}
+                aria-label="Close print preview"
+                className={iconButtonClass}
+              >
+                ×
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className={`${eyebrow} mb-1.5 block`}>Chain mode</span>
-            <SegmentedControl ariaLabel="Preview chain mode" value={mode} options={CHAIN_MODE_OPTIONS} onChange={setMode} />
-            <p className={helpText}>{CHAIN_MODE_OPTIONS.find((o) => o.value === mode)?.description}</p>
-          </div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] text-deck-400">Zoom</span>
             {/* "Print preview zoom", not "Preview zoom" (L14 review fix) --
                 Designer.tsx's own zoom control shares that exact name, and
-                both can legitimately be mounted at once (this drawer opens
+                both can legitimately be mounted at once (this deck opens
                 from the Design route too), which would otherwise give two
                 same-named radiogroups on one page. */}
             <SegmentedControl ariaLabel="Print preview zoom" options={ZOOM_OPTIONS} value={zoom} onChange={setZoom} />
           </div>
         </div>
 
-        <div>
+        {/* Group B: the cycler row + the strip itself (or, before a
+            preview exists, whichever placeholder state applies) -- the
+            strip is the whole point of a docked bottom deck, so it's the
+            one group that actually grows (`xl:flex-1`) to fill the
+            leftover width once A and C take their fixed columns.
+            `xl:min-h-0 xl:overflow-y-auto` (review fix): the docked deck's
+            own inner height is fixed (`xl:h-64`, 16rem, minus Group A/C's
+            padding leaves ~216px), and at high zoom (8x) the cycler row +
+            strip can exceed that -- without `xl:min-h-0` this flex child
+            would refuse to shrink below its content's intrinsic height, and
+            the overflow gets clipped by the panel's own `xl:overflow-hidden`
+            (the outer docked class group) with no way to reach the clipped
+            part; `xl:overflow-y-auto` gives Group B its own scroll escape
+            instead of silently clipping content. */}
+        <div
+          className={`flex flex-col ${docked && open ? "xl:min-w-0 xl:flex-1 xl:flex xl:flex-col xl:min-h-0 xl:overflow-y-auto" : ""}`}
+        >
           {!renderable ? (
             <div className="flex flex-col gap-1">
               <p className="text-[13px] text-deck-400">Nothing queued to print.</p>
@@ -416,7 +474,7 @@ export function ChainPreviewDrawer() {
                 <div className="relative" style={{ width: stripWidthPx, height: stripHeightPx }}>
                   <img
                     src={pngDataUrl(preview.png_b64)}
-                    alt="Chained job preview"
+                    alt="Print preview strip"
                     style={{ width: stripWidthPx, height: stripHeightPx, imageRendering: "pixelated" }}
                   />
                   {/* Selected-segment highlight -- left/width from the SAME
@@ -465,49 +523,62 @@ export function ChainPreviewDrawer() {
                   )}
                 </div>
               </div>
-
-              <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px] text-deck-200">
-                <div className="flex flex-col">
-                  <dt className="text-[11px] text-deck-400">Total</dt>
-                  <dd data-testid="preview-total-mm">{preview.total_mm.toFixed(1)} mm</dd>
-                </div>
-                <div className="flex flex-col">
-                  <dt className="text-[11px] text-deck-400">Content / overhead</dt>
-                  <dd>
-                    {preview.content_mm.toFixed(1)} / {preview.feed_overhead_mm.toFixed(1)} mm
-                  </dd>
-                </div>
-                <div className="flex flex-col">
-                  <dt className="text-[11px] text-deck-400">Per label</dt>
-                  <dd>{preview.per_label_mm.toFixed(1)} mm</dd>
-                </div>
-              </dl>
-
-              {preview.notes.length > 0 && (
-                <ul className="mt-2 flex flex-col gap-0.5 text-[11px] leading-snug text-deck-400">
-                  {preview.notes.map((note, i) => (
-                    <li key={i}>· {note}</li>
-                  ))}
-                </ul>
-              )}
-
-              {preview.warnings.length > 0 && (
-                <ul className="mt-2 flex flex-col gap-1">
-                  {preview.warnings.map((w, i) => (
-                    <li key={i} role="alert" className="text-[12px] text-rust-500">
-                      {w}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <p className={helpText}>
-                Tape usage shown here is an UNVERIFIED estimate pending the physical print checkpoint — actual
-                feed/margin behavior on real hardware may differ.
-              </p>
             </>
           )}
         </div>
+
+        {/* Group C: stats + notes + warnings + disclaimer -- only ever
+            rendered alongside the strip (same three-part guard as Group
+            B's own ternary), so it gets its own top-level conditional
+            rather than living inside Group B. `mt-3` dropped from the
+            `<dl>` below (it used to supply the gap between the strip and
+            the stats when both lived in one unwrapped block container) --
+            the panel's own top-level `gap-4` now supplies that same gap
+            between Group B and Group C directly, so keeping `mt-3` too
+            would double it. */}
+        {renderable && !error && preview && (
+          <div className={`flex flex-col ${docked && open ? "xl:w-72 xl:shrink-0 xl:overflow-y-auto" : ""}`}>
+            <dl className="flex flex-wrap gap-x-6 gap-y-1 font-mono text-[13px] text-deck-200">
+              <div className="flex flex-col">
+                <dt className="text-[11px] text-deck-400">Total</dt>
+                <dd data-testid="preview-total-mm">{preview.total_mm.toFixed(1)} mm</dd>
+              </div>
+              <div className="flex flex-col">
+                <dt className="text-[11px] text-deck-400">Content / overhead</dt>
+                <dd>
+                  {preview.content_mm.toFixed(1)} / {preview.feed_overhead_mm.toFixed(1)} mm
+                </dd>
+              </div>
+              <div className="flex flex-col">
+                <dt className="text-[11px] text-deck-400">Per label</dt>
+                <dd>{preview.per_label_mm.toFixed(1)} mm</dd>
+              </div>
+            </dl>
+
+            {preview.notes.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-0.5 text-[11px] leading-snug text-deck-400">
+                {preview.notes.map((note, i) => (
+                  <li key={i}>· {note}</li>
+                ))}
+              </ul>
+            )}
+
+            {preview.warnings.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1">
+                {preview.warnings.map((w, i) => (
+                  <li key={i} role="alert" className="text-[12px] text-rust-500">
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <p className={helpText}>
+              Tape usage shown here is an UNVERIFIED estimate pending the physical print checkpoint — actual
+              feed/margin behavior on real hardware may differ.
+            </p>
+          </div>
+        )}
       </div>
     </>
   );

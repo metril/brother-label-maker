@@ -47,7 +47,7 @@ interface CurrentDesignState {
  * outside Designer's own subtree: written ONLY by pages/Designer.tsx's own
  * mirror effect (CurrentDesignMirrorEffect), cleared on unmount (there IS no
  * current design once you navigate away). Not persisted -- same "pure
- * transient UI state" category as stores/chainPreview.ts's own `open`; a
+ * transient UI state" category as stores/printPreview.ts's own `open`; a
  * reload has no business resurrecting a half-typed design that was never
  * added to the tray or saved as a preset.
  *
@@ -57,7 +57,7 @@ interface CurrentDesignState {
  *    affordances (the empty-tray-prints-the-current-design fallback, "+ Add
  *    to tray") specifically on the Design route, exactly the way
  *    components/JobTray.tsx used to via a prop.
- *  - components/ChainPreviewDrawer.tsx: its own empty-tray fallback (a
+ *  - components/PrintPreviewDeck.tsx: its own empty-tray fallback (a
  *    strict subset of these fields -- definition/serialization/canSubmit). */
 export const useCurrentDesignStore = create<CurrentDesignState>((set) => ({
   current: null,

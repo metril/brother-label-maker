@@ -27,7 +27,7 @@ const HIGHLIGHT_MS = 2000;
 /** Mirrors the current, unsaved design into stores/currentDesign.ts so
  * every other tray surface -- components/GlobalTrayDrawer.tsx (now the
  * ONE tray UI, including on "/") and the AppShell-mounted
- * components/ChainPreviewDrawer.tsx (its own empty-tray fallback) -- can
+ * components/PrintPreviewDeck.tsx (its own empty-tray fallback) -- can
  * read it from outside Designer's own subtree. A child component (rendered
  * from Designer's success branch, so its hooks never sit below Designer's
  * own early returns) rather than inline hooks; cleared on unmount, because
@@ -251,7 +251,7 @@ export function Designer() {
   // stores/currentDesign.ts's own CurrentDesign doc) -- built here since
   // this page owns the schema/params/preview it's derived from, then
   // mirrored into that store below (CurrentDesignMirrorEffect) for
-  // components/GlobalTrayDrawer.tsx and components/ChainPreviewDrawer.tsx
+  // components/GlobalTrayDrawer.tsx and components/PrintPreviewDeck.tsx
   // to read from outside this page's own subtree. "+ Add to tray" itself
   // now lives in GlobalTrayDrawer (the snapshot logic moved there verbatim
   // -- see that component's own `handleAddToTray`).
@@ -348,7 +348,7 @@ export function Designer() {
 
       {/* Mirrors `currentDesign` into stores/currentDesign.ts -- see that
           effect's own docstring above -- so GlobalTrayDrawer/
-          ChainPreviewDrawer can read it from the header, well outside this
+          PrintPreviewDeck can read it from the header, well outside this
           component's own subtree. Renders nothing itself. */}
       <CurrentDesignMirrorEffect design={currentDesign} />
 
