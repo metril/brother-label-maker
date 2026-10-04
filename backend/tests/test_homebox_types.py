@@ -61,9 +61,17 @@ def test_get_renderer_returns_expected_renderer_instances():
 
 def test_api_lists_eleven_types_including_homebox():
     assert {t.type for t in list_types()} == {
-        "text", "barcode", "patch_panel", "punch_down", "faceplate",
-        "cable_wrap", "cable_flag", "terminal_block", "breaker_box",
-        "homebox_asset", "homebox_location",
+        "text",
+        "barcode",
+        "patch_panel",
+        "punch_down",
+        "faceplate",
+        "cable_wrap",
+        "cable_flag",
+        "terminal_block",
+        "breaker_box",
+        "homebox_asset",
+        "homebox_location",
     }
     assert len(list_types()) == 11
 
@@ -223,9 +231,7 @@ def test_asset_location_blank_renders_two_text_elements_not_three():
         HomeboxAssetParams(asset_id="1", name="UPS", qr_data="https://x/a/1"), tape
     )
     with_location = HomeboxAssetRenderer().render(
-        HomeboxAssetParams(
-            asset_id="1", name="UPS", location="Garage", qr_data="https://x/a/1"
-        ),
+        HomeboxAssetParams(asset_id="1", name="UPS", location="Garage", qr_data="https://x/a/1"),
         tape,
     )
     assert no_location.svg.count("<text") == 2
@@ -251,9 +257,7 @@ def test_asset_id_rendered_in_jetbrains_mono_bold():
     )
     assert 'font-family="JetBrains Mono"' in label.svg
     # The asset_id <text> element specifically carries font-weight="bold".
-    id_element = next(
-        line for line in label.svg.split("<text") if "JetBrains Mono" in line
-    )
+    id_element = next(line for line in label.svg.split("<text") if "JetBrains Mono" in line)
     assert 'font-weight="bold"' in id_element
 
 

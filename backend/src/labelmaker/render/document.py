@@ -95,8 +95,7 @@ class Tape(BaseModel):
                 return tape
         valid = sorted(t.nominal_mm for t in all_tapes() if t.family is media_family)
         raise ValueError(
-            f"no {self.family!r} tape with nominal width {self.width_mm}mm; "
-            f"valid widths: {valid}"
+            f"no {self.family!r} tape with nominal width {self.width_mm}mm; valid widths: {valid}"
         )
 
 

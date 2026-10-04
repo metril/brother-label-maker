@@ -103,9 +103,7 @@ def test_params_fifty_one_blocks_rejected():
 
 def test_params_both_lengths_set_rejected():
     with pytest.raises(ValidationError):
-        DividedBlocksParams(
-            blocks=[BlockSpec()], block_length_mm=10.0, total_length_mm=20.0
-        )
+        DividedBlocksParams(blocks=[BlockSpec()], block_length_mm=10.0, total_length_mm=20.0)
 
 
 def test_params_neither_length_set_rejected():
@@ -196,8 +194,7 @@ def test_total_length_mm_division_with_mixed_multipliers():
     # [85, 85, 170, 85, 85, 85] (the x2 block is exactly double).
     params = DividedBlocksParams(
         blocks=[
-            BlockSpec(lines=[str(i)], width_multiplier=m)
-            for i, m in enumerate([1, 1, 2, 1, 1, 1])
+            BlockSpec(lines=[str(i)], width_multiplier=m) for i, m in enumerate([1, 1, 2, 1, 1, 1])
         ],
         total_length_mm=84.0,
     )
@@ -278,9 +275,7 @@ def test_total_below_min_label_mm_raises():
 
 
 def test_total_above_tape_max_length_mm_raises():
-    params = DividedBlocksParams(
-        blocks=[BlockSpec(), BlockSpec()], block_length_mm=600.0
-    )
+    params = DividedBlocksParams(blocks=[BlockSpec(), BlockSpec()], block_length_mm=600.0)
     with pytest.raises(ValueError, match=r"1200\.0mm"):
         layout_blocks(params, _tape(24))  # tze max_length_mm == 1000.0
 
@@ -450,8 +445,8 @@ def test_vertical_rotates_90_clockwise():
         blocks=[BlockSpec(lines=["X"])], block_length_mm=20.0, orientation=Orientation.VERTICAL
     )
     label = render_divided_blocks(params, _tape(24))
-    assert 'rotate(90,' in label.svg
-    assert 'rotate(-90,' not in label.svg
+    assert "rotate(90," in label.svg
+    assert "rotate(-90," not in label.svg
 
 
 def test_backbone_rotates_90_counter_clockwise():
@@ -459,13 +454,13 @@ def test_backbone_rotates_90_counter_clockwise():
         blocks=[BlockSpec(lines=["X"])], block_length_mm=20.0, orientation=Orientation.BACKBONE
     )
     label = render_divided_blocks(params, _tape(24))
-    assert 'rotate(-90,' in label.svg
+    assert "rotate(-90," in label.svg
 
 
 def test_horizontal_has_no_rotation():
     params = DividedBlocksParams(blocks=[BlockSpec(lines=["X"])], block_length_mm=20.0)
     label = render_divided_blocks(params, _tape(24))
-    assert 'rotate(' not in label.svg
+    assert "rotate(" not in label.svg
 
 
 def test_vertical_fits_long_word_that_horizontal_cannot():

@@ -28,6 +28,9 @@ from labelmaker.driver.geometry import TapeSpec
 BYTES_PER_LINE = 16
 ZERO_LINE = b"\x00" * BYTES_PER_LINE
 
+# Byte -> bit-reversed byte, for LSB_FIRST packing (see image_to_pin_lines).
+_REVERSE_BITS = bytes(int(f"{b:08b}"[::-1], 2) for b in range(256))
+
 _FRAME_MARKER = 0x47  # 'G'
 _ZERO_LINE_MARKER = b"Z"  # 0x5A, PACKBITS-only shorthand for an all-zero line
 
@@ -94,19 +97,26 @@ def image_to_pin_lines(
     if img.width < 1:
         raise ValueError(f"image width must be >= 1, got {img.width}")
 
-    pixels = img.load()
+    # Vectorized via PIL (this runs while USB_LOCK is held, so the old
+    # per-pixel Python loop was costly): lay each image column out as one row
+    # of packed bits (y=0 first; PIL's 1 = white, inverted below so black ->
+    # 1), then shift that row into its pin position inside a 128-bit
+    # big-endian integer. Output is byte-for-byte identical to setting each
+    # black pixel's pin via set_pin() (test_raster.py compares against it).
+    n = tape.print_dots
+    # flip_pins: pin = left_pin + y; otherwise the y axis is reversed first.
+    oriented = img if config.flip_pins else img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    packed = oriented.transpose(Image.Transpose.TRANSPOSE).tobytes()
+    row_bytes = (n + 7) // 8
+    pad_bits = row_bytes * 8 - n
+    ink_mask = (1 << n) - 1
+    shift = BYTES_PER_LINE * 8 - tape.left_pin - n
+    lsb_first = config.bit_order is BitOrder.LSB_FIRST
     lines: list[bytes] = []
     for x in range(img.width):
-        line = bytearray(BYTES_PER_LINE)
-        for y in range(tape.print_dots):
-            if pixels[x, y] == 0:  # black
-                pin = (
-                    tape.left_pin + y
-                    if config.flip_pins
-                    else tape.left_pin + tape.print_dots - 1 - y
-                )
-                set_pin(line, pin, config.bit_order)
-        lines.append(bytes(line))
+        row = int.from_bytes(packed[x * row_bytes : (x + 1) * row_bytes], "big")
+        line = (((row >> pad_bits) ^ ink_mask) << shift).to_bytes(BYTES_PER_LINE, "big")
+        lines.append(line.translate(_REVERSE_BITS) if lsb_first else line)
     return lines
 
 

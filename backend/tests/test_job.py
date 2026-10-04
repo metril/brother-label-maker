@@ -237,14 +237,7 @@ def test_classic_cut_each_two_images_full_stream():
     )
     z_1line = b"\x1b\x69\x7a\x84\x00\x18\x00\x01\x00\x00\x00\x00\x00"
     expected = (
-        preamble
-        + z_1line
-        + FRAME_ROW0_PB
-        + CTRL_Z
-        + preamble
-        + z_1line
-        + FRAME_ROW127_PB
-        + CTRL_Z
+        preamble + z_1line + FRAME_ROW0_PB + CTRL_Z + preamble + z_1line + FRAME_ROW127_PB + CTRL_Z
     )
     assert result.data == expected
     assert result.data.count(b"\x00" * 100) == 2  # flush sequence appears exactly twice

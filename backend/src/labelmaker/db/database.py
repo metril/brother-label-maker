@@ -278,8 +278,7 @@ class Database:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
         cur = await self._conn.execute(
-            f"SELECT * FROM presets {where} "
-            "ORDER BY favorite DESC, updated_at DESC, rowid DESC",
+            f"SELECT * FROM presets {where} ORDER BY favorite DESC, updated_at DESC, rowid DESC",
             params,
         )
         rows = await cur.fetchall()
@@ -442,9 +441,7 @@ class Database:
 
         set_clauses = ", ".join(f"{key} = ?" for key in fields)
         params = [*fields.values(), job_id]
-        cur = await self._conn.execute(
-            f"UPDATE print_jobs SET {set_clauses} WHERE id = ?", params
-        )
+        cur = await self._conn.execute(f"UPDATE print_jobs SET {set_clauses} WHERE id = ?", params)
         if cur.rowcount == 0:
             return None
         return await self.get_job(job_id)
@@ -471,6 +468,16 @@ class Database:
         """
         cur = await self._conn.execute(
             "UPDATE print_jobs SET status = 'canceled' WHERE id = ? AND status = 'queued'",
+            (job_id,),
+        )
+        return cur.rowcount == 1
+
+    async def start_job_if_queued(self, job_id: str) -> bool:
+        """Atomic compare-and-set queued -> printing, the worker-side twin of
+        `cancel_job_if_queued`: returns False if a cancel (or anything else)
+        already moved the row off "queued", so the worker must not print it."""
+        cur = await self._conn.execute(
+            "UPDATE print_jobs SET status = 'printing' WHERE id = ? AND status = 'queued'",
             (job_id,),
         )
         return cur.rowcount == 1

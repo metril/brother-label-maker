@@ -229,18 +229,14 @@ async def test_put_422_never_echoes_key_value_for_a_typo_d_field_name(client):
     # extra_forbidden: pydantic's own ValidationError.errors() includes the
     # rejected input_value for this error too -- error_message()'s
     # str(exc) form would embed it, echoing the sentinel back into detail.
-    resp = await client.put(
-        "/api/settings", json={"homebox_apikey": _SENTINEL_KEY}
-    )
+    resp = await client.put("/api/settings", json={"homebox_apikey": _SENTINEL_KEY})
     assert resp.status_code == 422
     assert _SENTINEL_KEY not in resp.text
 
 
 async def test_put_422_never_echoes_key_value_for_wrong_json_type(client):
     # string_type: a list instead of a string for homebox_api_key.
-    resp = await client.put(
-        "/api/settings", json={"homebox_api_key": [_SENTINEL_KEY]}
-    )
+    resp = await client.put("/api/settings", json={"homebox_api_key": [_SENTINEL_KEY]})
     assert resp.status_code == 422
     assert _SENTINEL_KEY not in resp.text
 
@@ -248,9 +244,7 @@ async def test_put_422_never_echoes_key_value_for_wrong_json_type(client):
 async def test_put_422_never_echoes_key_value_for_a_too_long_key(client):
     # string_too_long: max_length=500 on homebox_api_key.
     too_long_key = _SENTINEL_KEY + ("x" * 500)
-    resp = await client.put(
-        "/api/settings", json={"homebox_api_key": too_long_key}
-    )
+    resp = await client.put("/api/settings", json={"homebox_api_key": too_long_key})
     assert resp.status_code == 422
     assert _SENTINEL_KEY not in resp.text
 
@@ -317,9 +311,7 @@ async def test_put_homebox_url_and_key_together_builds_and_closes_old_client(app
     assert second_client.base_url == "https://hb4.test"
     assert first_client._client.is_closed is True
 
-    resp = await client.put(
-        "/api/settings", json={"homebox_url": None, "homebox_api_key": None}
-    )
+    resp = await client.put("/api/settings", json={"homebox_url": None, "homebox_api_key": None})
     assert resp.status_code == 200
     assert app.state.homebox is None
     assert second_client._client.is_closed is True

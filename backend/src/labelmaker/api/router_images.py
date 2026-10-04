@@ -92,23 +92,26 @@ class ImageUploadResponse(BaseModel):
     height: int
 
 
-async def _read_capped(request: Request, file: UploadFile) -> bytes:
-    """Read `file` into memory, bailing with a 422 as soon as either the
-    declared `Content-Length` or the actually-read byte count exceeds
-    `MAX_UPLOAD_BYTES` -- see module docstring, cap (1)."""
+async def _read_capped(
+    request: Request,
+    file: UploadFile,
+    max_bytes: int = MAX_UPLOAD_BYTES,
+    status_code: int = 422,
+) -> bytes:
+    """Read `file` into memory, bailing with `status_code` (422 by default)
+    as soon as either the declared `Content-Length` or the actually-read
+    byte count exceeds `max_bytes` (default `MAX_UPLOAD_BYTES`) -- see
+    module docstring, cap (1). Also used by router_labels.py's CSV upload."""
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
             declared = int(content_length)
         except ValueError:
             declared = None
-        if declared is not None and declared > MAX_UPLOAD_BYTES:
+        if declared is not None and declared > max_bytes:
             raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"upload declares {declared} bytes, exceeding the "
-                    f"{MAX_UPLOAD_BYTES}-byte cap"
-                ),
+                status_code=status_code,
+                detail=(f"upload declares {declared} bytes, exceeding the {max_bytes}-byte cap"),
             )
 
     chunks = bytearray()
@@ -117,10 +120,10 @@ async def _read_capped(request: Request, file: UploadFile) -> bytes:
         if not chunk:
             break
         chunks.extend(chunk)
-        if len(chunks) > MAX_UPLOAD_BYTES:
+        if len(chunks) > max_bytes:
             raise HTTPException(
-                status_code=422,
-                detail=f"upload exceeds the {MAX_UPLOAD_BYTES}-byte cap",
+                status_code=status_code,
+                detail=f"upload exceeds the {max_bytes}-byte cap",
             )
     return bytes(chunks)
 
@@ -264,9 +267,7 @@ async def upload_image(
     if not data:
         raise HTTPException(status_code=422, detail="uploaded file is empty")
 
-    image_id, width, height = await anyio.to_thread.run_sync(
-        _process_upload, data, config.data_dir
-    )
+    image_id, width, height = await anyio.to_thread.run_sync(_process_upload, data, config.data_dir)
     return ImageUploadResponse(image_id=image_id, width=width, height=height)
 
 
@@ -423,7 +424,14 @@ def _generate_thumbnail(source_path: Path, dest_path: Path) -> None:
         img.load()
         thumb = img.copy()
         thumb.thumbnail((THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE), Image.Resampling.LANCZOS)
-        thumb.save(dest_path, format="PNG")
+        # Write to a sibling temp file then atomically rename into place, so a
+        # concurrent reader (cached for a day) never sees a half-written PNG.
+        tmp_path = dest_path.with_name(f"{dest_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            thumb.save(tmp_path, format="PNG")
+            os.replace(tmp_path, dest_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
 
 @router.get("/{image_id}")

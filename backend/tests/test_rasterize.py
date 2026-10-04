@@ -97,7 +97,7 @@ def test_rasterize_bundled_font_family_in_text_does_not_raise():
 def test_rasterize_unbundled_font_family_single_quoted_attr_raises():
     body = (
         '<rect width="100" height="40" fill="white"/>'
-        "<text x=\"5\" y=\"30\" font-family='Arial' font-size=\"24\">HELLO</text>"
+        '<text x="5" y="30" font-family=\'Arial\' font-size="24">HELLO</text>'
     )
     svg = _svg(100, 40, body)
     label = RenderedLabel(svg=svg, width_px=100, height_px=40)
@@ -108,7 +108,7 @@ def test_rasterize_unbundled_font_family_single_quoted_attr_raises():
 def test_rasterize_bundled_font_family_single_quoted_attr_does_not_raise():
     body = (
         '<rect width="100" height="40" fill="white"/>'
-        "<text x=\"5\" y=\"30\" font-family='Inter' font-size=\"24\">HI</text>"
+        '<text x="5" y="30" font-family=\'Inter\' font-size="24">HI</text>'
     )
     svg = _svg(100, 40, body)
     label = RenderedLabel(svg=svg, width_px=100, height_px=40)
@@ -183,9 +183,7 @@ def test_dither_region_has_scattered_pixels_threshold_region_has_uniform_rows():
     width, height = 100, 64
     svg = _vertical_gradient_svg(width, height)
     dither_region = ObjectRegion(x=0, y=0, width=50, height=height, mode="dither")
-    label = RenderedLabel(
-        svg=svg, width_px=width, height_px=height, object_map=[dither_region]
-    )
+    label = RenderedLabel(svg=svg, width_px=width, height_px=height, object_map=[dither_region])
     img = rasterize(label)
     assert img.size == (width, height)
 
@@ -222,8 +220,7 @@ def test_dither_mechanism_is_noop_without_object_map():
 
 def test_rasterize_is_deterministic():
     body = (
-        '<rect width="50" height="30" fill="white"/>'
-        '<circle cx="25" cy="15" r="10" fill="black"/>'
+        '<rect width="50" height="30" fill="white"/><circle cx="25" cy="15" r="10" fill="black"/>'
     )
     svg = _svg(50, 30, body)
     label = RenderedLabel(svg=svg, width_px=50, height_px=30)

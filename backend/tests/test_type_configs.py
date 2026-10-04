@@ -111,9 +111,7 @@ def test_patch_panel_block_text_zero_lines_accepted():
 
 def test_patch_panel_multipliers_length_mismatch_rejected():
     with pytest.raises(ValidationError, match="multipliers length"):
-        PatchPanelParams(
-            blocks=[PatchPanelBlockText(), PatchPanelBlockText()], multipliers=[1.0]
-        )
+        PatchPanelParams(blocks=[PatchPanelBlockText(), PatchPanelBlockText()], multipliers=[1.0])
 
 
 @pytest.mark.parametrize("multiplier", [0.1, 9.5])
@@ -128,9 +126,7 @@ def test_patch_panel_multiplier_out_of_range_rejected(multiplier):
 
 
 def test_patch_panel_multipliers_matching_length_accepted():
-    PatchPanelParams(
-        blocks=[PatchPanelBlockText(), PatchPanelBlockText()], multipliers=[1.0, 2.0]
-    )
+    PatchPanelParams(blocks=[PatchPanelBlockText(), PatchPanelBlockText()], multipliers=[1.0, 2.0])
 
 
 # --- 2. patch_panel: delegates to the engine, doesn't reimplement it -------
@@ -292,13 +288,16 @@ def test_punch_down_4pair_start_1_six_blocks_numbering():
     params = PunchDownParams(block_type="4-pair", sequence="horizontal", start_value=1, n_blocks=6)
     engine_params = punch_down_engine_params(params)
     assert [b.lines for b in engine_params.blocks] == [
-        ["1"], ["5"], ["9"], ["13"], ["17"], ["21"],
+        ["1"],
+        ["5"],
+        ["9"],
+        ["13"],
+        ["17"],
+        ["21"],
     ]
 
 
-@pytest.mark.parametrize(
-    "block_type,pair_count", [("2-pair", 2), ("3-pair", 3), ("5-pair", 5)]
-)
+@pytest.mark.parametrize("block_type,pair_count", [("2-pair", 2), ("3-pair", 3), ("5-pair", 5)])
 def test_punch_down_numbering_uses_pair_count_from_block_type(block_type, pair_count):
     params = PunchDownParams(block_type=block_type, start_value=10, n_blocks=3)
     engine_params = punch_down_engine_params(params)

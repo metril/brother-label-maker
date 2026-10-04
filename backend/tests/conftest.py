@@ -50,6 +50,7 @@ def _isolated_render_registry():
     _REGISTRY.clear()
     _REGISTRY.update(snapshot)
 
+
 # I4: app_config's own explicit defaults for the three checkpoint-pending
 # fields (printer_init_strategy/printer_bit_order/printer_flip_pins).
 # AppConfig is a pydantic-settings BaseSettings model -- ANY field not

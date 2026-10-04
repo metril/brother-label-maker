@@ -267,3 +267,11 @@ async def test_csv_upload_strips_whitespace_from_row_values_like_headers(client)
     )
     assert resp.status_code == 200
     assert resp.json()["rows"] == [{"port": "1", "name": "Alice"}]
+
+
+async def test_csv_upload_over_1mib_is_413(client):
+    big = b"a,b\n" + b"1,2\n" * 300_000  # ~1.2 MB
+    resp = await client.post(
+        "/api/serialize/csv", files={"file": ("big.csv", io.BytesIO(big), "text/csv")}
+    )
+    assert resp.status_code == 413

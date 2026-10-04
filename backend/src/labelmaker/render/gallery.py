@@ -223,8 +223,7 @@ def gallery_entries() -> tuple[GalleryEntry, ...]:
             id="patch-panel-serialized",
             title="Patch panel, serialized run",
             blurb=(
-                "A {seq} template expanded into four panel strips — "
-                "pictured: panel 1 of the run."
+                "A {seq} template expanded into four panel strips — pictured: panel 1 of the run."
             ),
             type="patch_panel",
             tape_mm=24,

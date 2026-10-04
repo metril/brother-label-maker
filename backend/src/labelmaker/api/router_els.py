@@ -238,9 +238,7 @@ async def get_els_label(
     title_text: str = Query(..., alias="TitleText", min_length=1, max_length=500),
     description_text: str = Query("", alias="DescriptionText", max_length=2000),
     url: str = Query(..., alias="URL", min_length=1, max_length=2000),
-    additional_information: str | None = Query(
-        None, alias="AdditionalInformation", max_length=500
-    ),
+    additional_information: str | None = Query(None, alias="AdditionalInformation", max_length=500),
     # -- Fields HomeBox always sends but this endpoint ignores (see module
     # docstring) -- still typed so a non-numeric value 422s cleanly rather
     # than being silently accepted as a string.

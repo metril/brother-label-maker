@@ -156,7 +156,11 @@ def test_terminal_block_numbering_with_step():
     params = TerminalBlockParams(n_terminals=5, start_value=10, step=2)
     engine_params = terminal_block_engine_params(params)
     assert [b.lines for b in engine_params.blocks] == [
-        ["10"], ["12"], ["14"], ["16"], ["18"],
+        ["10"],
+        ["12"],
+        ["14"],
+        ["16"],
+        ["18"],
     ]
 
 
@@ -168,7 +172,10 @@ def test_terminal_block_labels_override_partial_list():
     params = TerminalBlockParams(n_terminals=4, labels=["L1", "L2"])
     engine_params = terminal_block_engine_params(params)
     assert [b.lines for b in engine_params.blocks] == [
-        ["L1"], ["L2"], ["3"], ["4"],
+        ["L1"],
+        ["L2"],
+        ["3"],
+        ["4"],
     ]
 
 
@@ -324,9 +331,7 @@ def test_breaker_box_start_value_out_of_range_rejected(value):
 # test_breaker_box_even_scheme_requires_even_start_value below): "sequential"
 # doesn't care about parity, "odd" needs an odd start_value, "even" needs an
 # even one.
-@pytest.mark.parametrize(
-    "scheme,start_value", [("sequential", 1), ("odd", 1), ("even", 2)]
-)
+@pytest.mark.parametrize("scheme,start_value", [("sequential", 1), ("odd", 1), ("even", 2)])
 def test_breaker_box_numbering_scheme_valid_values_accepted(scheme, start_value):
     BreakerBoxParams(breakers=[BreakerSpec()], numbering_scheme=scheme, start_value=start_value)
 
@@ -399,8 +404,11 @@ def test_breaker_box_sequential_scheme_mixed_poles():
     # increment=1 -> slots = 1 + 1*[0, 1, 3, 6, 7] = [1, 2, 4, 7, 8]
     params = BreakerBoxParams(
         breakers=[
-            BreakerSpec(poles=1), BreakerSpec(poles=2), BreakerSpec(poles=3),
-            BreakerSpec(poles=1), BreakerSpec(poles=2),
+            BreakerSpec(poles=1),
+            BreakerSpec(poles=2),
+            BreakerSpec(poles=3),
+            BreakerSpec(poles=1),
+            BreakerSpec(poles=2),
         ],
         numbering_scheme="sequential",
         start_value=1,
@@ -416,8 +424,11 @@ def test_breaker_box_odd_scheme_mixed_poles():
     # slots = 1 + 2*[0, 1, 3, 6, 7] = [1, 3, 7, 13, 15]
     params = BreakerBoxParams(
         breakers=[
-            BreakerSpec(poles=1), BreakerSpec(poles=2), BreakerSpec(poles=3),
-            BreakerSpec(poles=1), BreakerSpec(poles=2),
+            BreakerSpec(poles=1),
+            BreakerSpec(poles=2),
+            BreakerSpec(poles=3),
+            BreakerSpec(poles=1),
+            BreakerSpec(poles=2),
         ],
         numbering_scheme="odd",
         start_value=1,
@@ -434,8 +445,11 @@ def test_breaker_box_even_scheme_mixed_poles_with_start_value_2():
     # slots = 2 + 2*[0, 1, 3, 6, 7] = [2, 4, 8, 14, 16]
     params = BreakerBoxParams(
         breakers=[
-            BreakerSpec(poles=1), BreakerSpec(poles=2), BreakerSpec(poles=3),
-            BreakerSpec(poles=1), BreakerSpec(poles=2),
+            BreakerSpec(poles=1),
+            BreakerSpec(poles=2),
+            BreakerSpec(poles=3),
+            BreakerSpec(poles=1),
+            BreakerSpec(poles=2),
         ],
         numbering_scheme="even",
         start_value=2,
@@ -461,9 +475,7 @@ def test_breaker_box_single_pole_sequential_is_plain_1_2_3():
 
 
 def test_breaker_box_block_text_is_number_then_lines():
-    params = BreakerBoxParams(
-        breakers=[BreakerSpec(poles=2, lines=["MAIN"])], show_numbers=True
-    )
+    params = BreakerBoxParams(breakers=[BreakerSpec(poles=2, lines=["MAIN"])], show_numbers=True)
     engine_params = breaker_box_engine_params(params)
     assert engine_params.blocks[0].lines == ["1", "MAIN"]
 
@@ -484,9 +496,7 @@ def test_breaker_box_show_numbers_true_no_lines_shows_number_alone():
 
 def test_breaker_box_show_numbers_and_two_lines_rejected():
     with pytest.raises(ValidationError, match="at most 1 description line fits"):
-        BreakerBoxParams(
-            breakers=[BreakerSpec(poles=1, lines=["A", "B"])], show_numbers=True
-        )
+        BreakerBoxParams(breakers=[BreakerSpec(poles=1, lines=["A", "B"])], show_numbers=True)
 
 
 def test_breaker_box_show_numbers_and_one_line_accepted():
@@ -494,9 +504,7 @@ def test_breaker_box_show_numbers_and_one_line_accepted():
 
 
 def test_breaker_box_show_numbers_false_and_two_lines_accepted():
-    BreakerBoxParams(
-        breakers=[BreakerSpec(poles=1, lines=["A", "B"])], show_numbers=False
-    )
+    BreakerBoxParams(breakers=[BreakerSpec(poles=1, lines=["A", "B"])], show_numbers=False)
 
 
 # --- 7. breaker_box: multiplier flow -- poles drives physical WIDTH ---------

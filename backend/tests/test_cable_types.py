@@ -79,9 +79,17 @@ def test_api_lists_eleven_types():
     # text, barcode, patch_panel, punch_down, faceplate, cable_wrap,
     # cable_flag, terminal_block, breaker_box, homebox_asset, homebox_location.
     assert {t.type for t in list_types()} == {
-        "text", "barcode", "patch_panel", "punch_down", "faceplate",
-        "cable_wrap", "cable_flag", "terminal_block", "breaker_box",
-        "homebox_asset", "homebox_location",
+        "text",
+        "barcode",
+        "patch_panel",
+        "punch_down",
+        "faceplate",
+        "cable_wrap",
+        "cable_flag",
+        "terminal_block",
+        "breaker_box",
+        "homebox_asset",
+        "homebox_location",
     }
     assert len(list_types()) == 11
 
@@ -230,9 +238,7 @@ def test_repeat_true_instance_count_matches_hand_derived_tiling_formula():
     # Inter's real extent_ratio (1.211) exceeds 1.15, so the real value
     # governs here, hand-derived independently via fonts.extent_ratio
     # (not by calling cable_wrap.py's own _effective_line_spacing).
-    params = CableWrapParams(
-        lines=["A"], font_size_px=10, cable_diameter_mm=90.0, overlap_mm=20.0
-    )
+    params = CableWrapParams(lines=["A"], font_size_px=10, cable_diameter_mm=90.0, overlap_mm=20.0)
     label = CableWrapRenderer().render(params, _tape(24))
     assert label.warnings == []  # font_size_px=10 must not have been clamped
 
@@ -248,9 +254,7 @@ def test_repeat_true_instance_count_matches_hand_derived_tiling_formula():
 
 
 def test_gap_between_repeated_instances_is_at_least_2mm():
-    params = CableWrapParams(
-        lines=["A"], font_size_px=10, cable_diameter_mm=90.0, overlap_mm=20.0
-    )
+    params = CableWrapParams(lines=["A"], font_size_px=10, cable_diameter_mm=90.0, overlap_mm=20.0)
     label = CableWrapRenderer().render(params, _tape(24))
     cxs = [float(m.group(1)) for m in re.finditer(r"rotate\(-90, ([\d.]+),", label.svg)]
     assert len(cxs) > 1
@@ -303,9 +307,7 @@ def test_real_rendered_ink_gap_at_least_2mm_for_tall_metric_font():
 
     def _ink_extent_near(cx: float, window: int = 40) -> tuple[int, int]:
         lo, hi = int(cx) - window, int(cx) + window
-        ink_cols = [
-            x for x in range(lo, hi) if any(_ink(img, x, y) for y in range(height_px))
-        ]
+        ink_cols = [x for x in range(lo, hi) if any(_ink(img, x, y) for y in range(height_px))]
         return min(ink_cols), max(ink_cols)
 
     _, hi0 = _ink_extent_near(cxs[0])
@@ -344,9 +346,7 @@ def test_wrap_unfittable_text_raises_value_error_naming_tape_width():
 
 def test_wrap_explicit_font_size_clamped_to_length_budget_warns_font_clamped():
     label = CableWrapRenderer().render(
-        CableWrapParams(
-            lines=["X"], font_size_px=128, cable_diameter_mm=3.0, overlap_mm=5.0
-        ),
+        CableWrapParams(lines=["X"], font_size_px=128, cable_diameter_mm=3.0, overlap_mm=5.0),
         _tape(24),
     )
     codes = [w.code for w in label.warnings]
@@ -354,9 +354,7 @@ def test_wrap_explicit_font_size_clamped_to_length_budget_warns_font_clamped():
 
 
 def test_wrap_explicit_font_size_that_fits_has_no_warning():
-    label = CableWrapRenderer().render(
-        CableWrapParams(lines=["X"], font_size_px=10), _tape(24)
-    )
+    label = CableWrapRenderer().render(CableWrapParams(lines=["X"], font_size_px=10), _tape(24))
     assert label.warnings == []
 
 
@@ -392,9 +390,7 @@ def test_wrap_explicit_font_size_at_floor_still_unfittable_raises():
     # must still be the brief's genuine 422 case, both when the caller
     # asks for the floor explicitly and when they ask for nothing (auto).
     with pytest.raises(ValueError, match=r"text too long for 3\.5mm tape"):
-        CableWrapRenderer().render(
-            CableWrapParams(lines=["A" * 30], font_size_px=6), _tape(3.5)
-        )
+        CableWrapRenderer().render(CableWrapParams(lines=["A" * 30], font_size_px=6), _tape(3.5))
 
 
 # --- 6. cable_flag: Params validation ---------------------------------------
@@ -548,9 +544,7 @@ def test_flag_auto_font_hits_floor_and_still_fits_warns_cramped():
 
 def test_flag_unfittable_text_horizontal_raises_value_error():
     with pytest.raises(ValueError, match="text too long for a 5.0mm flag"):
-        CableFlagRenderer().render(
-            CableFlagParams(lines=["A" * 30], flag_length_mm=5.0), _tape(6)
-        )
+        CableFlagRenderer().render(CableFlagParams(lines=["A" * 30], flag_length_mm=5.0), _tape(6))
 
 
 def test_flag_unfittable_text_vertical_raises_value_error_naming_tape():
@@ -568,9 +562,7 @@ def test_flag_explicit_font_size_clamped_warns_font_clamped():
 
 
 def test_flag_explicit_font_size_that_fits_has_no_warning():
-    label = CableFlagRenderer().render(
-        CableFlagParams(lines=["X"], font_size_px=10), _tape(24)
-    )
+    label = CableFlagRenderer().render(CableFlagParams(lines=["X"], font_size_px=10), _tape(24))
     assert label.warnings == []
 
 
@@ -603,9 +595,7 @@ def test_flag_explicit_font_size_at_floor_still_unfittable_raises():
 # --- 11. Schema fidelity: every field carries a description -----------------
 
 
-@pytest.mark.parametrize(
-    "params_cls", [CableWrapParams, CableFlagParams], ids=lambda c: c.__name__
-)
+@pytest.mark.parametrize("params_cls", [CableWrapParams, CableFlagParams], ids=lambda c: c.__name__)
 def test_every_field_carries_a_description(params_cls):
     props = params_cls.model_json_schema()["properties"]
     for field_name, schema in props.items():

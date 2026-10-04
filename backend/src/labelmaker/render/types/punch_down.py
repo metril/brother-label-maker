@@ -101,9 +101,7 @@ def _to_engine_params(params: PunchDownParams) -> DividedBlocksParams:
     orientation = Orientation.BACKBONE if params.sequence == "backbone" else Orientation.HORIZONTAL
     return build_divided_blocks_params(
         "PunchDownParams",
-        blocks=[
-            BlockSpec(lines=_block_lines(params, i)) for i in range(params.n_blocks)
-        ],
+        blocks=[BlockSpec(lines=_block_lines(params, i)) for i in range(params.n_blocks)],
         total_length_mm=params.module_width_mm,
         separator=Separator.LINE,
         orientation=orientation,

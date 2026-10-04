@@ -9,6 +9,8 @@ test_homebox_live.py.
 
 from __future__ import annotations
 
+import contextlib
+
 import httpx
 import pytest
 import respx
@@ -16,6 +18,7 @@ import respx
 from labelmaker.homebox import (
     HomeBoxAuthError,
     HomeBoxClient,
+    HomeBoxError,
     HomeBoxNotFoundError,
     HomeBoxUnavailableError,
     HomeBoxVersionError,
@@ -230,3 +233,25 @@ async def test_base_url_trailing_slash_is_normalized():
         assert str(c._client.base_url) == "https://hb.test/api/v1/"
     finally:
         await c.close()
+
+
+@respx.mock
+async def test_ids_are_percent_encoded_into_one_path_segment(client):
+    route = respx.get(url__regex=rf"{API}/(entities|assets)/.*").mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+    with contextlib.suppress(Exception):  # only the requested URL matters here
+        await client.get_path("a/../../status?x=1#f")
+    assert route.calls.last.request.url.raw_path == (
+        b"/api/v1/entities/a%2F..%2F..%2Fstatus%3Fx%3D1%23f/path"
+    )
+    await client.find_by_asset_id("..")
+    assert route.calls.last.request.url.raw_path.endswith(b"/assets/%2E%2E")
+
+
+@respx.mock
+async def test_4xx_error_body_is_truncated(client):
+    respx.get(f"{API}/entities").mock(return_value=httpx.Response(400, text="x" * 5000))
+    with pytest.raises(HomeBoxError) as excinfo:
+        await client.list_entities()
+    assert len(str(excinfo.value)) < 400

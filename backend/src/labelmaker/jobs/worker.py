@@ -44,6 +44,7 @@ from labelmaker.driver.printer import (
 )
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.driver.raster import BitOrder, RasterConfig
+from labelmaker.driver.status import PrinterStatus, StatusType
 from labelmaker.driver.strategies import InitStrategy, get_strategy
 from labelmaker.driver.transport import (
     USB_LOCK,
@@ -63,6 +64,29 @@ logger = logging.getLogger(__name__)
 # new multiple of this many percentage points since the last broadcast (see
 # _make_progress_cb) -- at most ~11 broadcasts per job (0%, 10%, ..., 100%).
 _PROGRESS_BROADCAST_THRESHOLD_PERCENT = 10
+
+
+def _post_print_error(result: PrintResult) -> str | None:
+    """A printer ERROR_OCCURRED status in the post-print drain means the job
+    did not actually complete cleanly -- the caller fails the job with this
+    message (after recording the stream/tape used, which really was consumed)
+    rather than reporting "done". None when there is no such error."""
+    names: list[str] = []
+    for event in result.post_print_events:
+        if isinstance(event, PrinterStatus) and (
+            event.status_type is StatusType.ERROR_OCCURRED or event.has_error
+        ):
+            names.extend(event.errors or ["unspecified printer error"])
+    if names:
+        return "printer error after printing: " + ", ".join(dict.fromkeys(names))
+    return None
+
+
+async def _broadcast_final(bus: EventBus, job_id: str, error: str | None) -> None:
+    if error:
+        await bus.broadcast({"event": "job.failed", "job_id": job_id, "error": error})
+    else:
+        await bus.broadcast({"event": "job.done", "job_id": job_id})
 
 
 def _make_progress_cb(bus: EventBus, job_id: str) -> Callable[[int, int], None]:
@@ -170,7 +194,10 @@ async def _process_job(state, job_id: str) -> None:
         # silently rather than resurrecting/overwriting it.
         return
 
-    await db.update_job(job_id, status="printing")
+    # Compare-and-set (not a plain update_job): a cancel landing between the
+    # get_job above and this write must win, not be overwritten by "printing".
+    if not await db.start_job_if_queued(job_id):
+        return
     await bus.broadcast({"event": "job.started", "job_id": job_id})
 
     try:
@@ -259,16 +286,18 @@ async def _process_job(state, job_id: str) -> None:
         # resolve_tape, possibly TZe-assumed) -- the same "what's actually
         # loaded" source I1's tape-mismatch error message above already
         # relies on, not the label's merely-declared tape.
+        post_print_error = _post_print_error(result)
         await db.update_job(
             job_id,
-            status="done",
+            status="failed" if post_print_error else "done",
+            error=post_print_error,
             preview_png=thumbnail,
             strategy=result.job.strategy_name,
             tape_width_mm=result.tape.nominal_mm,
             media_raw_byte=result.status_before.media_type_raw,
             tape_used_mm=tape_estimate.total_mm,
         )
-        await bus.broadcast({"event": "job.done", "job_id": job_id})
+        await _broadcast_final(bus, job_id, post_print_error)
     except Exception as exc:
         await db.update_job(job_id, status="failed", error=str(exc))
         await bus.broadcast({"event": "job.failed", "job_id": job_id, "error": str(exc)})
@@ -327,15 +356,17 @@ async def _process_feed_cut_job(state, job_id: str, effective) -> None:
     # MIN_FEED_MM in practice, same as the design doc's own "~24.5mm" framing.
     tape_used_mm = max(dots_to_mm(result.job.total_raster_lines), MIN_FEED_MM)
 
+    post_print_error = _post_print_error(result)
     await db.update_job(
         job_id,
-        status="done",
+        status="failed" if post_print_error else "done",
+        error=post_print_error,
         strategy=result.job.strategy_name,
         tape_width_mm=result.tape.nominal_mm,
         media_raw_byte=result.status_before.media_type_raw,
         tape_used_mm=tape_used_mm,
     )
-    await bus.broadcast({"event": "job.done", "job_id": job_id})
+    await _broadcast_final(bus, job_id, post_print_error)
 
 
 def _open_feed_cut_close(

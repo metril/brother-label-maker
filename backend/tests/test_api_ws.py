@@ -124,3 +124,39 @@ def test_ws_tolerates_a_binary_frame_and_still_delivers_a_later_event(tmp_path):
         # if the binary frame had killed it.
         event = _receive_json_bounded(ws)
         assert event["event"] == "job.queued"
+
+
+async def test_broadcast_drops_a_hung_client_without_stalling_others(monkeypatch):
+    import asyncio
+
+    from labelmaker.jobs import events
+    from labelmaker.jobs.events import EventBus
+
+    monkeypatch.setattr(events, "_SEND_TIMEOUT_S", 0.05)
+
+    class _Hung:
+        closed = False
+
+        async def send_json(self, data):
+            await asyncio.sleep(3600)
+
+        async def close(self):
+            self.closed = True
+
+    class _Ok:
+        def __init__(self):
+            self.got = []
+
+        async def send_json(self, data):
+            self.got.append(data)
+
+    bus, hung, ok = EventBus(), _Hung(), _Ok()
+    bus.register(hung)
+    bus.register(ok)
+
+    await asyncio.wait_for(bus.broadcast({"event": "x"}), timeout=2)
+
+    assert ok.got == [{"event": "x"}]
+    assert hung not in bus._clients and ok in bus._clients
+    await asyncio.sleep(0)  # let the scheduled close() run
+    assert hung.closed is True

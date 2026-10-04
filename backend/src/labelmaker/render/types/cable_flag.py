@@ -311,12 +311,22 @@ class CableFlagRenderer(LabelRenderer):
 
         if params.font_size_px is None:
             fit_a = fit_font_size(
-                lines, params.font_family, *avail_a, params.bold,
-                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
+                lines,
+                params.font_family,
+                *avail_a,
+                params.bold,
+                line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX,
+                max_px=_MAX_FONT_PX,
             )
             fit_b = fit_font_size(
-                lines, params.font_family, *avail_b, params.bold,
-                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
+                lines,
+                params.font_family,
+                *avail_b,
+                params.bold,
+                line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX,
+                max_px=_MAX_FONT_PX,
             )
             font_px = min(fit_a, fit_b)
             if font_px <= _MIN_FONT_PX:
@@ -338,12 +348,22 @@ class CableFlagRenderer(LabelRenderer):
             # shrinking the font was all that was needed. See module
             # docstring and cable_wrap.py's own identical fix.
             fit_a = fit_font_size(
-                lines, params.font_family, *avail_a, params.bold,
-                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
+                lines,
+                params.font_family,
+                *avail_a,
+                params.bold,
+                line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX,
+                max_px=_MAX_FONT_PX,
             )
             fit_b = fit_font_size(
-                lines, params.font_family, *avail_b, params.bold,
-                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
+                lines,
+                params.font_family,
+                *avail_b,
+                params.bold,
+                line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX,
+                max_px=_MAX_FONT_PX,
             )
             font_px = min(params.font_size_px, fit_a, fit_b)
             if font_px < params.font_size_px:

@@ -247,7 +247,12 @@ def _effective_line_spacing(family: str, bold: bool) -> float:
 
 
 def _text_group(
-    cx: float, cy: float, lines: list[str], family: str, font_px: int, bold: bool,
+    cx: float,
+    cy: float,
+    lines: list[str],
+    family: str,
+    font_px: int,
+    bold: bool,
     line_spacing: float,
 ) -> str:
     """One instance's PRE-rotation SVG: `lines` centered (both axes) on
@@ -306,8 +311,14 @@ class CableWrapRenderer(LabelRenderer):
 
         if params.font_size_px is None:
             font_px = fit_font_size(
-                lines, params.font_family, cross_budget_px, length_budget_px, params.bold,
-                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
+                lines,
+                params.font_family,
+                cross_budget_px,
+                length_budget_px,
+                params.bold,
+                line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX,
+                max_px=_MAX_FONT_PX,
             )
             if font_px <= _MIN_FONT_PX:
                 warnings.append(
@@ -330,8 +341,14 @@ class CableWrapRenderer(LabelRenderer):
             # NOTHING in range satisfies both constraints) still doesn't
             # satisfy the cross-tape budget, i.e. genuinely unfittable.
             fit_px = fit_font_size(
-                lines, params.font_family, cross_budget_px, length_budget_px, params.bold,
-                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
+                lines,
+                params.font_family,
+                cross_budget_px,
+                length_budget_px,
+                params.bold,
+                line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX,
+                max_px=_MAX_FONT_PX,
             )
             font_px = min(params.font_size_px, fit_px)
             if font_px < params.font_size_px:

@@ -68,9 +68,7 @@ class PatchPanelParams(BaseModel):
     # 0.1-9.5 range is on the annotation itself, not a validator body, so
     # the bound reaches params_schema AND each out-of-range item gets its
     # own error `loc` instead of one opaque message for the whole list).
-    multipliers: (
-        list[Annotated[float, Field(ge=_MIN_MULTIPLIER, le=_MAX_MULTIPLIER)]] | None
-    ) = None
+    multipliers: list[Annotated[float, Field(ge=_MIN_MULTIPLIER, le=_MAX_MULTIPLIER)]] | None = None
     font_family: str = "Inter"
     bold: bool = False
     font_size_px: int | None = None

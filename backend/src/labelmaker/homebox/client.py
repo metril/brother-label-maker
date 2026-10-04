@@ -34,8 +34,22 @@ requirement into a clear message instead of a cascade of 404s.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+
+# Cap on how much of an upstream 4xx body is echoed into our own error message.
+_MAX_ERROR_BODY_CHARS = 200
+
+
+def _path_segment(value: str) -> str:
+    """Percent-encode a caller-supplied id for use as ONE URL path segment, so
+    `/`, `?`, `#` or `..` can't redirect the request (carrying the server's
+    API key) to a different HomeBox endpoint."""
+    encoded = quote(value, safe="")
+    # quote() leaves "." alone, so a bare "."/".." would still be a dot segment.
+    return encoded.replace(".", "%2E") if set(encoded) == {"."} else encoded
 
 
 class HomeBoxError(Exception):
@@ -205,7 +219,8 @@ class HomeBoxClient:
         if resp.status_code >= 500:
             raise HomeBoxUnavailableError(f"HomeBox server error (HTTP {resp.status_code})")
         if resp.status_code >= 400 and resp.status_code != 404:
-            raise HomeBoxError(f"HomeBox request failed (HTTP {resp.status_code}): {resp.text}")
+            body = resp.text[:_MAX_ERROR_BODY_CHARS]
+            raise HomeBoxError(f"HomeBox request failed (HTTP {resp.status_code}): {body}")
         return resp
 
     async def status(self) -> HomeBoxStatus:
@@ -265,7 +280,7 @@ class HomeBoxClient:
         return EntityPage.model_validate(resp.json())
 
     async def get_entity(self, entity_id: str) -> Entity:
-        resp = await self._get(f"/entities/{entity_id}")
+        resp = await self._get(f"/entities/{_path_segment(entity_id)}")
         if resp.status_code == 404:
             raise HomeBoxNotFoundError(f"HomeBox entity {entity_id} not found")
         return Entity.model_validate(resp.json())
@@ -273,7 +288,7 @@ class HomeBoxClient:
     async def get_path(self, entity_id: str) -> list[PathSegment]:
         """Root-first ancestor chain including the entity itself -- the
         breadcrumb source ("Garage > Shelf B > Bin 3")."""
-        resp = await self._get(f"/entities/{entity_id}/path")
+        resp = await self._get(f"/entities/{_path_segment(entity_id)}/path")
         if resp.status_code == 404:
             raise HomeBoxNotFoundError(f"HomeBox entity {entity_id} not found")
         return [PathSegment.model_validate(seg) for seg in resp.json()]
@@ -292,7 +307,7 @@ class HomeBoxClient:
         returns a list; callers replicate HomeBox's own zero/one/many
         disambiguation (research doc recommendation #40). A 404 is treated
         as zero matches."""
-        resp = await self._get(f"/assets/{asset_id}")
+        resp = await self._get(f"/assets/{_path_segment(asset_id)}")
         if resp.status_code == 404:
             return []
         return EntityPage.model_validate(resp.json()).items

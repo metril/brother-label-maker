@@ -138,8 +138,13 @@ async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_
     ETag must move in lockstep with the cached bytes.
     """
     entry_a = {
-        "id": "a", "name": "A", "tags": [], "path": "a.svg",
-        "category": "misc", "source": "test", "license": "test",
+        "id": "a",
+        "name": "A",
+        "tags": [],
+        "path": "a.svg",
+        "category": "misc",
+        "source": "test",
+        "license": "test",
     }
     _write_symbols_index(tmp_path, [entry_a])
     (tmp_path / "a.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
@@ -160,8 +165,13 @@ async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_
     # different nanosecond buckets on every filesystem) -- the exact
     # scenario the cache key is meant to detect: same path, changed content.
     entry_b = {
-        "id": "b", "name": "B", "tags": [], "path": "b.svg",
-        "category": "misc", "source": "test", "license": "test",
+        "id": "b",
+        "name": "B",
+        "tags": [],
+        "path": "b.svg",
+        "category": "misc",
+        "source": "test",
+        "license": "test",
     }
     _write_symbols_index(tmp_path, [entry_a, entry_b])
     (tmp_path / "b.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
@@ -245,10 +255,17 @@ async def test_symbol_svg_route_sets_nosniff_header_for_a_normal_symbol(client):
 
 
 async def test_symbol_svg_route_rejects_script_sibling(client, monkeypatch, tmp_path):
-    entries = [{
-        "id": "hostile_script", "name": "Hostile", "tags": [], "path": "hostile.svg",
-        "category": "misc", "source": "test", "license": "test",
-    }]
+    entries = [
+        {
+            "id": "hostile_script",
+            "name": "Hostile",
+            "tags": [],
+            "path": "hostile.svg",
+            "category": "misc",
+            "source": "test",
+            "license": "test",
+        }
+    ]
     _write_symbols_index(tmp_path, entries)
     (tmp_path / "hostile.svg").write_text(
         '<svg viewBox="0 0 24 24"><path d="M0 0"/><script>alert(1)</script></svg>'
@@ -260,10 +277,17 @@ async def test_symbol_svg_route_rejects_script_sibling(client, monkeypatch, tmp_
 
 
 async def test_symbol_svg_route_rejects_onload_attribute(client, monkeypatch, tmp_path):
-    entries = [{
-        "id": "hostile_onload", "name": "Hostile", "tags": [], "path": "hostile.svg",
-        "category": "misc", "source": "test", "license": "test",
-    }]
+    entries = [
+        {
+            "id": "hostile_onload",
+            "name": "Hostile",
+            "tags": [],
+            "path": "hostile.svg",
+            "category": "misc",
+            "source": "test",
+            "license": "test",
+        }
+    ]
     _write_symbols_index(tmp_path, entries)
     (tmp_path / "hostile.svg").write_text(
         '<svg viewBox="0 0 24 24" onload="alert(1)"><path d="M0 0"/></svg>'
@@ -275,10 +299,17 @@ async def test_symbol_svg_route_rejects_onload_attribute(client, monkeypatch, tm
 
 
 async def test_symbol_svg_route_rejects_xlink_href(client, monkeypatch, tmp_path):
-    entries = [{
-        "id": "hostile_xlink", "name": "Hostile", "tags": [], "path": "hostile.svg",
-        "category": "misc", "source": "test", "license": "test",
-    }]
+    entries = [
+        {
+            "id": "hostile_xlink",
+            "name": "Hostile",
+            "tags": [],
+            "path": "hostile.svg",
+            "category": "misc",
+            "source": "test",
+            "license": "test",
+        }
+    ]
     _write_symbols_index(tmp_path, entries)
     (tmp_path / "hostile.svg").write_text(
         '<svg viewBox="0 0 24 24"><path d="M0 0"/>'
@@ -302,11 +333,17 @@ async def test_symbol_svg_route_404s_when_manifest_path_escapes_symbols_dir(
     secret = outside / "secret.svg"
     secret.write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
 
-    entries = [{
-        "id": "escaping", "name": "Escaping", "tags": [],
-        "path": "../outside-symbols/secret.svg",
-        "category": "misc", "source": "test", "license": "test",
-    }]
+    entries = [
+        {
+            "id": "escaping",
+            "name": "Escaping",
+            "tags": [],
+            "path": "../outside-symbols/secret.svg",
+            "category": "misc",
+            "source": "test",
+            "license": "test",
+        }
+    ]
     _write_symbols_index(tmp_path, entries)
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 

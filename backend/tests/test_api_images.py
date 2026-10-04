@@ -829,3 +829,25 @@ async def test_get_image_full_route_carries_cache_and_conditional_headers(client
     assert resp.headers["cache-control"] == "public, max-age=86400"
     assert "etag" in resp.headers
     assert "last-modified" in resp.headers
+
+
+def test_generate_thumbnail_writes_via_temp_file_and_leaves_no_tmp(tmp_path, monkeypatch):
+    from labelmaker.api import router_images
+
+    src = tmp_path / "src.png"
+    src.write_bytes(_large_png_bytes())
+    dest = tmp_path / "thumbs" / "t.png"
+    replaced: list[tuple] = []
+    real_replace = os.replace
+
+    def _spy(a, b):
+        assert not dest.exists()  # nothing at the final path until the atomic rename
+        replaced.append((a, b))
+        real_replace(a, b)
+
+    monkeypatch.setattr(router_images.os, "replace", _spy)
+    router_images._generate_thumbnail(src, dest)
+
+    assert len(replaced) == 1 and replaced[0][1] == dest
+    assert dest.is_file()
+    assert [p.name for p in dest.parent.iterdir()] == ["t.png"]

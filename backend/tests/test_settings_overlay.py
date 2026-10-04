@@ -92,9 +92,7 @@ async def test_reload_drops_a_bogus_stored_row_and_falls_back(db, cfg, caplog):
     assert overlay.provenance("printer_mode") == "env"
 
     records = [r for r in caplog.records if r.name == "labelmaker.settings_overlay"]
-    assert any(
-        r.levelno == logging.WARNING and "printer_mode" in r.getMessage() for r in records
-    )
+    assert any(r.levelno == logging.WARNING and "printer_mode" in r.getMessage() for r in records)
 
 
 # -- provenance() ------------------------------------------------------------

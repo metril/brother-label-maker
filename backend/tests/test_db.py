@@ -114,9 +114,7 @@ async def test_preset_crud_and_list_ordering(monkeypatch):
                 # computes a timestamp before discovering the id doesn't match any row
             ]
         )
-        monkeypatch.setattr(
-            "labelmaker.db.database._utcnow", lambda: next(timestamps)
-        )
+        monkeypatch.setattr("labelmaker.db.database._utcnow", lambda: next(timestamps))
 
         p1 = await db.create_preset("A", "address", {"x": 1})
         p2 = await db.create_preset("B", "address", {"x": 2}, favorite=True)
@@ -629,9 +627,7 @@ async def test_migration_gap_fill_applies_missing_version_below_already_applied_
     custom_dir = tmp_path / "migrations"
     custom_dir.mkdir()
     shutil.copy(_MIGRATIONS_DIR / "0001_init.sql", custom_dir / "0001_init.sql")
-    (custom_dir / "0003_add_note3.sql").write_text(
-        "ALTER TABLE presets ADD COLUMN note3 TEXT;\n"
-    )
+    (custom_dir / "0003_add_note3.sql").write_text("ALTER TABLE presets ADD COLUMN note3 TEXT;\n")
 
     db_path = tmp_path / "gapfill.db"
     db = await Database.open(db_path, migrations_dir=custom_dir)
@@ -643,9 +639,7 @@ async def test_migration_gap_fill_applies_missing_version_below_already_applied_
     # 0002 lands in the migrations dir AFTER 0003 was already applied to
     # this db file -- a gap below the recorded max. Re-opening must still
     # apply it.
-    (custom_dir / "0002_add_note2.sql").write_text(
-        "ALTER TABLE presets ADD COLUMN note2 TEXT;\n"
-    )
+    (custom_dir / "0002_add_note2.sql").write_text("ALTER TABLE presets ADD COLUMN note2 TEXT;\n")
 
     db2 = await Database.open(db_path, migrations_dir=custom_dir)
     try:
@@ -676,8 +670,7 @@ async def test_migration_runs_in_a_transaction_rolls_back_on_failure(tmp_path):
     custom_dir = tmp_path / "migrations"
     custom_dir.mkdir()
     (custom_dir / "0001_init.sql").write_text(
-        "CREATE TABLE foo (id INTEGER PRIMARY KEY);\n"
-        "CREATE TABLE this is not valid sql (;\n"
+        "CREATE TABLE foo (id INTEGER PRIMARY KEY);\nCREATE TABLE this is not valid sql (;\n"
     )
 
     db_path = tmp_path / "broken.db"
@@ -720,9 +713,7 @@ async def test_migration_0003_adds_print_jobs_kind_column_applied_exactly_once(t
     # other migration in this suite is held to).
     db2 = await Database.open(db_path)
     try:
-        cur = await db2._conn.execute(
-            "SELECT COUNT(*) FROM schema_migrations WHERE version = 3"
-        )
+        cur = await db2._conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE version = 3")
         (count,) = await cur.fetchone()
         assert count == 1
     finally:
@@ -752,5 +743,22 @@ async def test_print_jobs_kind_defaults_to_print_and_accepts_feed_cut():
         kinds = {item["id"]: item["kind"] for item in listed["items"]}
         assert kinds[default_job["id"]] == "print"
         assert kinds[feed_cut_job["id"]] == "feed_cut"
+    finally:
+        await db.close()
+
+
+async def test_start_job_if_queued_is_a_cas():
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        assert await db.start_job_if_queued(job["id"]) is True
+        assert (await db.get_job(job["id"]))["status"] == "printing"
+        assert await db.start_job_if_queued(job["id"]) is False  # no longer queued
+
+        canceled = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        assert await db.cancel_job_if_queued(canceled["id"]) is True
+        assert await db.start_job_if_queued(canceled["id"]) is False
+        assert (await db.get_job(canceled["id"]))["status"] == "canceled"
+        assert await db.start_job_if_queued("does-not-exist") is False
     finally:
         await db.close()

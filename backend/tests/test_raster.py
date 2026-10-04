@@ -23,6 +23,7 @@ from labelmaker.driver.raster import (
     encode_image,
     encode_line,
     image_to_pin_lines,
+    set_pin,
 )
 
 TAPE_24MM = find_tape(24, MediaFamily.TZE)  # left_pin=0, print_dots=128
@@ -135,8 +136,22 @@ def test_encode_line_zero_raw():
 def test_encode_line_packbits_roundtrip():
     line = bytes(
         [
-            0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0xFF,
-            0xFF, 0x10, 0x20, 0x30, 0x40, 0x50, 0x00, 0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x02,
+            0x03,
+            0xFF,
+            0xFF,
+            0x10,
+            0x20,
+            0x30,
+            0x40,
+            0x50,
+            0x00,
+            0x00,
         ]
     )
     assert len(line) == BYTES_PER_LINE
@@ -246,3 +261,37 @@ def test_encode_image_matches_encode_line_over_pin_lines():
     pin_lines = image_to_pin_lines(img, TAPE_12MM)
     expected = [encode_line(pins, Compression.PACKBITS) for pins in pin_lines]
     assert frames == expected
+
+
+def _legacy_image_to_pin_lines(img: Image.Image, tape: TapeSpec, config: RasterConfig):
+    """The original per-pixel implementation, kept as a byte-exact oracle."""
+    pixels = img.load()
+    lines = []
+    for x in range(img.width):
+        line = bytearray(16)
+        for y in range(tape.print_dots):
+            if pixels[x, y] == 0:
+                pin = (
+                    tape.left_pin + y
+                    if config.flip_pins
+                    else tape.left_pin + tape.print_dots - 1 - y
+                )
+                set_pin(line, pin, config.bit_order)
+        lines.append(bytes(line))
+    return lines
+
+
+@pytest.mark.parametrize("tape", all_tapes(), ids=lambda t: f"{t.family.name}-{t.nominal_mm}")
+@pytest.mark.parametrize("flip", [False, True])
+@pytest.mark.parametrize("order", list(BitOrder))
+def test_image_to_pin_lines_matches_legacy_per_pixel_implementation(tape, flip, order):
+    import random
+
+    rng = random.Random(f"{tape.nominal_mm}{flip}{order}")
+    config = RasterConfig(bit_order=order, flip_pins=flip)
+    for width in (1, 7, 64):
+        img = Image.new("1", (width, tape.print_dots), 1)
+        img.putdata([rng.choice((0, 1)) for _ in range(width * tape.print_dots)])
+        assert image_to_pin_lines(img, tape, config) == _legacy_image_to_pin_lines(
+            img, tape, config
+        )

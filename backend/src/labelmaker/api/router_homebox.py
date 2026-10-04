@@ -92,8 +92,13 @@ async def homebox_status(settings: SettingsDep) -> dict:
     """
     effective = settings.effective()
     if not (effective.homebox_url and effective.homebox_api_key):
-        return {"configured": False, "reachable": None, "healthy": None, "version": None,
-                "error": None}
+        return {
+            "configured": False,
+            "reachable": None,
+            "healthy": None,
+            "version": None,
+            "error": None,
+        }
     from labelmaker.homebox import HomeBoxClient  # narrow import for monkeypatching in tests
 
     version: str | None = None
@@ -109,18 +114,33 @@ async def homebox_status(settings: SettingsDep) -> dict:
             await probe_client.close()
     except HomeBoxVersionError as exc:
         # Server answers but speaks the pre-merge API generation.
-        return {"configured": True, "reachable": True, "healthy": False, "version": version,
-                "error": str(exc)}
+        return {
+            "configured": True,
+            "reachable": True,
+            "healthy": False,
+            "version": version,
+            "error": str(exc),
+        }
     except HomeBoxError as exc:
-        return {"configured": True, "reachable": False, "healthy": None, "version": None,
-                "error": str(exc)}
+        return {
+            "configured": True,
+            "reachable": False,
+            "healthy": None,
+            "version": None,
+            "error": str(exc),
+        }
     except Exception as exc:  # noqa: B902 -- non-JSON / non-HomeBox response shape
         # Whatever answered at HOMEBOX_URL is not a HomeBox API (SSO login
         # page, default vhost, ...). This endpoint's contract is "always
         # 200"; a 500 here would read as "the app is broken" instead of
         # "HomeBox is misconfigured".
-        return {"configured": True, "reachable": False, "healthy": None, "version": None,
-                "error": f"HomeBox URL answered, but not with a HomeBox API response: {exc}"}
+        return {
+            "configured": True,
+            "reachable": False,
+            "healthy": None,
+            "version": None,
+            "error": f"HomeBox URL answered, but not with a HomeBox API response: {exc}",
+        }
     return {
         "configured": True,
         "reachable": True,
@@ -144,7 +164,9 @@ async def list_entities(
 ) -> EntityPage:
     return await _proxy(
         homebox.list_entities(
-            q=q, page=page, page_size=page_size,
+            q=q,
+            page=page,
+            page_size=page_size,
             parent_ids=[parent_id] if parent_id else None,
         )
     )

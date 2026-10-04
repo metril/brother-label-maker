@@ -139,9 +139,7 @@ def test_height_px_equals_print_dots_12mm():
 
 def test_auto_length_grows_with_text_length():
     tape = _tape(24)
-    short = TextLabelRenderer().render(
-        TextLabelParams(lines=["A"], font_size_px=20), tape
-    )
+    short = TextLabelRenderer().render(TextLabelParams(lines=["A"], font_size_px=20), tape)
     long = TextLabelRenderer().render(
         TextLabelParams(lines=["A LONG STRING OF LABEL TEXT"], font_size_px=20), tape
     )
@@ -150,25 +148,19 @@ def test_auto_length_grows_with_text_length():
 
 def test_fixed_length_honored_exactly():
     tape = _tape(24)
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], length_mm=40.0), tape
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["HI"], length_mm=40.0), tape)
     assert label.width_px == mm_to_dots(40.0)
 
 
 def test_fixed_length_clamped_to_min_label_mm():
     tape = _tape(24)
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], length_mm=0.1), tape
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["HI"], length_mm=0.1), tape)
     assert label.width_px == mm_to_dots(MIN_LABEL_MM)
 
 
 def test_fixed_length_clamped_to_tape_max_length_mm():
     tape = _tape(24)
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], length_mm=99999.0), tape
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["HI"], length_mm=99999.0), tape)
     assert label.width_px == mm_to_dots(tape.max_length_mm)
 
 
@@ -183,9 +175,7 @@ def test_auto_length_at_least_min_label_mm():
 
 def test_explicit_font_size_clamped_to_print_area_height():
     tiny_tape = _tape(3.5)  # print_dots == 24
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["A"], font_size_px=128), tiny_tape
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["A"], font_size_px=128), tiny_tape)
     assert 'font-size="128"' not in label.svg
     assert label.height_px == 24
 
@@ -195,9 +185,7 @@ def test_explicit_font_size_clamped_to_print_area_height():
 
 def test_cramped_auto_size_triggers_warning():
     tiny_tape = _tape(3.5)  # print_dots == 24
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["A", "B", "C", "D"]), tiny_tape
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["A", "B", "C", "D"]), tiny_tape)
     assert any(w.code == "text_cramped" for w in label.warnings)
     assert all(w.severity == "warning" for w in label.warnings)
 
@@ -229,16 +217,12 @@ def test_fixed_length_no_truncation_no_clip():
 
 def test_explicit_font_size_reduced_by_height_fit_triggers_font_clamped_warning():
     tiny_tape = _tape(3.5)  # print_dots == 24: 128px explicitly asked for cannot fit
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["A"], font_size_px=128), tiny_tape
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["A"], font_size_px=128), tiny_tape)
     assert any(w.code == "font_clamped" for w in label.warnings)
 
 
 def test_explicit_font_size_that_already_fits_has_no_font_clamped_warning():
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], font_size_px=20), _tape(24)
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["HI"], font_size_px=20), _tape(24))
     assert label.warnings == []
 
 
@@ -249,9 +233,7 @@ def test_explicit_font_size_that_already_fits_has_no_font_clamped_warning():
     "h_align,anchor", [("left", "start"), ("center", "middle"), ("right", "end")]
 )
 def test_h_align_maps_to_text_anchor(h_align, anchor):
-    label = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], h_align=h_align), _tape(24)
-    )
+    label = TextLabelRenderer().render(TextLabelParams(lines=["HI"], h_align=h_align), _tape(24))
     assert f'text-anchor="{anchor}"' in label.svg
 
 
@@ -424,9 +406,7 @@ def test_params_icon_unknown_kind_rejected():
 
 def test_params_icon_image_threshold_out_of_range_rejected():
     with pytest.raises(ValidationError):
-        TextLabelParams(
-            lines=["HI"], icon={"kind": "image", "image_id": "x", "threshold": 300}
-        )
+        TextLabelParams(lines=["HI"], icon={"kind": "image", "image_id": "x", "threshold": 300})
 
 
 # -- symbol icon: layout ------------------------------------------------------
@@ -457,9 +437,7 @@ def test_symbol_icon_shifts_left_aligned_text_right_by_icon_plus_padding():
     with_icon = TextLabelRenderer().render(
         TextLabelParams(lines=["HI"], h_align="left", icon=SymbolIcon(id="bolt")), tape
     )
-    without_icon = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], h_align="left"), tape
-    )
+    without_icon = TextLabelRenderer().render(TextLabelParams(lines=["HI"], h_align="left"), tape)
     assert f'x="{expected_x}"' in with_icon.svg
     # sanity: the no-icon render uses plain padding_px as its left edge, a
     # different (smaller) x than the icon case -- proves the shift is real,
@@ -473,9 +451,7 @@ def test_symbol_icon_auto_width_grows_to_fit_icon_plus_text():
     with_icon = TextLabelRenderer().render(
         TextLabelParams(lines=["HI"], font_size_px=20, icon=SymbolIcon(id="bolt")), tape
     )
-    without_icon = TextLabelRenderer().render(
-        TextLabelParams(lines=["HI"], font_size_px=20), tape
-    )
+    without_icon = TextLabelRenderer().render(TextLabelParams(lines=["HI"], font_size_px=20), tape)
     assert with_icon.width_px > without_icon.width_px
 
 
@@ -630,9 +606,7 @@ def test_overflowing_text_never_draws_inside_the_icon_square(h_align):
     tape = _tape(24)
     icon = SymbolIcon(id="bolt")
 
-    clean_pixels, clean_warnings = _icon_square_pixels(
-        tape, icon, ["X"], h_align, font_size_px=20
-    )
+    clean_pixels, clean_warnings = _icon_square_pixels(tape, icon, ["X"], h_align, font_size_px=20)
     assert clean_warnings == []
 
     overflow_pixels, overflow_warnings = _icon_square_pixels(
