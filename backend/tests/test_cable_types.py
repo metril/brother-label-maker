@@ -30,7 +30,9 @@ from pydantic import ValidationError
 from labelmaker.driver.geometry import mm_to_dots
 from labelmaker.render.document import Tape
 from labelmaker.render.fonts import extent_ratio
+from labelmaker.render.objects import qr_fit_group
 from labelmaker.render.rasterize import preview_png, rasterize
+from labelmaker.render.serialize import Sequence, SequenceKind, expand_definition
 from labelmaker.render.types import get_renderer, list_types
 from labelmaker.render.types.cable_flag import (
     CableFlagParams,
@@ -626,6 +628,104 @@ def test_cable_flag_diameter_and_flag_length_bounds_visible_in_schema():
     assert props["cable_diameter_mm"]["maximum"] == 90
     assert props["flag_length_mm"]["minimum"] == 5
     assert props["flag_length_mm"]["maximum"] == 100
+
+
+# --- 11b. Optional QR (qr_data) ----------------------------------------------
+
+_QR = "https://hb.example/a/000-001"
+
+
+def _qr_svg(tape) -> str:
+    return qr_fit_group(_QR, tape.print_dots)[0]
+
+
+def test_wrap_qr_none_has_no_qr_and_matches_default():
+    tape = _tape(24)
+    base = CableWrapRenderer().render(CableWrapParams(lines=["X"], cable_diameter_mm=40), tape)
+    explicit = CableWrapRenderer().render(
+        CableWrapParams(lines=["X"], cable_diameter_mm=40, qr_data=None), tape
+    )
+    assert base.svg == explicit.svg
+    assert base.svg.count("<text") > 1
+
+
+def test_wrap_qr_replaces_only_first_instance():
+    tape = _tape(24)
+    params = dict(lines=["X"], cable_diameter_mm=40)
+    plain = CableWrapRenderer().render(CableWrapParams(**params), tape)
+    with_qr = CableWrapRenderer().render(CableWrapParams(**params, qr_data=_QR), tape)
+    assert with_qr.width_px == plain.width_px
+    assert with_qr.svg.count(_qr_svg(tape)) == 1
+    assert with_qr.svg.count("<text") < plain.svg.count("<text")
+    assert not [w for w in with_qr.warnings if w.code == "qr_curved"]
+
+
+def test_wrap_qr_repeat_false_is_qr_only():
+    label = CableWrapRenderer().render(
+        CableWrapParams(lines=["X"], cable_diameter_mm=40, repeat=False, qr_data=_QR), _tape(24)
+    )
+    assert "<text" not in label.svg
+
+
+def test_wrap_qr_is_capped_to_label_length_or_raises():
+    # 3mm cable -> ~102px label on a 24mm tape: QR must shrink to fit, never overflow
+    params = CableWrapParams(lines=["X"], cable_diameter_mm=3, qr_data=_QR)
+    label = CableWrapRenderer().render(params, _tape(24))
+    assert not re.search(r'translate\(-', label.svg)
+    long_data = "x" * 1000  # needs far more modules than the label's length can hold
+    with pytest.raises(ValueError):
+        CableWrapRenderer().render(
+            CableWrapParams(lines=["X"], cable_diameter_mm=3, qr_data=long_data), _tape(24)
+        )
+
+
+def test_wrap_qr_warns_on_small_cable():
+    label = CableWrapRenderer().render(
+        CableWrapParams(lines=["X"], cable_diameter_mm=6, qr_data=_QR), _tape(24)
+    )
+    assert [w.code for w in label.warnings if w.code == "qr_curved"] == ["qr_curved"]
+
+
+def _flag(placement, qr=_QR, flag_length_mm=40):
+    return CableFlagRenderer().render(
+        CableFlagParams(
+            lines=["X"], flag_length_mm=flag_length_mm, qr_data=qr, qr_placement=placement
+        ),
+        _tape(24),
+    )
+
+
+def test_flag_qr_none_unchanged_and_placement_ignored():
+    tape = _tape(24)
+    base = CableFlagRenderer().render(CableFlagParams(lines=["X"], flag_length_mm=40), tape)
+    assert _flag("both", qr=None).svg == base.svg
+    assert _flag("flag_a", qr=None).svg == base.svg
+
+
+def test_flag_qr_placement_flag_a_and_both():
+    tape = _tape(24)
+    base = CableFlagRenderer().render(CableFlagParams(lines=["X"], flag_length_mm=40), tape)
+    qr = _qr_svg(tape)
+    a, both = _flag("flag_a"), _flag("both")
+    assert a.svg.count(qr) == 1 and a.svg.count("<text") == base.svg.count("<text") // 2
+    assert both.svg.count(qr) == 2 and both.svg.count("<text") == base.svg.count("<text")
+    assert a.width_px == both.width_px == base.width_px
+
+
+def test_flag_qr_flag_too_short_for_qr_and_text_raises():
+    # "both" on a very short flag leaves no room for text -> clean ValueError, not a crash
+    with pytest.raises(ValueError):
+        _flag("both", flag_length_mm=5)
+
+
+def test_expand_definition_passes_seq_and_csv_tokens_through_qr_data():
+    d = {"type": "cable_wrap", "params": {"lines": ["x"], "qr_data": "u/{seq}/{csv.n}"}}
+    seq = Sequence(kind=SequenceKind.CSV, rows=[{"n": "a"}, {"n": "b"}])
+    out = expand_definition(d, seq)
+    assert [o["params"]["qr_data"] for o in out] == ["u/1/a", "u/2/b"]
+    d2 = {"type": "cable_wrap", "params": {"lines": ["x"], "qr_data": "u/{seq}"}}
+    seq2 = Sequence(kind=SequenceKind.NUMERIC, start=7, count=2)
+    assert [o["params"]["qr_data"] for o in expand_definition(d2, seq2)] == ["u/7", "u/8"]
 
 
 # --- 12. Golden PNGs: byte-locked against committed files -------------------

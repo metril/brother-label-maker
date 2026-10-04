@@ -110,6 +110,47 @@ export function buildHomeboxLabelDefinition(
   };
 }
 
+/** Which label type an entity row's "Add to tray" builds. */
+export type HomeboxLabelKind = "homebox_asset" | "cable_wrap" | "cable_flag";
+
+/** Backend bounds for cable_wrap/cable_flag `lines` (see render/types/cable_wrap.py). */
+const CABLE_MAX_LINES = 2;
+const CABLE_MAX_LINE_CHARS = 30;
+
+/** The URL a printed QR should resolve to: `${base}/a/${asset_id}` when the
+ * entity has an asset id, else `${base}/item/${id}` (`/location/${id}` for
+ * locations). Null when no base URL is configured -- never fabricates a host. */
+export function homeboxQrUrl(entity: HomeboxEntitySummary, qrBaseUrl: string | null): string | null {
+  if (qrBaseUrl == null) return null;
+  if (entity.entity_type?.is_location) return `${qrBaseUrl}/location/${entity.id}`;
+  return entity.asset_id ? `${qrBaseUrl}/a/${entity.asset_id}` : `${qrBaseUrl}/item/${entity.id}`;
+}
+
+/** LabelDefinition for a cable_wrap / cable_flag label of one entity: lines
+ * default to [name, asset id] (trailing blank dropped, each clamped to the
+ * type's 30-char / 2-line limits); `qr_data` is set only when a QR base URL
+ * is configured. `params` override the defaults (e.g. cable_diameter_mm). */
+export function buildHomeboxCableLabelDefinition(
+  entity: HomeboxEntitySummary,
+  kind: "cable_wrap" | "cable_flag",
+  qrBaseUrl: string | null,
+  tape: Tape,
+  params: Record<string, unknown> = {},
+): LabelDefinition {
+  const lines = [entity.name, entity.asset_id]
+    .map((line) => clamp(line.trim(), CABLE_MAX_LINE_CHARS))
+    .filter((line, i) => line !== "" || i === 0)
+    .slice(0, CABLE_MAX_LINES);
+  // Backend requires at least one non-blank line: fall back to a short entity id.
+  if (!lines[0]) lines[0] = entity.id.slice(0, CABLE_MAX_LINE_CHARS);
+  const qr = homeboxQrUrl(entity, qrBaseUrl);
+  return {
+    type: kind,
+    tape,
+    params: { lines, ...(qr != null ? { qr_data: qr } : {}), ...params },
+  };
+}
+
 /** The tray item's own short caption (TrayItem.label, components/
  * TrayItemRow.tsx) -- "type title + name", the same "Type — text" shape
  * lib/tray.ts's describeCurrentDesign gives every Designer-added item, so a

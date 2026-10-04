@@ -115,6 +115,16 @@ label's length with >= 2mm gaps between them, evenly centered as one block
 inside the (padded) length budget. `repeat=False`: exactly one instance,
 centered on the whole label -- which is just the n=1 case of the same
 tiling formula, not a separate code path.
+
+-- Optional QR --
+
+`qr_data` (default None -> output unchanged) replaces the FIRST repeated
+instance with a QR sized to the tape's print height (objects.qr_fit_group),
+rotated like the text (and capped to the label's own length budget, raising
+ValueError if even the smallest QR can't fit); the remaining repeats stay text, and the tiling
+reserves the QR's own (square) length for slot 0. A `qr_curved` warning is
+emitted when the QR is wider than 1/3 of the wrap's circumference (pi *
+cable_diameter_mm), since a code bent around a small cable scans poorly.
 """
 
 from __future__ import annotations
@@ -134,6 +144,7 @@ from labelmaker.render.document import (
     _text_element,
 )
 from labelmaker.render.fonts import extent_ratio, fit_font_size, font_path, list_fonts, measure_text
+from labelmaker.render.objects import qr_fit_group
 from labelmaker.render.types.base import LabelRenderer, register
 
 _LINE_SPACING = 1.15
@@ -142,6 +153,7 @@ _MAX_FONT_PX = 128
 _MAX_LINE_CHARS = 30
 _MAX_LINES = 2
 _MIN_GAP_MM = 2.0  # minimum edge-to-edge gap between repeated instances
+_QR_MAX_CIRCUMFERENCE_FRACTION = 1 / 3
 _VALID_FAMILIES = {f.family for f in list_fonts()}
 
 
@@ -175,6 +187,13 @@ class CableWrapParams(BaseModel):
         description=(
             "repeat the text as many times as fit around the wrap with >= 2mm gaps; "
             "False prints a single instance centered on the label"
+        ),
+    )
+    qr_data: str | None = Field(
+        None,
+        description=(
+            "optional QR payload; renders a QR (sized to the tape height) in place of the "
+            "first text instance"
         ),
     )
     font_family: str = Field("Inter", description="font family name (see GET /api/fonts)")
@@ -274,6 +293,21 @@ def _text_group(
     return "".join(parts)
 
 
+def _tile_centers_with_first(
+    n: int, first_len_px: float, instance_len_px: float, budget_px: float, padding_px: int
+) -> list[float]:
+    """Like `_tile_centers`, but slot 0 is `first_len_px` wide (the QR)."""
+    content = first_len_px + (n - 1) * instance_len_px
+    gap_px = 0.0 if n <= 1 else (budget_px - content) / (n - 1)
+    start_x = padding_px + (budget_px - (content + (n - 1) * gap_px)) / 2
+    centers = [start_x + first_len_px / 2]
+    x = start_x + first_len_px + gap_px
+    for _ in range(n - 1):
+        centers.append(x + instance_len_px / 2)
+        x += instance_len_px + gap_px
+    return centers
+
+
 def _tile_centers(n: int, instance_len_px: float, budget_px: float, padding_px: int) -> list[float]:
     """n evenly-spaced instance centers (each instance `instance_len_px`
     wide), packed with exactly the caller-computed gap between them,
@@ -364,14 +398,52 @@ class CableWrapRenderer(LabelRenderer):
         instance_len_px = len(lines) * line_height_px
         gap_px = mm_to_dots(_MIN_GAP_MM)
 
+        qr_group = ""
+        qr_size_px = 0
+        if params.qr_data is not None:
+            qr_group, qr_size_px, qr_warnings = qr_fit_group(
+                params.qr_data, min(height_px, length_budget_px)
+            )
+            warnings.extend(qr_warnings)
+            circumference_px = mm_to_dots(math.pi * params.cable_diameter_mm)
+            if qr_size_px > circumference_px * _QR_MAX_CIRCUMFERENCE_FRACTION:
+                warnings.append(
+                    RenderWarning(
+                        code="qr_curved",
+                        message=(
+                            f"QR code ({qr_size_px}px) is wider than 1/3 of the cable "
+                            "circumference; it may scan poorly once wrapped -- use a "
+                            "larger cable or a narrower tape"
+                        ),
+                    )
+                )
+
         if params.repeat:
-            n = max(1, math.floor((length_budget_px + gap_px) / (instance_len_px + gap_px)))
+            if qr_group:
+                n = 1 + max(
+                    0, math.floor((length_budget_px - qr_size_px) / (instance_len_px + gap_px))
+                )
+            else:
+                n = max(1, math.floor((length_budget_px + gap_px) / (instance_len_px + gap_px)))
         else:
             n = 1
 
         cy = height_px / 2
         body_parts = []
-        for cx in _tile_centers(n, instance_len_px, length_budget_px, padding_px):
+        if qr_group:
+            centers = _tile_centers_with_first(
+                n, qr_size_px, instance_len_px, length_budget_px, padding_px
+            )
+        else:
+            centers = _tile_centers(n, instance_len_px, length_budget_px, padding_px)
+        for i, cx in enumerate(centers):
+            if i == 0 and qr_group:
+                qr_pos = f"{_fmt_num(cx - qr_size_px / 2)},{_fmt_num(cy - qr_size_px / 2)}"
+                body_parts.append(
+                    f'<g transform="rotate(-90, {_fmt_num(cx)}, {_fmt_num(cy)})">'
+                    f'<g transform="translate({qr_pos})">{qr_group}</g></g>'
+                )
+                continue
             group = _text_group(
                 cx, cy, lines, params.font_family, font_px, params.bold, line_spacing
             )

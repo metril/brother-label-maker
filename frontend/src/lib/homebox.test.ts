@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBreadcrumb, buildHomeboxLabelDefinition, describeHomeboxEntity, matchesAssetIdShape, stripAssetIdHash } from "./homebox";
+import { buildBreadcrumb, buildHomeboxCableLabelDefinition, buildHomeboxLabelDefinition, homeboxQrUrl, describeHomeboxEntity, matchesAssetIdShape, stripAssetIdHash } from "./homebox";
 import type { HomeboxEntitySummary, HomeboxPathSegment } from "../api/types";
 
 function entity(overrides: Partial<HomeboxEntitySummary> = {}): HomeboxEntitySummary {
@@ -153,5 +153,40 @@ describe("describeHomeboxEntity", () => {
     expect(describeHomeboxEntity(entity({ name: "Shelf B", entity_type: { id: "et-2", name: "", is_location: true } }))).toBe(
       "HomeBox Location — Shelf B",
     );
+  });
+});
+
+describe("homeboxQrUrl", () => {
+  const BASE = "https://homebox.example.com";
+
+  it("prefers the asset-id URL, falls back to item/location by entity id, and is null without a base", () => {
+    expect(homeboxQrUrl(entity(), BASE)).toBe(`${BASE}/a/000-001`);
+    expect(homeboxQrUrl(entity({ asset_id: "" }), BASE)).toBe(`${BASE}/item/entity-1`);
+    expect(homeboxQrUrl(entity({ entity_type: { id: "l", name: "", is_location: true } }), BASE)).toBe(`${BASE}/location/entity-1`);
+    expect(homeboxQrUrl(entity(), null)).toBeNull();
+  });
+});
+
+describe("buildHomeboxCableLabelDefinition", () => {
+  const TAPE = { width_mm: 12, family: "tze" as const };
+
+  it("defaults lines to [name, asset id] with qr_data when a base is configured", () => {
+    expect(buildHomeboxCableLabelDefinition(entity(), "cable_wrap", "https://hb.example", TAPE)).toEqual({
+      type: "cable_wrap",
+      tape: TAPE,
+      params: { lines: ["Impact Driver", "000-001"], qr_data: "https://hb.example/a/000-001" },
+    });
+  });
+
+  it("omits qr_data without a base, drops a blank second line, clamps to 30 chars, and lets params override", () => {
+    const def = buildHomeboxCableLabelDefinition(entity({ name: "x".repeat(40), asset_id: "" }), "cable_flag", null, TAPE, {
+      qr_placement: "both",
+    });
+    expect(def.params).toEqual({ lines: [`${"x".repeat(29)}…`], qr_placement: "both" });
+  });
+
+  it("falls back to the entity id when name and asset id are both blank", () => {
+    const def = buildHomeboxCableLabelDefinition(entity({ name: " ", asset_id: "" }), "cable_wrap", null, TAPE);
+    expect(def.params).toEqual({ lines: ["entity-1"] });
   });
 });
