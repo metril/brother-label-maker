@@ -10,3 +10,5 @@ dist/
 /data/
 backend/data/
 .coverage
+docs/
+superpowers/
