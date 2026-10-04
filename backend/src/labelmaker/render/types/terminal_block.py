@@ -119,10 +119,14 @@ class TerminalBlockParams(BaseModel):
         "vertical",
         description="text direction: vertical (default -- narrow strip) or horizontal",
     )
-    separator: Separator = Field(Separator.LINE, description="mark drawn on each terminal boundary")
+    separator: Separator = Field(
+        Separator.LINE, description="mark drawn on each terminal boundary"
+    )
     font_family: str = Field("Inter", description="font family name (see GET /api/fonts)")
     bold: bool = Field(False, description="bold text weight")
-    font_size_px: int | None = Field(None, description="fixed font size in px; omit for auto-fit")
+    font_size_px: int | None = Field(
+        None, description="fixed font size in px; omit for auto-fit"
+    )
     padding_mm: float = Field(
         default=1.0, ge=0, description="inner text padding on every side of each block"
     )
@@ -153,7 +157,9 @@ def _terminal_text(params: TerminalBlockParams, index: int) -> list[str]:
 def _to_engine_params(params: TerminalBlockParams) -> DividedBlocksParams:
     return build_divided_blocks_params(
         "TerminalBlockParams",
-        blocks=[BlockSpec(lines=_terminal_text(params, i)) for i in range(params.n_terminals)],
+        blocks=[
+            BlockSpec(lines=_terminal_text(params, i)) for i in range(params.n_terminals)
+        ],
         block_length_mm=params.pitch_mm,
         separator=params.separator,
         orientation=params.orientation,

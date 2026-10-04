@@ -205,9 +205,7 @@ class SettingsOverlay:
                 logger.warning(
                     "settings_overlay: dropping invalid stored override %r=%r for field "
                     "%r (no longer a valid value) -- falling back to its env/default value",
-                    key,
-                    value,
-                    field,
+                    key, value, field,
                 )
                 continue
             overrides[field] = getattr(validated, field)

@@ -278,7 +278,8 @@ class Database:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
         cur = await self._conn.execute(
-            f"SELECT * FROM presets {where} ORDER BY favorite DESC, updated_at DESC, rowid DESC",
+            f"SELECT * FROM presets {where} "
+            "ORDER BY favorite DESC, updated_at DESC, rowid DESC",
             params,
         )
         rows = await cur.fetchall()
@@ -441,7 +442,9 @@ class Database:
 
         set_clauses = ", ".join(f"{key} = ?" for key in fields)
         params = [*fields.values(), job_id]
-        cur = await self._conn.execute(f"UPDATE print_jobs SET {set_clauses} WHERE id = ?", params)
+        cur = await self._conn.execute(
+            f"UPDATE print_jobs SET {set_clauses} WHERE id = ?", params
+        )
         if cur.rowcount == 0:
             return None
         return await self.get_job(job_id)

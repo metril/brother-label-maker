@@ -141,7 +141,9 @@ async def test_feed_cut_job_id_type_matches_post_print(app_and_client):
 # --- 2. No-printer path: PyUsbTransport.open monkeypatched -----------------
 
 
-async def test_feed_cut_usb_no_printer_job_fails_cleanly_with_error_surfaced(tmp_path, monkeypatch):
+async def test_feed_cut_usb_no_printer_job_fails_cleanly_with_error_surfaced(
+    tmp_path, monkeypatch
+):
     def _raise_not_found(*args, **kwargs):
         raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
 

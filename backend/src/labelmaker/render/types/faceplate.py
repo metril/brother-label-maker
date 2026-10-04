@@ -66,7 +66,9 @@ class FaceplateParams(BaseModel):
     @model_validator(mode="after")
     def _pad_blocks_to_n_blocks(self) -> "FaceplateParams":
         if len(self.blocks) > self.n_blocks:
-            raise ValueError(f"blocks length {len(self.blocks)} exceeds n_blocks {self.n_blocks}")
+            raise ValueError(
+                f"blocks length {len(self.blocks)} exceeds n_blocks {self.n_blocks}"
+            )
         if len(self.blocks) < self.n_blocks:
             self.blocks = [
                 *self.blocks,

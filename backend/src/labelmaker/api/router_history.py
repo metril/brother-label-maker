@@ -61,7 +61,9 @@ def _to_light_item(job: dict) -> dict:
     relying on that never drifting.
     """
     item = {key: job[key] for key in _LIGHT_ITEM_FIELDS}
-    item["thumbnail_url"] = f"/api/history/{job['id']}/thumbnail" if job["has_thumbnail"] else None
+    item["thumbnail_url"] = (
+        f"/api/history/{job['id']}/thumbnail" if job["has_thumbnail"] else None
+    )
     return item
 
 

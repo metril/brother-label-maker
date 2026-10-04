@@ -181,7 +181,9 @@ def test_chain2_label_b_is_hollow_not_solid():
 
 def test_capture_classic_arrow_stream_shape(tmp_path):
     out = tmp_path / "classic_arrow.bin"
-    rc = cli.main(["capture", "--out", str(out), "--strategy", "classic", "--pattern", "arrow"])
+    rc = cli.main(
+        ["capture", "--out", str(out), "--strategy", "classic", "--pattern", "arrow"]
+    )
     assert rc == 0
     assert out.exists()
     data = out.read_bytes()
@@ -192,7 +194,9 @@ def test_capture_classic_arrow_stream_shape(tmp_path):
 
 def test_capture_e310bt_arrow_stream_shape(tmp_path):
     out = tmp_path / "e310bt_arrow.bin"
-    rc = cli.main(["capture", "--out", str(out), "--strategy", "e310bt", "--pattern", "arrow"])
+    rc = cli.main(
+        ["capture", "--out", str(out), "--strategy", "e310bt", "--pattern", "arrow"]
+    )
     assert rc == 0
     data = out.read_bytes()
     assert data.startswith(b"\x00" * 100 + b"\x1b\x40")
@@ -325,7 +329,9 @@ def test_print_test_capture_flag_matches_capture_subcommand(tmp_path):
             str(out1),
         ]
     )
-    cli.main(["capture", "--out", str(out2), "--strategy", "e310bt", "--pattern", "chain2"])
+    cli.main(
+        ["capture", "--out", str(out2), "--strategy", "e310bt", "--pattern", "chain2"]
+    )
     assert out1.read_bytes() == out2.read_bytes()
 
 
@@ -482,7 +488,9 @@ def test_print_test_usb_no_post_print_status_prints_note(monkeypatch, capsys):
 # ddd4e18` while designing the fix. ---
 
 
-def test_print_test_usb_drain_malformed_block_only_prints_note_not_no_status(monkeypatch, capsys):
+def test_print_test_usb_drain_malformed_block_only_prints_note_not_no_status(
+    monkeypatch, capsys
+):
     transport = CaptureTransport()
     transport.queue_read(REFERENCE_STATUS_BLOCK)  # initial status request reply
     bad_block = _status_block({0: 0x81})  # bad header byte0 -> parse_status raises
@@ -500,7 +508,9 @@ def test_print_test_usb_drain_malformed_block_only_prints_note_not_no_status(mon
     assert "no post-print status received" not in out  # a block WAS received
 
 
-def test_print_test_usb_drain_malformed_then_completed_prints_both_in_order(monkeypatch, capsys):
+def test_print_test_usb_drain_malformed_then_completed_prints_both_in_order(
+    monkeypatch, capsys
+):
     transport = CaptureTransport()
     transport.queue_read(REFERENCE_STATUS_BLOCK)
     bad_block = _status_block({0: 0x81})
@@ -785,7 +795,9 @@ def test_feed_cut_printer_not_found_exits_1_with_permissions_hint(monkeypatch, c
 
 def test_feed_cut_bad_strategy_choice_exits_2(tmp_path):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["feed-cut", "--capture", str(tmp_path / "x.bin"), "--strategy", "bogus"])
+        cli.main(
+            ["feed-cut", "--capture", str(tmp_path / "x.bin"), "--strategy", "bogus"]
+        )
     assert exc.value.code == 2
 
 

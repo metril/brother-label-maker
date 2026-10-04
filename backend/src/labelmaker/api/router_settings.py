@@ -86,29 +86,16 @@ def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> dict:
             # whether one is currently set (db override OR env), so the
             # Settings page can render "Key set"/"Not set" without this
             # route ever echoing the secret itself back to the browser.
-            rows.append(
-                {
-                    "key": field,
-                    "set": bool(effective.homebox_api_key),
-                    "source": source,
-                    "editable": True,
-                }
-            )
+            rows.append({"key": field, "set": bool(effective.homebox_api_key),
+                         "source": source, "editable": True})
         else:
-            rows.append(
-                {
-                    "key": field,
-                    "value": getattr(effective, field),
-                    "source": source,
-                    "editable": True,
-                }
-            )
+            rows.append({"key": field, "value": getattr(effective, field),
+                         "source": source, "editable": True})
 
     for field in _READONLY_FIELDS:
         value = str(config.data_dir) if field == "data_dir" else getattr(config, field)
-        rows.append(
-            {"key": field, "value": value, "source": _cfg_source(config, field), "editable": False}
-        )
+        rows.append({"key": field, "value": value,
+                     "source": _cfg_source(config, field), "editable": False})
 
     return {"settings": rows}
 

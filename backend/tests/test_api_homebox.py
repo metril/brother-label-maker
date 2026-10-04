@@ -61,11 +61,8 @@ async def test_status_unconfigured_is_always_200(client):
     resp = await client.get("/api/homebox/status")
     assert resp.status_code == 200
     assert resp.json() == {
-        "configured": False,
-        "reachable": None,
-        "healthy": None,
-        "version": None,
-        "error": None,
+        "configured": False, "reachable": None, "healthy": None,
+        "version": None, "error": None,
     }
 
 
@@ -198,9 +195,7 @@ async def test_entities_tree_passthrough(app_and_client, hb_mock):
             200,
             json=[
                 {
-                    "id": "l1",
-                    "name": "Garage",
-                    "type": "location",
+                    "id": "l1", "name": "Garage", "type": "location",
                     "children": [
                         {"id": "l2", "name": "Shelf B", "type": "location", "children": []}
                     ],
@@ -244,9 +239,7 @@ async def test_find_by_asset_id_many_matches(app_and_client, hb_mock):
             200,
             json={
                 "items": [_entity_summary(), _entity_summary(id="dup", name="Duplicate")],
-                "page": 1,
-                "pageSize": 50,
-                "total": 2,
+                "page": 1, "pageSize": 50, "total": 2,
             },
         )
     )
@@ -312,7 +305,9 @@ async def test_status_stays_200_when_upstream_answers_html(client, hb_mock):
     """An SSO login page / default vhost at HOMEBOX_URL: /v1/status answers
     200 but with HTML. The contract is ALWAYS 200 -- this must report
     reachable=False with a diagnostic, never a 500 (review finding #1)."""
-    hb_mock.get(f"{API}/status").mock(return_value=httpx.Response(200, text="<html>Sign in</html>"))
+    hb_mock.get(f"{API}/status").mock(
+        return_value=httpx.Response(200, text="<html>Sign in</html>")
+    )
     resp = await client.get("/api/homebox/status")
     assert resp.status_code == 200
     body = resp.json()

@@ -432,7 +432,10 @@ def _attempt(
         band_height_px = height_px - available_height_px
         leading_px = line_height_px - (ascent + descent)
         baseline_y = (
-            band_top_px + max(0, band_height_px - line_height_px) / 2 + leading_px / 2 + ascent
+            band_top_px
+            + max(0, band_height_px - line_height_px) / 2
+            + leading_px / 2
+            + ascent
         )
         body += _text_element(
             width_px / 2,

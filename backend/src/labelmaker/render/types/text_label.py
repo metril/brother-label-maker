@@ -211,14 +211,8 @@ class TextLabelRenderer(LabelRenderer):
         # -- font size: auto-fit, or explicit-but-clamped-to-the-print-area --
         if params.font_size_px is None:
             font_px = fit_font_size(
-                lines,
-                params.font_family,
-                fit_width_budget,
-                height_px,
-                params.bold,
-                line_spacing=_LINE_SPACING,
-                min_px=_MIN_FONT_PX,
-                max_px=_MAX_FONT_PX,
+                lines, params.font_family, fit_width_budget, height_px, params.bold,
+                line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
             if font_px <= _MIN_FONT_PX:
                 warnings.append(
@@ -233,14 +227,9 @@ class TextLabelRenderer(LabelRenderer):
             # physical print area (height is a hard constraint, unlike width
             # in auto-length mode, which just grows to accommodate it).
             height_fit_px = fit_font_size(
-                lines,
-                params.font_family,
-                None,
-                height_px,
-                params.bold,
-                line_spacing=_LINE_SPACING,
-                min_px=_MIN_FONT_PX,
-                max_px=_MAX_FONT_PX,
+                lines, params.font_family, None, height_px,
+                params.bold, line_spacing=_LINE_SPACING,
+                min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
             font_px = min(params.font_size_px, height_fit_px)
             if font_px < params.font_size_px:
@@ -306,13 +295,8 @@ class TextLabelRenderer(LabelRenderer):
             baseline_y = line_top + leading_px / 2 + ascent
             text_elements.append(
                 _text_element(
-                    x,
-                    baseline_y,
-                    line,
-                    params.font_family,
-                    font_px,
-                    text_anchor=anchor,
-                    bold=params.bold,
+                    x, baseline_y, line, params.font_family, font_px,
+                    text_anchor=anchor, bold=params.bold,
                 )
             )
         text_body = "".join(text_elements)

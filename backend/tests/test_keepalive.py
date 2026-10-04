@@ -230,7 +230,9 @@ async def test_toggling_keep_printer_awake_mid_run_takes_effect_without_restart(
 # -- disabling mid-sleep skips the pending poll (L4, 2026-08 review) --------
 
 
-async def test_disabling_mid_sleep_skips_the_pending_poll(usb_overlay, fast_intervals, monkeypatch):
+async def test_disabling_mid_sleep_skips_the_pending_poll(
+    usb_overlay, fast_intervals, monkeypatch
+):
     """The overlay is re-read AFTER the long `keep_awake_interval_min`
     sleep, so disabling `keep_printer_awake` WHILE the coroutine is asleep
     must skip the poll that would otherwise fire right after waking --

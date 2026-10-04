@@ -182,7 +182,9 @@ def test_qr_auto_sizing_caption_reduces_module_px_24mm():
     label_with_caption = BarcodeLabelRenderer().render(params_with_caption, tape)
 
     module_px_no_caption = (label_no_caption.width_px - 2 * _padding_px()) // total_modules
-    module_px_with_caption = (label_with_caption.width_px - 2 * _padding_px()) // total_modules
+    module_px_with_caption = (
+        label_with_caption.width_px - 2 * _padding_px()
+    ) // total_modules
 
     assert expected_module_px == 3
     assert module_px_with_caption == expected_module_px
@@ -337,7 +339,9 @@ def test_caption_wider_than_fixed_length_warns_truncated_not_dropped():
     # clipped-and-warned instead, exactly text_label.py's fixed-length
     # text_truncated behavior, never shrunk or dropped.
     url = "https://example.com/a/000-001"
-    params = BarcodeLabelParams(symbology="qr", data=url, caption="below", length_mm=20.0)
+    params = BarcodeLabelParams(
+        symbology="qr", data=url, caption="below", length_mm=20.0
+    )
     label = BarcodeLabelRenderer().render(params, _tape(24))
     assert "caption_truncated" in [w.code for w in label.warnings]
     assert "caption_omitted" not in [w.code for w in label.warnings]
@@ -449,7 +453,9 @@ def test_fixed_length_mm_too_small_raises_value_error():
 
 def test_fixed_length_mm_that_fits_centers_the_code():
     tape = _tape(24)
-    params = BarcodeLabelParams(symbology="datamatrix", data="T-01", caption="none", length_mm=40.0)
+    params = BarcodeLabelParams(
+        symbology="datamatrix", data="T-01", caption="none", length_mm=40.0
+    )
     label = BarcodeLabelRenderer().render(params, tape)
     from labelmaker.driver.geometry import mm_to_dots
 

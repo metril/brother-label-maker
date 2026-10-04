@@ -147,7 +147,8 @@ class BreakerBoxParams(BaseModel):
     numbering_scheme: NumberingScheme = Field(
         "sequential",
         description=(
-            "sequential 1,2,3...; odd = left panel column 1,3,5...; even = right column 2,4,6..."
+            "sequential 1,2,3...; odd = left panel column 1,3,5...; "
+            "even = right column 2,4,6..."
         ),
     )
     start_value: int = Field(
@@ -162,10 +163,14 @@ class BreakerBoxParams(BaseModel):
     show_numbers: bool = Field(
         True, description="prepend the computed panel-position number to each breaker's text"
     )
-    separator: Separator = Field(Separator.LINE, description="mark drawn on each breaker boundary")
+    separator: Separator = Field(
+        Separator.LINE, description="mark drawn on each breaker boundary"
+    )
     font_family: str = Field("Inter", description="font family name (see GET /api/fonts)")
     bold: bool = Field(False, description="bold text weight")
-    font_size_px: int | None = Field(None, description="fixed font size in px; omit for auto-fit")
+    font_size_px: int | None = Field(
+        None, description="fixed font size in px; omit for auto-fit"
+    )
     padding_mm: float = Field(
         default=1.0, ge=0, description="inner text padding on every side of each block"
     )

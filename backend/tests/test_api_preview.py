@@ -97,10 +97,9 @@ async def test_preview_short_label_warning_present_when_under_min_feed(client):
     short_label_warnings = [w for w in body["warnings"] if w["code"] == "short_label"]
     assert len(short_label_warnings) == 1
     assert short_label_warnings[0]["severity"] == "info"
-    assert (
-        str(MIN_FEED_MM) in short_label_warnings[0]["message"]
-        or "24.5" in short_label_warnings[0]["message"]
-    )
+    assert str(MIN_FEED_MM) in short_label_warnings[0]["message"] or "24.5" in short_label_warnings[
+        0
+    ]["message"]
 
 
 async def test_preview_no_short_label_warning_when_at_or_above_min_feed(client):
@@ -132,7 +131,9 @@ async def test_preview_warnings_pass_through_on_cramped_text(client):
     assert resp.status_code == 200
     body = resp.json()
     assert any(w["code"] == "text_cramped" for w in body["warnings"])
-    assert all(w["severity"] == "warning" for w in body["warnings"] if w["code"] == "text_cramped")
+    assert all(
+        w["severity"] == "warning" for w in body["warnings"] if w["code"] == "text_cramped"
+    )
     # task 2.9: this label's content is well under MIN_FEED_MM (24.5mm) on a
     # 3.5mm tape -- the preview response's own short_label warning (info
     # severity, NOT "warning" -- see
@@ -182,7 +183,9 @@ async def test_preview_divided_blocks_engine_value_error_returns_422_with_messag
             "block_length_mm": 300.0,
         },
     }
-    resp = await client.post("/api/render/preview", json={"definition": bad_definition, "scale": 1})
+    resp = await client.post(
+        "/api/render/preview", json={"definition": bad_definition, "scale": 1}
+    )
     assert resp.status_code == 422
     detail = resp.json()["detail"]
     assert "1200.0mm" in detail

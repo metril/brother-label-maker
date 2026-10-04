@@ -421,7 +421,8 @@ async def test_delete_history_job_409_details_differ_for_queued_vs_printing(app_
     resp = await client.delete(f"/api/history/{printing['id']}")
     assert resp.status_code == 409
     assert resp.json()["detail"] == (
-        "job is 'printing'; wait for it to finish (interrupted jobs are marked failed at restart)"
+        "job is 'printing'; wait for it to finish "
+        "(interrupted jobs are marked failed at restart)"
     )
 
 

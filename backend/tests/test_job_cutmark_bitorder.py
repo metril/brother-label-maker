@@ -63,7 +63,9 @@ def test_set_pin_default_bit_order_is_msb_first():
 # MSB_FIRST: bit = 7 - pin%8 -> pin%8 in [0,3] -> bits 7,6,5,4 set -> 0xF0.
 # LSB_FIRST: bit = pin%8     -> pin%8 in [0,3] -> bits 0,1,2,3 set -> 0x0F.
 
-_EXPECTED_CUT_MARK_PINS = {pin for pin in range(TAPE_24MM.print_dots) if (pin // 4) % 2 == 0}
+_EXPECTED_CUT_MARK_PINS = {
+    pin for pin in range(TAPE_24MM.print_dots) if (pin // 4) % 2 == 0
+}
 
 
 def _decode_pins(line: bytes, bit_order: BitOrder) -> set[int]:

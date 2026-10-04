@@ -346,10 +346,14 @@ async def test_preview_pixel_budget_uses_post_scale_dimensions(client):
     width_dots*scale x height_dots*scale, not the unscaled figure."""
     label = _text_label("BUDGET", length_mm=900.0)  # ~6380 dots x 128 -> ~0.82 MP pre-scale
 
-    small_scale_resp = await client.post("/api/print/preview", json={"labels": [label], "scale": 1})
+    small_scale_resp = await client.post(
+        "/api/print/preview", json={"labels": [label], "scale": 1}
+    )
     assert small_scale_resp.status_code == 200  # ~0.82 MP: nowhere near the cap
 
-    large_scale_resp = await client.post("/api/print/preview", json={"labels": [label], "scale": 8})
+    large_scale_resp = await client.post(
+        "/api/print/preview", json={"labels": [label], "scale": 8}
+    )
     # ~0.82 MP x 64 (scale=8 squared) =~ 52.3 MP: over the 40 MP cap.
     assert large_scale_resp.status_code == 422
     assert "40,000,000" in large_scale_resp.json()["detail"]
@@ -423,7 +427,9 @@ async def test_preview_warnings_are_index_prefixed_and_aligned_with_the_warning_
 @pytest.mark.parametrize("scale", [0, 9])
 async def test_preview_scale_out_of_range_is_422(client, scale):
     label = _text_label("SOLO", length_mm=20.0)
-    resp = await client.post("/api/print/preview", json={"labels": [label], "scale": scale})
+    resp = await client.post(
+        "/api/print/preview", json={"labels": [label], "scale": scale}
+    )
     assert resp.status_code == 422
 
 

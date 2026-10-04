@@ -60,13 +60,24 @@ def test_extract_fill_path_drops_fill_none_boilerplate_and_merges_rest():
 
 
 def test_extract_fill_path_merges_multiple_real_paths_in_document_order():
-    svg = '<svg viewBox="0 0 24 24"><path d="M1 1z" /><path d="M2 2z" /><path d="M3 3z" /></svg>'
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M1 1z" />'
+        '<path d="M2 2z" />'
+        '<path d="M3 3z" />'
+        "</svg>"
+    )
     result = common.extract_fill_path(svg)
     assert result == ("M1 1z M2 2z M3 3z", "nonzero")
 
 
 def test_extract_fill_path_union_evenodd_wins_if_any_path_declares_it():
-    svg = '<svg viewBox="0 0 24 24"><path d="M1 1z" /><path fill-rule="evenodd" d="M2 2z" /></svg>'
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M1 1z" />'
+        '<path fill-rule="evenodd" d="M2 2z" />'
+        "</svg>"
+    )
     result = common.extract_fill_path(svg)
     assert result == ("M1 1z M2 2z", "evenodd")
 
@@ -82,7 +93,12 @@ def test_extract_fill_path_rejects_relative_m_on_non_first_survivor():
     # the exact shape of bootstrap_house's second path in the real source:
     # docs/code-review-2026-08.md H3). Naive concatenation used to accept
     # this; it must now be rejected rather than "fixed" by guessing.
-    svg = '<svg viewBox="0 0 24 24"><path d="M0 0h10v10h-10z" /><path d="m5 5h5v5h-5z" /></svg>'
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M0 0h10v10h-10z" />'
+        '<path d="m5 5h5v5h-5z" />'
+        "</svg>"
+    )
     assert common.extract_fill_path(svg) is None
 
 
@@ -127,7 +143,12 @@ def test_extract_fill_path_render_equivalence_gate_passes_disjoint_merge():
     # equivalence gate must still let this real, legitimate merge through
     # -- this is the common case (the large majority of the four sources'
     # real multi-path merges), not just the toy cases above.
-    svg = '<svg viewBox="0 0 24 24"><path d="M1 1H9V9H1Z" /><path d="M15 15H23V23H15Z" /></svg>'
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M1 1H9V9H1Z" />'
+        '<path d="M15 15H23V23H15Z" />'
+        "</svg>"
+    )
     result = common.extract_fill_path(svg)
     assert result == ("M1 1H9V9H1Z M15 15H23V23H15Z", "nonzero")
 
@@ -177,7 +198,12 @@ def test_extract_fill_path_accepts_same_explicit_fill_repeated():
 
 
 def test_extract_fill_path_rejects_stroke_on_a_kept_path():
-    svg = '<svg viewBox="0 0 24 24"><path d="M1 1z"/><path stroke="red" d="M2 2z"/></svg>'
+    svg = (
+        '<svg viewBox="0 0 24 24">'
+        '<path d="M1 1z"/>'
+        '<path stroke="red" d="M2 2z"/>'
+        "</svg>"
+    )
     assert common.extract_fill_path(svg) is None
 
 

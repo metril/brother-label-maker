@@ -417,7 +417,9 @@ def _parse_csv_upload(raw: bytes) -> dict:
         if len(raw_row) != len(header):
             raise HTTPException(
                 status_code=422,
-                detail=(f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"),
+                detail=(
+                    f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"
+                ),
             )
         # Row values stripped the same way header column names are above --
         # untrimmed whitespace around a CSV cell (common from spreadsheet

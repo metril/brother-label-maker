@@ -94,7 +94,9 @@ def _build_chained(
     strategy: InitStrategy,
     options: JobOptions,
 ) -> JobStream:
-    pages = [encode_image(img, tape, strategy.compression, options.raster_config) for img in images]
+    pages = [
+        encode_image(img, tape, strategy.compression, options.raster_config) for img in images
+    ]
     # encode_image validates mode/height/width per image; a mixed-height list
     # raises ValueError here, from the raster layer -- not pre-checked or caught.
 

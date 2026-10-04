@@ -350,7 +350,9 @@ async def test_put_preset_revalidates_tape_width_and_family_pair(client):
 
     # Changing ONLY tape_family to one that doesn't have a 9.0mm tape must
     # re-validate against the (new family, EXISTING width) pair.
-    bad = await client.put(f"/api/presets/{created['id']}", json={"tape_family": "hse_2_1"})
+    bad = await client.put(
+        f"/api/presets/{created['id']}", json={"tape_family": "hse_2_1"}
+    )
     assert bad.status_code == 422
 
     # Still 9.0mm/hse_3_1 -- unaffected by the rejected attempt.

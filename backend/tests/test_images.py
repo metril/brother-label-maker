@@ -111,7 +111,9 @@ def test_image_object_preserves_aspect_ratio_when_width_omitted(tmp_path):
 
 def test_image_object_forces_exact_size_when_width_given(tmp_path):
     image_id = _put_upload(tmp_path, Image.new("RGB", (200, 100), "black"))  # 2:1
-    _svg, w, h, _region = image_object(image_id, target_h_px=40, target_w_px=40, data_dir=tmp_path)
+    _svg, w, h, _region = image_object(
+        image_id, target_h_px=40, target_w_px=40, data_dir=tmp_path
+    )
     assert (w, h) == (40, 40)
 
 

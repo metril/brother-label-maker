@@ -114,7 +114,8 @@ class Sequence(BaseModel):
         elif self.kind == SequenceKind.CSV:
             if not (_MIN_CSV_ROWS <= len(self.rows) <= MAX_CSV_ROWS):
                 raise ValueError(
-                    f"kind=csv requires {_MIN_CSV_ROWS}-{MAX_CSV_ROWS} rows, got {len(self.rows)}"
+                    f"kind=csv requires {_MIN_CSV_ROWS}-{MAX_CSV_ROWS} rows, "
+                    f"got {len(self.rows)}"
                 )
             columns = set(self.rows[0])
             for i, row in enumerate(self.rows[1:], start=1):

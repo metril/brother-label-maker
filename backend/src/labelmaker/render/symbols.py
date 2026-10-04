@@ -266,7 +266,7 @@ def _validate_symbol_svg(info: SymbolInfo, raw: str) -> str:
             f"symbol {info.id!r} file {info.path} is not a single <svg>...</svg> document"
         )
     if not _VIEWBOX_RE.search(raw):
-        raise ValueError(f'symbol {info.id!r} file {info.path} must declare viewBox="0 0 24 24"')
+        raise ValueError(f"symbol {info.id!r} file {info.path} must declare viewBox=\"0 0 24 24\"")
     path_count = len(_PATH_TAG_RE.findall(raw))
     if path_count != 1:
         raise ValueError(
@@ -334,7 +334,9 @@ def _load_symbol_inner_svg(info: SymbolInfo) -> str:
     ensure_symbols_dir()
     path = resolve_symbol_path(info)
     if not path.is_file():
-        raise RuntimeError(f"symbol file missing: {path} (listed in index.json as id={info.id!r})")
+        raise RuntimeError(
+            f"symbol file missing: {path} (listed in index.json as id={info.id!r})"
+        )
     return _validate_symbol_svg(info, path.read_text())
 
 

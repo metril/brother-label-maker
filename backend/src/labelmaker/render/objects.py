@@ -251,7 +251,9 @@ def _bars_object(
     cursor_modules = _BARS_QUIET_MODULES
     for is_bar, width_modules in runs:
         if is_bar:
-            rects.append(_rect(cursor_modules * x_dim_px, 0, width_modules * x_dim_px, height_px))
+            rects.append(
+                _rect(cursor_modules * x_dim_px, 0, width_modules * x_dim_px, height_px)
+            )
         cursor_modules += width_modules
 
     svg_group = _group(x, y, rects)

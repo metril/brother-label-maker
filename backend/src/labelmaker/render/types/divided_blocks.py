@@ -354,7 +354,8 @@ def render_divided_blocks(params: DividedBlocksParams, tape: TapeSpec) -> Render
                     RenderWarning(
                         code="text_cramped",
                         message=(
-                            f"block {i}: auto font size hit the minimum size; text may be cramped"
+                            f"block {i}: auto font size hit the minimum size; "
+                            "text may be cramped"
                         ),
                         object_id=f"block-{i}",
                     )
@@ -412,7 +413,9 @@ def render_divided_blocks(params: DividedBlocksParams, tape: TapeSpec) -> Render
                 warnings.append(
                     RenderWarning(
                         code="text_truncated",
-                        message=(f"block {i}: text truncated: content is wider than the block"),
+                        message=(
+                            f"block {i}: text truncated: content is wider than the block"
+                        ),
                         object_id=f"block-{i}",
                     )
                 )

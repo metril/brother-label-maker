@@ -32,13 +32,7 @@ from labelmaker.render.symbols import (
 # must add its prefix here (the pipeline README's "Adding a source" step 8
 # points at this tuple).
 _SOURCE_PREFIXES = (
-    "material_",
-    "phosphor_",
-    "lucide_",
-    "tabler_",
-    "remix_",
-    "bootstrap_",
-    "fluent_",
+    "material_", "phosphor_", "lucide_", "tabler_", "remix_", "bootstrap_", "fluent_",
 )
 
 
@@ -105,12 +99,8 @@ def test_list_symbols_meets_floor_and_every_source_contributes():
     assert legacy_count == 60, f"legacy group must stay exactly 60, found {legacy_count}"
 
     floors = {
-        "material_": 700,
-        "phosphor_": 50,
-        "tabler_": 1000,
-        "remix_": 1500,
-        "bootstrap_": 630,
-        "fluent_": 2400,
+        "material_": 700, "phosphor_": 50,
+        "tabler_": 1000, "remix_": 1500, "bootstrap_": 630, "fluent_": 2400,
     }
     for group, floor in floors.items():
         count = len(by_group.get(group, []))
@@ -159,13 +149,8 @@ def _write_index(tmp_path, entries: list[dict]) -> None:
 
 def test_list_symbols_and_get_symbol_info_invalidate_on_index_mtime_change(monkeypatch, tmp_path):
     entry_a = {
-        "id": "a",
-        "name": "A",
-        "tags": [],
-        "path": "a.svg",
-        "category": "misc",
-        "source": "test",
-        "license": "test",
+        "id": "a", "name": "A", "tags": [], "path": "a.svg",
+        "category": "misc", "source": "test", "license": "test",
     }
     _write_index(tmp_path, [entry_a])
     (tmp_path / "a.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
@@ -180,13 +165,8 @@ def test_list_symbols_and_get_symbol_info_invalidate_on_index_mtime_change(monke
     # different nanosecond buckets on every filesystem) -- this is the exact
     # scenario the cache key is meant to detect: same path, changed content.
     entry_b = {
-        "id": "b",
-        "name": "B",
-        "tags": [],
-        "path": "b.svg",
-        "category": "misc",
-        "source": "test",
-        "license": "test",
+        "id": "b", "name": "B", "tags": [], "path": "b.svg",
+        "category": "misc", "source": "test", "license": "test",
     }
     _write_index(tmp_path, [entry_a, entry_b])
     (tmp_path / "b.svg").write_text('<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
@@ -201,13 +181,8 @@ def test_list_symbols_and_get_symbol_info_invalidate_on_index_mtime_change(monke
 
 def test_list_symbols_returns_a_copy_callers_cant_use_to_corrupt_the_cache(monkeypatch, tmp_path):
     entry = {
-        "id": "a",
-        "name": "A",
-        "tags": ["x"],
-        "path": "a.svg",
-        "category": "misc",
-        "source": "test",
-        "license": "test",
+        "id": "a", "name": "A", "tags": ["x"], "path": "a.svg",
+        "category": "misc", "source": "test", "license": "test",
     }
     _write_index(tmp_path, [entry])
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
@@ -255,7 +230,7 @@ def test_every_indexed_symbol_file_is_a_single_path_24x24_svg():
         raw = (SYMBOLS_DIR / info.path).read_text()
         assert raw.strip().startswith("<svg"), f"{info.id}: doesn't start with <svg"
         assert raw.strip().endswith("</svg>"), f"{info.id}: doesn't end with </svg>"
-        assert _VIEWBOX_RE.search(raw), f'{info.id}: missing viewBox="0 0 24 24"'
+        assert _VIEWBOX_RE.search(raw), f"{info.id}: missing viewBox=\"0 0 24 24\""
         assert len(_PATH_RE.findall(raw)) == 1, f"{info.id}: expected exactly one <path>"
         assert "style" not in raw, f"{info.id}: unexpected style attribute"
         assert "font-family" not in raw, f"{info.id}: unexpected font-family attribute"
@@ -307,7 +282,9 @@ def test_indexed_symbol_files_render_nonblank_via_resvg():
     assert sample, "sample is empty -- list_symbols() returned nothing?"
     for info in sample:
         svg_group = symbol_object(info.id, size_px=24)
-        label = RenderedLabel(svg=_svg_document(24, 24, svg_group), width_px=24, height_px=24)
+        label = RenderedLabel(
+            svg=_svg_document(24, 24, svg_group), width_px=24, height_px=24
+        )
         img = rasterize(label)
         assert img.getextrema() != (255, 255), f"{info.id}: rendered blank"
 
@@ -391,23 +368,18 @@ def test_symbol_object_larger_size_produces_more_ink_pixels():
 
 
 def _write_index_and_file(tmp_path, filename: str, svg_text: str):
-    index = [
-        {
-            "id": "broken",
-            "name": "Broken",
-            "tags": ["misc"],
-            "path": filename,
-            "category": "misc",
-            "source": "test",
-            "license": "test",
-        }
-    ]
+    index = [{
+        "id": "broken", "name": "Broken", "tags": ["misc"], "path": filename,
+        "category": "misc", "source": "test", "license": "test",
+    }]
     (tmp_path / "index.json").write_text(json.dumps(index))
     (tmp_path / filename).write_text(svg_text)
 
 
 def test_symbol_object_raises_on_wrong_viewbox(monkeypatch, tmp_path):
-    _write_index_and_file(tmp_path, "broken.svg", '<svg viewBox="0 0 48 48"><path d="M0 0"/></svg>')
+    _write_index_and_file(
+        tmp_path, "broken.svg", '<svg viewBox="0 0 48 48"><path d="M0 0"/></svg>'
+    )
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
     with pytest.raises(ValueError, match="viewBox"):
         symbol_object("broken", size_px=24)
@@ -436,17 +408,10 @@ def test_symbol_object_raises_on_style_attribute(monkeypatch, tmp_path):
 
 
 def test_symbol_object_raises_on_missing_file(monkeypatch, tmp_path):
-    index = [
-        {
-            "id": "ghost",
-            "name": "Ghost",
-            "tags": [],
-            "path": "ghost.svg",
-            "category": "misc",
-            "source": "test",
-            "license": "test",
-        }
-    ]
+    index = [{
+        "id": "ghost", "name": "Ghost", "tags": [], "path": "ghost.svg",
+        "category": "misc", "source": "test", "license": "test",
+    }]
     (tmp_path / "index.json").write_text(json.dumps(index))
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
     with pytest.raises(RuntimeError, match="symbol file missing"):

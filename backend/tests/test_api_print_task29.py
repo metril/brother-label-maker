@@ -364,7 +364,9 @@ async def test_cancel_race_job_already_printing_returns_409_naming_status(app_an
 # =====================================================================
 
 
-@pytest.mark.parametrize("app_config", [{"printer_init_strategy": "e310bt"}], indirect=True)
+@pytest.mark.parametrize(
+    "app_config", [{"printer_init_strategy": "e310bt"}], indirect=True
+)
 async def test_print_broadcasts_job_progress_events_monotonic_and_final_matches_total(
     app_and_client,
 ):

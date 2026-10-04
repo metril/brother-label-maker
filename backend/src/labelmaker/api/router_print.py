@@ -146,7 +146,9 @@ def _validate_serialized_print(
         try:
             r = render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
         except (KeyError, ValueError) as exc:
-            raise ValueError(f"label {i} (sequence value {value!r}): {error_message(exc)}") from exc
+            raise ValueError(
+                f"label {i} (sequence value {value!r}): {error_message(exc)}"
+            ) from exc
         rendered.append(r)
     return bound, rendered
 
@@ -191,7 +193,9 @@ async def _validate_and_render(
         label_count = len(bound)
     else:
         try:
-            rendered = await anyio.to_thread.run_sync(_validate_render_side, body.labels, data_dir)
+            rendered = await anyio.to_thread.run_sync(
+                _validate_render_side, body.labels, data_dir
+            )
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=error_message(exc)) from exc
         label_count = len(body.labels)

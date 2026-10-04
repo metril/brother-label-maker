@@ -211,14 +211,8 @@ def _role_font_px(role: _TextRole, band_height_px: float, warnings: list[RenderW
     `text_cramped` info warning, named by `role.key`, if `fit_font_size`
     fell back to its own `_MIN_FONT_PX` floor."""
     font_px = fit_font_size(
-        [role.text],
-        role.family,
-        None,
-        band_height_px,
-        role.bold,
-        line_spacing=_LINE_SPACING,
-        min_px=_MIN_FONT_PX,
-        max_px=_MAX_FONT_PX,
+        [role.text], role.family, None, band_height_px, role.bold,
+        line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
     )
     if font_px <= _MIN_FONT_PX:
         warnings.append(
@@ -289,13 +283,8 @@ class HomeboxAssetRenderer(LabelRenderer):
             baseline_y = cursor_px + leading_px / 2 + ascent
             text_parts.append(
                 _text_element(
-                    content_left_px,
-                    baseline_y,
-                    role.text,
-                    role.family,
-                    font_px,
-                    text_anchor="start",
-                    bold=role.bold,
+                    content_left_px, baseline_y, role.text, role.family, font_px,
+                    text_anchor="start", bold=role.bold,
                 )
             )
             cursor_px += line_height_px

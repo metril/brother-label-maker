@@ -57,12 +57,12 @@ from labelmaker.render import fonts
 from labelmaker.render.document import RenderedLabel
 
 # Attribute form, either quote style: font-family="X" / font-family='X'.
-_FONT_FAMILY_ATTR_RE = re.compile(r"""font-family\s*=\s*(["'])(.*?)\1""")
+_FONT_FAMILY_ATTR_RE = re.compile(r'''font-family\s*=\s*(["'])(.*?)\1''')
 # CSS declaration form, as it would appear inside a style="..." attribute:
 # font-family: X; -- value runs up to the next ';' or quote character
 # (there is no reliable unquoted terminator otherwise), since SVG/CSS
 # doesn't require a trailing ';' before the closing attribute quote.
-_FONT_FAMILY_STYLE_RE = re.compile(r"""font-family\s*:\s*([^;"']+)""")
+_FONT_FAMILY_STYLE_RE = re.compile(r'''font-family\s*:\s*([^;"']+)''')
 
 
 def _referenced_font_families(svg: str) -> set[str]:
@@ -122,7 +122,9 @@ def preview_png(img_1bit: Image.Image, scale: int = 1) -> bytes:
 
     img = img_1bit
     if scale > 1:
-        img = img.resize((img.width * scale, img.height * scale), resample=Image.Resampling.NEAREST)
+        img = img.resize(
+            (img.width * scale, img.height * scale), resample=Image.Resampling.NEAREST
+        )
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
