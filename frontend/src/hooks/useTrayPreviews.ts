@@ -36,7 +36,7 @@ export function useTrayPreviews(items: TrayItem[]): Map<string, TrayPreview> {
   const results = useQueries({
     queries: targets.map((item) => ({
       queryKey: ["tray-preview", item.id],
-      queryFn: () => postPreview({ definition: item.definition }),
+      queryFn: ({ signal }) => postPreview({ definition: item.definition }, signal),
       staleTime: Infinity,
       retry: false,
     })),

@@ -10,7 +10,7 @@ import { useFeedCut } from "../hooks/useFeedCut";
 import { useHealth } from "../hooks/useHealth";
 import { useHistoryList } from "../hooks/useHistory";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
-import { useJobEventsContext } from "../hooks/useJobEvents";
+import { useJobConnectionState } from "../hooks/useJobEvents";
 import { usePrinterStatus } from "../hooks/usePrinterStatus";
 import { formatAbsoluteTime, formatRelativeTime } from "../lib/time";
 import { buildRawMediaReport, describeMedia, describeMediaTypeRaw } from "../lib/printerStatus";
@@ -96,7 +96,7 @@ export function Diagnostics() {
   const homebox = useHomeboxStatus();
   const health = useHealth();
   const auth = useAuth();
-  const { connectionState } = useJobEventsContext();
+  const connectionState = useJobConnectionState();
   const recentJobs = useHistoryList({ page: 1, pageSize: RECENT_JOBS_COUNT });
 
   const [copied, setCopied] = useState(false);

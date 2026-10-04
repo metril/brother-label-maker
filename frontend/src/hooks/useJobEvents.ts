@@ -77,17 +77,36 @@ export function useJobEvents(): UseJobEventsResult {
   return { connectionState, events };
 }
 
-const JobEventsContext = createContext<UseJobEventsResult | null>(null);
+// Two contexts, not one: every `job.progress` frame replaces `events`, so a
+// single combined value re-rendered every consumer (AppShell, Diagnostics)
+// that only ever reads `connectionState`. Split so those subscribe to the
+// connection alone and only event readers re-render per frame.
+const JobConnectionContext = createContext<WsConnectionState | null>(null);
+const JobEventsContext = createContext<Record<string, JobEvent> | null>(null);
 
 /** One WS connection for the whole app -- mount near the root (App.tsx) and
  * read it anywhere below via useJobEventsContext(), instead of every
  * PrintButton opening its own socket. */
 export function JobEventsProvider({ children }: { children: ReactNode }) {
-  const value = useJobEvents();
-  return createElement(JobEventsContext.Provider, { value }, children);
+  const { connectionState, events } = useJobEvents();
+  return createElement(
+    JobConnectionContext.Provider,
+    { value: connectionState },
+    createElement(JobEventsContext.Provider, { value: events }, children),
+  );
 }
 
-export function useJobEventsContext(): UseJobEventsResult {
+/** Connection state only -- does NOT re-render on job events (prefer this
+ * over useJobEventsContext() when `events` isn't needed). */
+export function useJobConnectionState(): WsConnectionState {
+  const ctx = useContext(JobConnectionContext);
+  if (!ctx) {
+    throw new Error("useJobConnectionState must be used within a JobEventsProvider");
+  }
+  return ctx;
+}
+
+function useJobEventsMap(): Record<string, JobEvent> {
   const ctx = useContext(JobEventsContext);
   if (!ctx) {
     throw new Error("useJobEventsContext must be used within a JobEventsProvider");
@@ -95,9 +114,15 @@ export function useJobEventsContext(): UseJobEventsResult {
   return ctx;
 }
 
+export function useJobEventsContext(): UseJobEventsResult {
+  const connectionState = useJobConnectionState();
+  const events = useJobEventsMap();
+  return useMemo(() => ({ connectionState, events }), [connectionState, events]);
+}
+
 /** Convenience: the latest event for one job id, memoized so consumers don't
  * re-render on unrelated job events. */
 export function useJobEvent(jobId: string | null): JobEvent | undefined {
-  const { events } = useJobEventsContext();
+  const events = useJobEventsMap();
   return useMemo(() => (jobId ? events[jobId] : undefined), [events, jobId]);
 }

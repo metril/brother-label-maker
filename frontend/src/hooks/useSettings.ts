@@ -23,8 +23,15 @@ export function useUpdateSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (partial: SettingsUpdate) => putSettings(partial),
-    onSuccess: (data) => {
+    onSuccess: (data, partial) => {
       queryClient.setQueryData(SETTINGS_QUERY_KEY, data);
+      // A homebox_* override (URL/API key) changes what every HomeBox query
+      // sees, so refetch them rather than wait out their own staleTime.
+      if (Object.keys(partial).some((key) => key.startsWith("homebox_"))) {
+        for (const key of ["homebox-status", "homebox-tree", "homebox-entities"]) {
+          void queryClient.invalidateQueries({ queryKey: [key] });
+        }
+      }
     },
   });
 }

@@ -127,6 +127,35 @@ describe("Presets page", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("printer out of tape");
   });
 
+  it("Print stays disabled while the job is queued/printing, so a double-click can't queue two jobs", async () => {
+    const user = userEvent.setup();
+    let posts = 0;
+    server.use(
+      http.get("/api/presets", () => HttpResponse.json([preset()])),
+      http.post("/api/presets/preset-1/print", () => {
+        posts++;
+        return HttpResponse.json({ job_id: "job-dbl" }, { status: 202 });
+      }),
+    );
+    renderWithProviders(<Presets />);
+
+    const button = await screen.findByRole("button", { name: "Print" });
+    await user.click(button);
+    await waitFor(() => expect(mockWebSocketInstances.length).toBeGreaterThan(0));
+    const socket = mockWebSocketInstances.at(-1)!;
+
+    act(() => socket.emit({ event: "job.queued", job_id: "job-dbl" }));
+    await waitFor(() => expect(button).toBeDisabled());
+    await user.click(button);
+    expect(posts).toBe(1);
+
+    act(() => socket.emit({ event: "job.started", job_id: "job-dbl" }));
+    expect(button).toBeDisabled();
+
+    act(() => socket.emit({ event: "job.done", job_id: "job-dbl" }));
+    await waitFor(() => expect(button).toBeEnabled());
+  });
+
   it("favorite toggle PUTs the flipped value", async () => {
     const user = userEvent.setup();
     let capturedBody: unknown;

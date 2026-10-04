@@ -62,12 +62,15 @@ export function usePrintPreview(
 
   const query = useQuery({
     queryKey: ["print-preview", bodyKey],
-    queryFn: () =>
-      postPrintPreview({
-        labels,
-        options,
-        scale: PREVIEW_SCALE,
-      }),
+    queryFn: ({ signal }) =>
+      postPrintPreview(
+        {
+          labels,
+          options,
+          scale: PREVIEW_SCALE,
+        },
+        signal,
+      ),
     enabled,
     retry: false,
     staleTime: Infinity,

@@ -65,12 +65,15 @@ export function usePrintEstimate(
 
   const query = useQuery({
     queryKey: ["print-estimate", debouncedTypeKey, debounced ? JSON.stringify(debounced) : null],
-    queryFn: () =>
-      postPrintEstimate({
-        labels: debounced!.labels,
-        options: debounced!.options,
-        serialization: debounced!.serialization ?? undefined,
-      }),
+    queryFn: ({ signal }) =>
+      postPrintEstimate(
+        {
+          labels: debounced!.labels,
+          options: debounced!.options,
+          serialization: debounced!.serialization ?? undefined,
+        },
+        signal,
+      ),
     enabled,
     placeholderData: (previousData, previousQuery) =>
       debouncedTypeKey !== null && previousQuery?.queryKey?.[1] === debouncedTypeKey ? previousData : undefined,

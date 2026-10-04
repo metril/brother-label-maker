@@ -164,7 +164,7 @@ export function PresetCard({ preset, typeTitle }: PresetCardProps) {
         <button
           type="button"
           onClick={() => printMutation.mutate()}
-          disabled={printMutation.isPending}
+          disabled={printMutation.isPending || printStatus === "queued" || printStatus === "printing"}
           className="text-[12px] font-medium text-amber-300 hover:underline disabled:opacity-50"
         >
           Print
