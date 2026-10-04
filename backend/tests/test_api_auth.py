@@ -271,7 +271,13 @@ async def test_docs_and_openapi_are_withheld_in_oidc_mode(client):
     no schema/console CONTENT leaks, not any particular status code."""
     for path in ("/docs", "/redoc", "/openapi.json"):
         resp = await client.get(path)
-        assert "application/json" not in resp.headers.get("content-type", ""), path
+        # Without a built frontend/dist (CI) there is no SPA catch-all, so
+        # the path 404s with FastAPI's generic JSON {"detail": "Not Found"};
+        # with one it is index.html. Either is fine -- only a 200 JSON body
+        # (the schema itself) would be a leak.
+        assert not (
+            resp.status_code == 200 and "application/json" in resp.headers.get("content-type", "")
+        ), path
         assert "swagger" not in resp.text.lower(), path
         assert '"openapi"' not in resp.text, path
 
