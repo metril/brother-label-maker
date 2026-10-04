@@ -111,9 +111,32 @@ def _require_oidc_mode(config: AppConfig) -> None:
         raise HTTPException(status_code=404, detail="not found")
 
 
+SESSION_NEXT_KEY = "login_next"
+
+
+def safe_next_path(value: str | None) -> str:
+    """Post-login redirect target: ONLY a same-origin relative path -- a
+    single leading "/", never "//" (protocol-relative), a backslash (some
+    browsers treat "/\\host" as "//host"), a scheme/host, or control
+    characters/whitespace -- else "/". Prevents an open redirect via
+    `/api/auth/login?next=...`."""
+    if (
+        not value
+        or not value.startswith("/")
+        or value.startswith("//")
+        or "\\" in value
+        or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
+    ):
+        return "/"
+    return value
+
+
 @router.get("/auth/login")
-async def login(request: Request, config: AppConfigDep) -> RedirectResponse:
+async def login(
+    request: Request, config: AppConfigDep, next: str | None = None
+) -> RedirectResponse:
     _require_oidc_mode(config)
+    request.session[SESSION_NEXT_KEY] = safe_next_path(next)
     oauth: OAuth = request.app.state.oauth
     redirect_uri = str(request.url_for("auth_callback"))
     try:
@@ -148,6 +171,9 @@ async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
             status_code=401,
             detail="sign-in failed: the provider returned no verified id_token subject",
         )
+    # Re-validated on the way out too (the session is signed, but a bad
+    # value here would be an open redirect, so never trust it blindly).
+    next_path = safe_next_path(request.session.pop(SESSION_NEXT_KEY, None))
     request.session[SESSION_USER_KEY] = {
         "sub": userinfo["sub"],
         "name": userinfo.get("name"),
@@ -164,7 +190,7 @@ async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
     # for nothing here (this is a plain browser-navigable GET, same as
     # `authorize_redirect`'s own explicit 302 in the login route above) and
     # would otherwise read as an odd inconsistency between the two.
-    return RedirectResponse(url="/", status_code=302)
+    return RedirectResponse(url=next_path, status_code=302)
 
 
 @router.post("/auth/logout", status_code=204)
