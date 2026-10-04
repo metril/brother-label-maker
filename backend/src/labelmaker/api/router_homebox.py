@@ -3,11 +3,12 @@
 The browser never talks to HomeBox directly: the hb_ API key lives only in
 this process (config.homebox_api_key), and HomeBox has no reason to allow
 this app's origin via CORS. So every read the frontend needs is proxied
-1:1 here through the read-only HomeBoxClient, with the client's error
+1:1 here through the HomeBoxClient, with the client's error
 taxonomy mapped onto our HTTP surface:
 
 - integration unconfigured           -> 503 (deps.get_homebox's hint)
 - entity/asset genuinely absent      -> 404
+- HomeBox rejected a write payload   -> 422
 - HomeBox unreachable / 5xx / bad key / pre-0.26 server -> 502, with the
   client's own actionable message as the detail (these are deployment
   problems, not browser-user problems -- a gateway error is honest).
@@ -15,6 +16,11 @@ taxonomy mapped onto our HTTP surface:
 GET /api/homebox/status is the one route that answers 200 regardless, so
 the frontend can decide whether to show HomeBox UI at all without a
 try/except dance.
+
+Writes (opt-in): bulk item creation, photo upload, and the tag/entity-type
+pickers they need are all gated on the `homebox_writes_enabled` setting
+(403 {"detail": "homebox writes disabled"} otherwise) and sit behind the
+same auth gate as every other /api route.
 
 Settings: `qr_base_url` (db settings table, key "homebox_qr_base_url") is
 the base URL embedded in label QR codes -- following HomeBox's own URL
@@ -30,18 +36,23 @@ printed QR codes still resolve for phones.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable
+from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from labelmaker.api.deps import DbDep, HomeBoxDep, SettingsDep
+from labelmaker.api.router_images import _read_capped
 from labelmaker.homebox import (
     Entity,
     EntityPage,
     EntitySummary,
     HomeBoxError,
     HomeBoxNotFoundError,
+    HomeBoxValidationError,
     HomeBoxVersionError,
     PathSegment,
     TreeItem,
@@ -56,6 +67,7 @@ async def _proxy[T](call: Awaitable[T]) -> T:
     """Shared error mapping for every proxied HomeBox call.
 
     - HomeBoxNotFoundError -> 404 (the entity/asset genuinely isn't there).
+    - HomeBoxValidationError (write payload rejected) -> 422.
     - Any other HomeBoxError (auth, version, unavailable) -> 502: the app
       is fine, the HomeBox side of the bridge is not.
     - ValueError -> 502 too: whatever answered at HOMEBOX_URL replied with
@@ -68,6 +80,8 @@ async def _proxy[T](call: Awaitable[T]) -> T:
         return await call
     except HomeBoxNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HomeBoxValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HomeBoxError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
@@ -170,6 +184,150 @@ async def find_by_asset_id(homebox: HomeBoxDep, asset_id: str) -> list[EntitySum
     """Zero, one, or many matches -- asset ids are not unique; the caller
     replicates HomeBox's own disambiguation on the length."""
     return await _proxy(homebox.find_by_asset_id(asset_id))
+
+
+# -- writes (opt-in via the homebox_writes_enabled setting) ---------------
+
+MAX_PHOTO_BYTES = 12 * 1024 * 1024
+_MAX_BULK_NAMES = 100
+_HEIC_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis"}
+_HEIF_BRANDS = {b"mif1", b"msf1", b"heif"}
+
+
+def _require_writes(settings: SettingsDep) -> None:
+    if not settings.effective().homebox_writes_enabled:
+        raise HTTPException(status_code=403, detail="homebox writes disabled")
+
+
+_WritesGate = [Depends(_require_writes)]
+
+
+class NamedRef(BaseModel):
+    id: str
+    name: str
+
+
+_Id = Annotated[str, Field(max_length=100)]
+_Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
+
+class BulkCreateRequest(BaseModel):
+    parent_id: str = Field(min_length=1, max_length=100)
+    entity_type_id: str | None = Field(None, max_length=100)
+    tag_ids: list[_Id] = Field(default_factory=list, max_length=50)
+    description: str | None = Field(None, max_length=1000)
+    quantity: int | None = Field(None, ge=0, le=1_000_000)
+    names: list[_Name] = Field(min_length=1, max_length=_MAX_BULK_NAMES)
+
+
+class BulkCreatedEntity(BaseModel):
+    id: str
+    name: str
+    asset_id: str
+
+
+class BulkRowResult(BaseModel):
+    index: int
+    ok: bool
+    entity: BulkCreatedEntity | None = None
+    error: str | None = None
+
+
+class BulkCreateResponse(BaseModel):
+    results: list[BulkRowResult]
+
+
+class AttachmentResponse(BaseModel):
+    entity_id: str
+    attachment_id: str | None
+    primary: bool
+
+
+def _sniff_image(head: bytes) -> tuple[str, str] | None:
+    """(extension, content type) from magic bytes -- the client-declared
+    Content-Type is never trusted."""
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg", "image/jpeg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png", "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp", "image/webp"
+    if head[4:8] == b"ftyp":
+        brand = head[8:12]
+        if brand in _HEIC_BRANDS:
+            return "heic", "image/heic"
+        if brand in _HEIF_BRANDS:
+            return "heif", "image/heif"
+    return None
+
+
+@router.post("/homebox/entities/bulk", dependencies=_WritesGate)
+async def bulk_create_entities(body: BulkCreateRequest, homebox: HomeBoxDep) -> BulkCreateResponse:
+    """Sequential (so HomeBox assigns asset ids in name order); a row HomeBox
+    rejects is reported and the rest still run, but an auth/version/
+    unavailable error aborts the whole batch (502)."""
+    results: list[BulkRowResult] = []
+    for index, name in enumerate(body.names):
+        try:
+            entity = await homebox.create_entity(
+                name,
+                parent_id=body.parent_id,
+                entity_type_id=body.entity_type_id,
+                tag_ids=body.tag_ids,
+                description=body.description,
+                quantity=body.quantity,
+            )
+        except (HomeBoxValidationError, HomeBoxNotFoundError, ValueError) as exc:
+            results.append(BulkRowResult(index=index, ok=False, error=str(exc)))
+            continue
+        except HomeBoxError as exc:
+            # Auth/version/unavailable would fail every remaining row too:
+            # abort with the same 502 _proxy gives them.
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        results.append(
+            BulkRowResult(
+                index=index,
+                ok=True,
+                entity=BulkCreatedEntity(id=entity.id, name=entity.name, asset_id=entity.asset_id),
+            )
+        )
+    return BulkCreateResponse(results=results)
+
+
+@router.post("/homebox/entities/{entity_id}/attachments", dependencies=_WritesGate)
+async def upload_entity_photo(
+    request: Request,
+    homebox: HomeBoxDep,
+    entity_id: str,
+    file: UploadFile,
+    primary: Annotated[bool, Form()] = False,
+) -> AttachmentResponse:
+    raw = await _read_capped(request, file, max_bytes=MAX_PHOTO_BYTES, status_code=413)
+    sniffed = _sniff_image(raw[:16])
+    if sniffed is None:
+        raise HTTPException(
+            status_code=415, detail="unsupported image type (allowed: jpeg, png, webp, heic, heif)"
+        )
+    ext, content_type = sniffed
+    entity = await _proxy(homebox.get_entity(entity_id))
+    stem = re.sub(r"[^A-Za-z0-9._-]", "_", entity.asset_id or entity.id)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{stem}-{stamp}.{ext}"
+    updated = await _proxy(
+        homebox.add_attachment(entity_id, filename, raw, content_type, primary=primary)
+    )
+    attachment_id = next((a.id for a in updated.attachments if a.title == filename), None)
+    return AttachmentResponse(entity_id=entity_id, attachment_id=attachment_id, primary=primary)
+
+
+@router.get("/homebox/tags", dependencies=_WritesGate)
+async def list_tags(homebox: HomeBoxDep) -> list[NamedRef]:
+    return [NamedRef(id=t.id, name=t.name) for t in await _proxy(homebox.list_tags())]
+
+
+@router.get("/homebox/entity-types", dependencies=_WritesGate)
+async def list_entity_types(homebox: HomeBoxDep) -> list[NamedRef]:
+    return [NamedRef(id=t.id, name=t.name) for t in await _proxy(homebox.list_entity_types())]
 
 
 class HomeBoxSettings(BaseModel):

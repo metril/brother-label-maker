@@ -126,11 +126,13 @@ function SwitchSettingRow({
   fieldKey,
   rows,
   resetLabel,
+  help,
 }: {
   label: string;
   fieldKey: string;
   rows: SettingRow[];
   resetLabel?: string;
+  help?: string;
 }) {
   const row = findRow(rows, fieldKey);
   const mutation = useUpdateSettings();
@@ -157,6 +159,7 @@ function SwitchSettingRow({
           />
         )}
       </div>
+      {help && <p className={helpText}>{help}</p>}
       <SettingErrorText mutation={mutation} />
     </div>
   );
@@ -513,6 +516,13 @@ function HomeboxSection({ rows }: { rows: SettingRow[] }) {
       <div className="flex flex-col gap-4">
         <HomeboxUrlField rows={rows} />
         <HomeboxApiKeyField rows={rows} />
+        <SwitchSettingRow
+          label="Allow writes to HomeBox"
+          fieldKey="homebox_writes_enabled"
+          rows={rows}
+          resetLabel="Reset to default"
+          help="Lets this app create items and upload photos in HomeBox. Your HomeBox API key needs write access."
+        />
         <QrBaseUrlPanel />
       </div>
     </section>

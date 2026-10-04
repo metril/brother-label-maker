@@ -89,7 +89,7 @@ export function SequenceEditor() {
   );
 }
 
-function NumericFields({ sequence, errors, onPatch }: { sequence: Sequence; errors: SequenceFieldErrors; onPatch: (p: Partial<Sequence>) => void }) {
+export function NumericFields({ sequence, errors, onPatch }: { sequence: Sequence; errors: SequenceFieldErrors; onPatch: (p: Partial<Sequence>) => void }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <SequenceNumberField
@@ -132,7 +132,7 @@ function NumericFields({ sequence, errors, onPatch }: { sequence: Sequence; erro
   );
 }
 
-function AlphaFields({ sequence, errors, onPatch }: { sequence: Sequence; errors: SequenceFieldErrors; onPatch: (p: Partial<Sequence>) => void }) {
+export function AlphaFields({ sequence, errors, onPatch }: { sequence: Sequence; errors: SequenceFieldErrors; onPatch: (p: Partial<Sequence>) => void }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <div>
@@ -200,7 +200,7 @@ function SequenceNumberField({ id, label, value, error, min, max, onChange }: Se
   );
 }
 
-function ListValuesField({ values, error, onChange }: { values: string[]; error?: string; onChange: (values: string[]) => void }) {
+export function ListValuesField({ values, error, onChange }: { values: string[]; error?: string; onChange: (values: string[]) => void }) {
   // A local, uncontrolled-by-`values` text buffer -- see lib/sequence.ts's
   // parseListTextarea docstring for why: re-deriving the textarea's own
   // displayed text from the PARSED `values` array on every render would

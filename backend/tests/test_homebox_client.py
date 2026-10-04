@@ -21,6 +21,7 @@ from labelmaker.homebox import (
     HomeBoxError,
     HomeBoxNotFoundError,
     HomeBoxUnavailableError,
+    HomeBoxValidationError,
     HomeBoxVersionError,
 )
 
@@ -255,3 +256,96 @@ async def test_4xx_error_body_is_truncated(client):
     with pytest.raises(HomeBoxError) as excinfo:
         await client.list_entities()
     assert len(str(excinfo.value)) < 400
+
+
+# -- writes ----------------------------------------------------------------
+
+
+async def test_create_entity_posts_camelcase_body_and_omits_unset(client):
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(f"{API}/entities").mock(
+            return_value=httpx.Response(201, json=_entity_summary(name="Cable 1"))
+        )
+        entity = await client.create_entity(
+            "Cable 1", parent_id="loc-1", entity_type_id="et-1", tag_ids=["t1"], quantity=2
+        )
+        bare = await client.create_entity("Bare")
+    import json
+
+    assert json.loads(route.calls[0].request.content) == {
+        "name": "Cable 1", "parentId": "loc-1", "entityTypeId": "et-1",
+        "tagIds": ["t1"], "quantity": 2,
+    }
+    assert json.loads(route.calls[1].request.content) == {"name": "Bare"}
+    assert route.calls[0].request.headers["authorization"] == "Bearer hb_testkey"
+    assert entity.asset_id == "000-042"
+    assert bare.id
+
+
+@pytest.mark.parametrize(
+    ("status", "exc"),
+    [
+        (422, HomeBoxValidationError),
+        (401, HomeBoxAuthError),
+        (403, HomeBoxAuthError),
+        (404, HomeBoxVersionError),
+        (405, HomeBoxVersionError),
+        (503, HomeBoxUnavailableError),
+        (400, HomeBoxError),
+    ],
+)
+async def test_create_entity_error_mapping(client, status, exc):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(f"{API}/entities").mock(return_value=httpx.Response(status, text="nope"))
+        with pytest.raises(exc):
+            await client.create_entity("x")
+
+
+async def test_write_transport_failure_is_unavailable(client):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(f"{API}/entities").mock(side_effect=httpx.ConnectError("down"))
+        with pytest.raises(HomeBoxUnavailableError):
+            await client.create_entity("x")
+
+
+async def test_list_tags_and_entity_types(client):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(f"{API}/tags").mock(
+            return_value=httpx.Response(200, json=[{"id": "t1", "name": "cables"}])
+        )
+        mock.get(f"{API}/entity-types").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": "et1", "name": "Item", "isLocation": False}]
+            )
+        )
+        tags = await client.list_tags()
+        types = await client.list_entity_types()
+    assert [(t.id, t.name) for t in tags] == [("t1", "cables")]
+    assert [(t.id, t.name) for t in types] == [("et1", "Item")]
+
+
+async def test_list_tags_404_is_too_old(client):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(f"{API}/tags").mock(return_value=httpx.Response(404))
+        with pytest.raises(HomeBoxVersionError):
+            await client.list_tags()
+
+
+async def test_add_attachment_multipart_and_encoded_id(client):
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(f"{API}/entities/a%2Fb/attachments").mock(
+            return_value=httpx.Response(
+                201, json={**_entity_summary(), "attachments": [{"id": "att1", "title": "p.jpg"}]}
+            )
+        )
+        entity = await client.add_attachment(
+            "a/b", "p.jpg", b"\xff\xd8\xffdata", "image/jpeg", primary=True
+        )
+    req = route.calls[0].request
+    assert req.headers["content-type"].startswith("multipart/form-data")
+    body = req.content
+    assert b'name="file"; filename="p.jpg"' in body
+    assert b'name="name"\r\n\r\np.jpg' in body
+    assert b'name="type"\r\n\r\nphoto' in body
+    assert b'name="primary"\r\n\r\ntrue' in body
+    assert entity.attachments[0].id == "att1"

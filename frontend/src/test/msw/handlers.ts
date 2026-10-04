@@ -551,6 +551,7 @@ export const defaultSettingsBody: SettingsResponse = {
     settingsRow("els_tape_mm", 24.0),
     settingsRow("homebox_url", null),
     { key: "homebox_api_key", set: false, source: "default", editable: true },
+    settingsRow("homebox_writes_enabled", false),
     settingsRow("keep_printer_awake", false),
     settingsRow("keep_awake_interval_min", 5),
     settingsRow("auth_mode", "none", "default", false),

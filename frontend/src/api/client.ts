@@ -11,8 +11,11 @@ import type {
   HistoryJob,
   HistoryListParams,
   HistoryListResponse,
+  HomeboxBulkCreateRequest,
+  HomeboxBulkCreateResponse,
   HomeboxEntityPage,
   HomeboxEntitySummary,
+  HomeboxNamedRef,
   HomeboxPathSegment,
   HomeboxSettings,
   HomeboxSettingsUpdate,
@@ -501,6 +504,29 @@ export function getHomeboxEntityPath(id: string): Promise<HomeboxPathSegment[]> 
  * renders all of them as cards for the user to pick from. */
 export function getHomeboxAssetMatches(assetId: string): Promise<HomeboxEntitySummary[]> {
   return request<HomeboxEntitySummary[]>(`/homebox/assets/${encodeURIComponent(assetId)}`);
+}
+
+/** POST /api/homebox/entities/bulk -- sequential server-side; per-row
+ * failures come back in `results` (HTTP 200), only a bad request (422) or a
+ * disabled-writes deployment (403) throws. */
+export function postHomeboxBulkCreate(body: HomeboxBulkCreateRequest): Promise<HomeboxBulkCreateResponse> {
+  return request<HomeboxBulkCreateResponse>("/homebox/entities/bulk", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** POST target for a photo upload (multipart: `file`, `primary`) -- exported
+ * as a path builder so an XHR-progress uploader can share it. */
+export function homeboxAttachmentsPath(entityId: string): string {
+  return `${API_BASE}/homebox/entities/${encodeURIComponent(entityId)}/attachments`;
+}
+
+/** GET /api/homebox/tags (writes-enabled deployments only). */
+export function getHomeboxTags(): Promise<HomeboxNamedRef[]> {
+  return request<HomeboxNamedRef[]>("/homebox/tags");
+}
+
+/** GET /api/homebox/entity-types (writes-enabled deployments only). */
+export function getHomeboxEntityTypes(): Promise<HomeboxNamedRef[]> {
+  return request<HomeboxNamedRef[]>("/homebox/entity-types");
 }
 
 /** GET /api/homebox/settings -- `effective_qr_base_url` is what "Add to

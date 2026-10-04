@@ -18,11 +18,13 @@ own recommendation. Where the live spec disagrees with that research doc
   EntitySummary -- HomeBox's zero/one/many asset-id disambiguation (asset
   ids are NOT unique) maps directly onto `len(result.items)`.
 
-The client is read-only by design: this app treats HomeBox purely as a
-data source (research doc's recommendation) and renders its own labels.
-All calls carry `Authorization: Bearer <hb_ key>`; the key inherits the
-creating user's permissions, so a read-only key keeps the whole
-integration read-only server-side too.
+The client is read-mostly: this app renders its own labels and treats
+HomeBox as a data source, but the opt-in write helpers (create_entity,
+add_attachment; gated by the `homebox_writes_enabled` setting at the router
+layer) can create items and upload photos. All calls carry
+`Authorization: Bearer <hb_ key>`; the key inherits the creating user's
+permissions, so a read-only key keeps the whole integration read-only
+server-side too.
 
 Error taxonomy: transport failures and 5xx raise HomeBoxUnavailableError,
 401/403 raise HomeBoxAuthError, a missing entity raises
@@ -72,6 +74,10 @@ class HomeBoxUnavailableError(HomeBoxError):
     pass
 
 
+class HomeBoxValidationError(HomeBoxError):
+    """HomeBox answered 422 to a write: the payload was rejected."""
+
+
 class _ApiModel(BaseModel):
     """Field names are snake_case locally; HomeBox's camelCase wire names
     are `validation_alias`es (NOT plain `alias`), so parsing accepts the
@@ -116,6 +122,16 @@ class EntitySummary(_ApiModel):
     image_id: str | None = Field(None, validation_alias="imageId")
 
 
+class EntityAttachment(_ApiModel):
+    """repo.EntityAttachment subset -- enough to find the attachment an
+    upload just created (HomeBox titles it with the uploaded `name`)."""
+
+    id: str = ""
+    title: str = ""
+    primary: bool = False
+    type: str = ""
+
+
 class Entity(EntitySummary):
     """repo.EntityOut -- the full single-entity shape (label-relevant
     subset; purchase/sold/warranty fields deliberately unmodeled)."""
@@ -125,6 +141,7 @@ class Entity(EntitySummary):
     manufacturer: str = ""
     notes: str = ""
     children: list[EntitySummary] = []
+    attachments: list[EntityAttachment] = []
 
 
 class EntityPage(_ApiModel):
@@ -203,25 +220,54 @@ class HomeBoxClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def _get(self, path: str, params: dict | None = None) -> httpx.Response:
-        """GET with the shared error mapping. 404 is returned to the caller
+    def _check(self, resp: httpx.Response, *, write: bool = False) -> httpx.Response:
+        """Shared status mapping. 404 is returned to the caller for reads
         (its meaning is endpoint-specific); everything else that isn't 2xx
-        raises."""
-        try:
-            resp = await self._client.get(path, params=params)
-        except httpx.HTTPError as exc:
-            raise HomeBoxUnavailableError(f"HomeBox unreachable at {self.base_url}: {exc}") from exc
+        raises. For writes 404/405 mean the route is missing (a server too
+        old for writes) and 422 is a HomeBoxValidationError."""
         if resp.status_code in (401, 403):
             raise HomeBoxAuthError(
                 f"HomeBox rejected the API key (HTTP {resp.status_code}) -- check "
                 "HOMEBOX_API_KEY (an hb_-prefixed key from HomeBox's user settings)"
+                + (" and that it has write access" if write else "")
             )
         if resp.status_code >= 500:
             raise HomeBoxUnavailableError(f"HomeBox server error (HTTP {resp.status_code})")
+        if write and resp.status_code in (404, 405):
+            raise HomeBoxVersionError(
+                f"HomeBox server too old for writes (HTTP {resp.status_code} on this route; "
+                "or the target entity no longer exists) -- upgrade HomeBox (v0.26.1+)"
+            )
+        body = resp.text[:_MAX_ERROR_BODY_CHARS]
+        if resp.status_code == 422:
+            raise HomeBoxValidationError(f"HomeBox rejected the request (HTTP 422): {body}")
         if resp.status_code >= 400 and resp.status_code != 404:
-            body = resp.text[:_MAX_ERROR_BODY_CHARS]
             raise HomeBoxError(f"HomeBox request failed (HTTP {resp.status_code}): {body}")
         return resp
+
+    async def _send(
+        self, method: str, path: str, *, write: bool = False, **kwargs
+    ) -> httpx.Response:
+        try:
+            resp = await self._client.request(method, path, **kwargs)
+        except httpx.HTTPError as exc:
+            raise HomeBoxUnavailableError(f"HomeBox unreachable at {self.base_url}: {exc}") from exc
+        return self._check(resp, write=write)
+
+    async def _get(self, path: str, params: dict | None = None) -> httpx.Response:
+        """GET with the shared error mapping (see `_check`)."""
+        return await self._send("GET", path, params=params)
+
+    async def _post_json(self, path: str, body: dict) -> httpx.Response:
+        """POST a JSON body with the shared error mapping, write flavor."""
+        return await self._send("POST", path, write=True, json=body)
+
+    async def _post_multipart(
+        self, path: str, *, files: dict, data: dict, timeout: float = 60.0
+    ) -> httpx.Response:
+        """POST multipart/form-data (uploads get a longer timeout than the
+        client's 10s default)."""
+        return await self._send("POST", path, write=True, files=files, data=data, timeout=timeout)
 
     async def status(self) -> HomeBoxStatus:
         """GET /v1/status -- unauthenticated on HomeBox's side, but sent with
@@ -311,3 +357,68 @@ class HomeBoxClient:
         if resp.status_code == 404:
             return []
         return EntityPage.model_validate(resp.json()).items
+
+    async def create_entity(
+        self,
+        name: str,
+        *,
+        parent_id: str | None = None,
+        entity_type_id: str | None = None,
+        tag_ids: list[str] | None = None,
+        description: str | None = None,
+        quantity: int | None = None,
+        location_id: str | None = None,
+        manufacturer: str | None = None,
+        model_number: str | None = None,
+    ) -> Entity:
+        """POST /v1/entities (repo.EntityCreate, camelCase) -> 201 EntityOut;
+        the server assigns assetId when auto-increment is on. Unset optional
+        fields are omitted from the body. `location_id` is only meaningful
+        when the parent is an item."""
+        body: dict = {"name": name}
+        optional = {
+            "description": description,
+            "parentId": parent_id,
+            "locationId": location_id,
+            "entityTypeId": entity_type_id,
+            "tagIds": tag_ids or None,
+            "quantity": quantity,
+            "manufacturer": manufacturer,
+            "modelNumber": model_number,
+        }
+        body.update({k: v for k, v in optional.items() if v is not None})
+        resp = await self._post_json("/entities", body)
+        return Entity.model_validate(resp.json())
+
+    async def list_tags(self) -> list[TagSummary]:
+        resp = await self._get("/tags")
+        if resp.status_code == 404:
+            raise HomeBoxVersionError("/v1/tags missing -- HomeBox server too old")
+        return [TagSummary.model_validate(t) for t in resp.json()]
+
+    async def list_entity_types(self) -> list[EntityTypeSummary]:
+        resp = await self._get("/entity-types")
+        if resp.status_code == 404:
+            raise HomeBoxVersionError("/v1/entity-types missing -- HomeBox server too old")
+        return [EntityTypeSummary.model_validate(t) for t in resp.json()]
+
+    async def add_attachment(
+        self,
+        entity_id: str,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        *,
+        type: str = "photo",  # noqa: A002 -- HomeBox's own form field name
+        primary: bool = False,
+    ) -> Entity:
+        """POST /v1/entities/{id}/attachments (multipart: file, name, type,
+        primary) -> 201 EntityOut. A 404 here is the entity (or route) being
+        absent; writes map it to the too-old-server error, so check the id
+        via get_entity first when the distinction matters."""
+        resp = await self._post_multipart(
+            f"/entities/{_path_segment(entity_id)}/attachments",
+            files={"file": (filename, content, content_type)},
+            data={"name": filename, "type": type, "primary": "true" if primary else "false"},
+        )
+        return Entity.model_validate(resp.json())

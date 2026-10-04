@@ -21,6 +21,7 @@ _EXPECTED_ROW_KEYS = {
     "els_tape_mm",
     "homebox_url",
     "homebox_api_key",
+    "homebox_writes_enabled",
     "keep_printer_awake",
     "keep_awake_interval_min",
     "auth_mode",
@@ -332,3 +333,18 @@ async def test_put_unrelated_field_does_not_touch_homebox_client(app_and_client)
     resp = await client.put("/api/settings", json={"printer_flip_pins": True})
     assert resp.status_code == 200
     assert app.state.homebox is None
+
+
+async def test_homebox_writes_enabled_defaults_off_and_roundtrips(client):
+    rows = _rows_by_key((await client.get("/api/settings")).json())
+    assert rows["homebox_writes_enabled"]["value"] is False
+    assert rows["homebox_writes_enabled"]["source"] == "default"
+
+    resp = await client.put("/api/settings", json={"homebox_writes_enabled": True})
+    assert resp.status_code == 200
+    row = _rows_by_key(resp.json())["homebox_writes_enabled"]
+    assert row["value"] is True
+    assert row["source"] == "db"
+
+    resp = await client.put("/api/settings", json={"homebox_writes_enabled": None})
+    assert _rows_by_key(resp.json())["homebox_writes_enabled"]["value"] is False
