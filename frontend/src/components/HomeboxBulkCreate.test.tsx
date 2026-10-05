@@ -66,6 +66,44 @@ describe("HomeboxBulkCreate", () => {
     expect(useTrayDrawerStore.getState().open).toBe(true);
   });
 
+  it("sends entity type, quantity and description only when set", async () => {
+    const user = userEvent.setup();
+    useTagsHandler();
+    const bodies: unknown[] = [];
+    server.use(
+      http.get("/api/homebox/entity-types", () => HttpResponse.json([{ id: "et1", name: "Cable" }])),
+      http.post("/api/homebox/entities/bulk", async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ results: [] });
+      }),
+    );
+    renderWithProviders(<HomeboxBulkCreate parent={PARENT} />);
+
+    const count = screen.getByLabelText("Count");
+    await user.clear(count);
+    await user.type(count, "1");
+    const button = await screen.findByRole("button", { name: "Create 1 & print" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ parent_id: "loc-1", tag_ids: [], names: ["Cable 1"] });
+
+    await screen.findByRole("option", { name: "Cable" });
+    await user.selectOptions(screen.getByLabelText("Entity type"), "et1");
+    await user.type(screen.getByLabelText("Quantity"), "4");
+    await user.type(screen.getByLabelText("Description"), "Spare {{seq}");
+    await user.click(button);
+    await waitFor(() => expect(bodies).toHaveLength(2));
+    expect(bodies[1]).toEqual({
+      parent_id: "loc-1",
+      tag_ids: [],
+      names: ["Cable 1"],
+      entity_type_id: "et1",
+      quantity: 4,
+      description: "Spare {seq}",
+    });
+  });
+
   it("homebox_asset label type with Show QR off builds show_qr false", async () => {
     const user = userEvent.setup();
     useTagsHandler();

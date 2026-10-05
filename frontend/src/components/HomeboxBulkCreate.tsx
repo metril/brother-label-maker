@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getHomeboxEntityPath, getHomeboxSettings, postExpand } from "../api/client";
-import { useBulkCreateEntities, useHomeboxTags } from "../hooks/useHomeboxWrite";
+import { useBulkCreateEntities, useHomeboxEntityTypes, useHomeboxTags } from "../hooks/useHomeboxWrite";
 import {
   buildBreadcrumb,
   buildHomeboxCableLabelDefinition,
@@ -15,13 +15,15 @@ import { useTrayStore } from "../stores/tray";
 import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { AlphaFields, ListValuesField, NumericFields } from "./SequenceEditor";
 import { SegmentedControl } from "./ui/SegmentedControl";
-import { Select, TextInput } from "./ui/inputs";
+import { NumberInput, Select, Textarea, TextInput } from "./ui/inputs";
 import { Switch } from "./ui/Switch";
 import { checkboxClass, errorText, fieldLabelText, helpText, panel, panelHeading, primaryButtonClass } from "./ui/styles";
 import type { HomeboxBulkRowResult, HomeboxEntitySummary, HomeboxPathSegment, Sequence, SequenceKind } from "../api/types";
 
 const MAX_NAMES = 100;
 const MAX_NAME_LEN = 255;
+const MAX_DESCRIPTION_LEN = 1000;
+const MAX_QUANTITY = 1_000_000; // router_homebox.py BulkCreateRequest: 0..1_000_000
 const SEQ_TOKEN = "{seq}";
 
 // buildBreadcrumb drops the LAST path segment (the entity itself); a new
@@ -68,12 +70,16 @@ export function HomeboxBulkCreate({ parent }: { parent: { id: string; name: stri
   const addTrayItem = useTrayStore((s) => s.addItem);
   const openDrawer = useTrayDrawerStore((s) => s.openDrawer);
   const tags = useHomeboxTags();
+  const entityTypes = useHomeboxEntityTypes();
   const bulk = useBulkCreateEntities();
 
   const [pattern, setPattern] = useState(`Cable ${SEQ_TOKEN}`);
   const [sequence, setSequence] = useState<Sequence>({ ...DEFAULT_SEQUENCE, count: 5 });
   const [tagIds, setTagIds] = useState<Set<string>>(new Set());
   const [labelKind, setLabelKind] = useState<HomeboxLabelKind>("cable_wrap");
+  const [entityTypeId, setEntityTypeId] = useState("");
+  const [quantity, setQuantity] = useState<number | undefined>(undefined);
+  const [description, setDescription] = useState("");
   const [showQr, setShowQr] = useState(true);
   const [results, setResults] = useState<HomeboxBulkRowResult[] | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
@@ -98,6 +104,7 @@ export function HomeboxBulkCreate({ parent }: { parent: { id: string; name: stri
   else if (names.length > MAX_NAMES) problem = `At most ${MAX_NAMES} items per batch.`;
   else if (names.some((n) => n === "" || n.length > MAX_NAME_LEN)) problem = `Each name must be 1-${MAX_NAME_LEN} characters.`;
   else if (names.length > 1 && !pattern.includes(SEQ_TOKEN)) problem = `Add ${SEQ_TOKEN} to the pattern so names differ.`;
+  else if (quantity !== undefined && (!Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QUANTITY)) problem = `Quantity must be a whole number from 0 to ${MAX_QUANTITY}.`;
   const canRun = problem === null && names.length > 0 && !bulk.isPending;
 
   function switchKind(kind: SequenceKind) {
@@ -119,7 +126,14 @@ export function HomeboxBulkCreate({ parent }: { parent: { id: string; name: stri
     setResults(null);
     let response;
     try {
-      response = await bulk.mutateAsync({ parent_id: parent.id, tag_ids: [...tagIds], names });
+      response = await bulk.mutateAsync({
+        parent_id: parent.id,
+        tag_ids: [...tagIds],
+        names,
+        ...(entityTypeId && { entity_type_id: entityTypeId }),
+        ...(quantity !== undefined && { quantity }),
+        ...(description.trim() && { description }),
+      });
     } catch {
       return; // surfaced through bulk.error below
     }
@@ -202,6 +216,36 @@ export function HomeboxBulkCreate({ parent }: { parent: { id: string; name: stri
               ))}
             </div>
           )}
+        </fieldset>
+
+        <fieldset className="flex flex-col gap-3 rounded-md border border-deck-800 p-3">
+          <legend className={`${fieldLabelText} px-1`}>Optional</legend>
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label htmlFor="bulk-entity-type" className={`${fieldLabelText} mb-1`}>
+                Entity type
+              </label>
+              <Select
+                id="bulk-entity-type"
+                value={entityTypeId}
+                onChange={setEntityTypeId}
+                options={[{ value: "", label: "HomeBox default" }, ...(entityTypes.data ?? []).map((t) => ({ value: t.id, label: t.name }))]}
+              />
+            </div>
+            <div>
+              <label htmlFor="bulk-quantity" className={`${fieldLabelText} mb-1`}>
+                Quantity
+              </label>
+              <NumberInput id="bulk-quantity" value={quantity} onChange={setQuantity} min={0} max={MAX_QUANTITY} step={1} className="w-28" />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="bulk-description" className={`${fieldLabelText} mb-1`}>
+              Description
+            </label>
+            <Textarea id="bulk-description" value={description} onChange={setDescription} rows={2} maxLength={MAX_DESCRIPTION_LEN} />
+            <p className={helpText}>Applied as-is to every item; {SEQ_TOKEN} is not expanded here.</p>
+          </div>
         </fieldset>
 
         <div className="flex flex-wrap items-end gap-4">

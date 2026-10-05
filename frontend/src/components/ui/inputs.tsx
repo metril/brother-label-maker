@@ -55,19 +55,21 @@ interface TextareaProps {
   onChange: (value: string) => void;
   placeholder?: string;
   rows?: number;
+  maxLength?: number;
   ariaLabel?: string;
 }
 
 /** The List-kind Sequence editor's one-value-per-line control
  * (components/SequenceEditor.tsx) -- the only current caller, so styled
  * plainly rather than added to ui/styles.ts's shared class fragments. */
-export function Textarea({ id, value, onChange, placeholder, rows = 5, ariaLabel }: TextareaProps) {
+export function Textarea({ id, value, onChange, placeholder, rows = 5, maxLength, ariaLabel }: TextareaProps) {
   return (
     <textarea
       id={id}
       value={value}
       placeholder={placeholder}
       rows={rows}
+      maxLength={maxLength}
       aria-label={ariaLabel}
       onChange={(e: ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
       className="w-full resize-y rounded-md border border-deck-600 bg-deck-800 px-3 py-1.5 text-[14px] text-deck-200 placeholder:text-deck-400"

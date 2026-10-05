@@ -486,6 +486,8 @@ export const homeboxStatusConfiguredHandler = http.get("/api/homebox/status", ()
 
 export const homeboxTreeHandler = http.get("/api/homebox/entities/tree", () => HttpResponse.json([]));
 
+export const homeboxEntityTypesHandler = http.get("/api/homebox/entity-types", () => HttpResponse.json([]));
+
 export const homeboxEntitiesHandler = http.get("/api/homebox/entities", () =>
   HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 }),
 );
@@ -619,6 +621,7 @@ export const defaultHandlers = [
   deleteHistoryHandler,
   homeboxStatusConfiguredHandler,
   homeboxTreeHandler,
+  homeboxEntityTypesHandler,
   homeboxEntitiesHandler,
   homeboxEntityPathHandler,
   homeboxAssetMatchesHandler,
