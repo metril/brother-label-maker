@@ -1,0 +1,39 @@
+# Prebuilt-image deployment: same shape as docker-compose.yml, but pulls the
+# released image from GHCR instead of building from source. No repo checkout
+# needed beyond this file:
+#   docker compose -f docker/docker-compose.ghcr.yml up -d
+# Update to the newest release:
+#   docker compose -f docker/docker-compose.ghcr.yml pull && \
+#     docker compose -f docker/docker-compose.ghcr.yml up -d
+#
+# See docker-compose.yml for the full reasoning behind each setting, and
+# ../docs/usb-setup.md for the host-side udev rule this depends on.
+
+services:
+  labelmaker:
+    # `latest` tracks the newest stable release; pin a version (e.g. `:1.2`
+    # or `:1.2.3`) via LABELMAKER_TAG for reproducible deploys.
+    image: ghcr.io/metril/brother-label-maker:${LABELMAKER_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # HOMEBOX_API_KEY deliberately absent: it's a secret and lives in the
+      # DB settings overlay (Settings page), never in this file.
+      HOMEBOX_URL: https://homebox.azureolympos.com
+      PRINTER_MODE: usb
+      PRINTER_INIT_STRATEGY: classic
+      PRINTER_FLIP_PINS: "true"
+      # Only needed if the frontend is served from a different origin.
+      # CORS_ORIGINS: '["https://labels.example.com"]'
+    volumes:
+      # Whole USB tree, not a single device node -- node paths renumber on
+      # every replug/reboot.
+      - /dev/bus/usb:/dev/bus/usb
+      - labeldata:/data
+    # USB device nodes (major 189) without `--privileged`.
+    device_cgroup_rules:
+      - "c 189:* rmw"
+
+volumes:
+  labeldata: {}

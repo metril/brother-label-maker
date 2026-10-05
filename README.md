@@ -105,7 +105,8 @@ hotplug/power-cycle caveats, a zero-libusb `usblp` fallback) is in
 [docs/usb-setup.md](docs/usb-setup.md) — read it before filing a "printer
 not found" issue against yourself.
 
-**2. Run with USB passthrough.** A GHCR-based deployment looks like this —
+**2. Run with USB passthrough.** A GHCR-based deployment looks like this
+(shipped ready-to-run as `docker/docker-compose.ghcr.yml`) —
 the repo's own `docker/docker-compose.yml` is the build-from-source variant
 of the same shape (it uses `build:` instead of `image:` and carries the
 verified printer-protocol env knobs as comments):
