@@ -9,6 +9,7 @@ import { usePrintPreviewStore } from "../stores/printPreview";
 import { useCurrentDesignStore, type CurrentDesign } from "../stores/currentDesign";
 import { useTrayDrawerStore } from "../stores/trayDrawer";
 import { useTrayStore } from "../stores/tray";
+import { homeboxStatusConfiguredHandler } from "../test/msw/handlers";
 import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import { setMediaQueryMatches } from "../test/setup";
 import type { LabelDefinition } from "../api/types";
@@ -436,5 +437,35 @@ describe("AppShell -- tray-only rail, and the preview deck nested in the middle 
     expect(deckPanel.className).not.toContain("xl:sticky");
     expect(deckPanel.className).not.toContain("xl:bottom-0");
     expect(deckPanel.className).not.toContain("xl:w-[26rem]");
+  });
+});
+
+describe("AppShell Capture nav link", () => {
+  it("renders the Capture link when HomeBox is enabled", async () => {
+    server.use(homeboxStatusConfiguredHandler);
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+    );
+    expect(await screen.findByRole("link", { name: "Capture" })).toHaveAttribute("href", "/capture");
+  });
+
+  it("does not render the Capture link when HomeBox is disabled", async () => {
+    let served = false;
+    server.use(
+      http.get("/api/homebox/status", () => {
+        served = true;
+        return HttpResponse.json({ configured: false, reachable: false, healthy: false, version: null, error: null });
+      }),
+    );
+    renderWithProviders(
+      <AppShell>
+        <div>designer content</div>
+      </AppShell>,
+    );
+    await screen.findByText("designer content");
+    await waitFor(() => expect(served).toBe(true));
+    expect(screen.queryByRole("link", { name: "Capture" })).not.toBeInTheDocument();
   });
 });
