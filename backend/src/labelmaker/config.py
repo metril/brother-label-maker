@@ -41,6 +41,10 @@ class AppConfig(BaseSettings):
     # /api/homebox/* proxy routes.
     homebox_url: str | None = None
     homebox_api_key: str | None = None
+    # Opt-in: lets this app create items and upload photos in HomeBox
+    # (router_homebox.py's write routes answer 403 while this is False).
+    # The API key must ALSO have write access on HomeBox's side.
+    homebox_writes_enabled: bool = False
     # M3: pydantic-settings parses list-typed fields as JSON, not a bare
     # comma-separated string -- the env var value must be a JSON array,
     # quoted so the shell/compose file passes the brackets/quotes through

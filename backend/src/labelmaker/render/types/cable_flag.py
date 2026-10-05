@@ -120,6 +120,16 @@ same way above, it only ever fires at the genuine floor case), for the
 same reason cable_wrap.py's own hard width check does: an over-wide
 flag's text would bleed into the blank gap region, not just clip its own
 tail.
+
+
+-- Optional QR --
+
+`qr_data` (default None -> output unchanged) puts a QR on the flag(s):
+`qr_placement="flag_a"` (default) puts it alone on flag A and the text on
+flag B; "both" puts a QR beside the text on both flags. The QR is sized to
+the flag's printable height (and width, if the flag is shorter than tall),
+sits at the flag's outer edge (left on A; right on B, rotated 180 like B's
+text), and the text is fitted into the remaining width.
 """
 
 from __future__ import annotations
@@ -140,6 +150,7 @@ from labelmaker.render.document import (
     _text_element,
 )
 from labelmaker.render.fonts import fit_font_size, font_path, list_fonts, measure_text
+from labelmaker.render.objects import qr_fit_group
 from labelmaker.render.types.base import LabelRenderer, register
 
 _LINE_SPACING = 1.15
@@ -177,6 +188,13 @@ class CableFlagParams(BaseModel):
         min_length=1,
         max_length=_MAX_LINES,
         description="1-2 lines of text, each <= 30 chars; at least one must be non-empty",
+    )
+    qr_data: str | None = Field(
+        None, description="optional QR payload; adds a QR to the flag(s), see qr_placement"
+    )
+    qr_placement: Literal["flag_a", "both"] = Field(
+        "flag_a",
+        description="flag_a: QR on flag A, text on flag B; both: QR beside the text on both flags",
     )
     text_orientation: Literal["horizontal", "vertical"] = Field(
         "horizontal",
@@ -306,8 +324,18 @@ class CableFlagRenderer(LabelRenderer):
         width_px = b3
         width_a_px, width_b_px = b1, b3 - b2
 
-        avail_a = _avail(width_a_px, height_px, padding_px, vertical)
-        avail_b = _avail(width_b_px, height_px, padding_px, vertical)
+        qr_group = ""
+        qr_size_px = 0
+        qr_both = params.qr_placement == "both"
+        if params.qr_data is not None:
+            qr_budget_px = min(height_px, min(width_a_px, width_b_px)) - 2 * padding_px
+            qr_group, qr_size_px, qr_warnings = qr_fit_group(params.qr_data, qr_budget_px)
+            warnings.extend(qr_warnings)
+        use_a = not qr_group or qr_both  # flag A carries text
+        qr_text_px = qr_size_px if qr_both else 0
+
+        avail_a = _avail(width_a_px - qr_text_px, height_px, padding_px, vertical)
+        avail_b = _avail(width_b_px - qr_text_px, height_px, padding_px, vertical)
 
         if params.font_size_px is None:
             fit_a = fit_font_size(
@@ -318,7 +346,7 @@ class CableFlagRenderer(LabelRenderer):
                 lines, params.font_family, *avail_b, params.bold,
                 line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
-            font_px = min(fit_a, fit_b)
+            font_px = min(fit_a, fit_b) if use_a else fit_b
             if font_px <= _MIN_FONT_PX:
                 warnings.append(
                     RenderWarning(
@@ -345,7 +373,7 @@ class CableFlagRenderer(LabelRenderer):
                 lines, params.font_family, *avail_b, params.bold,
                 line_spacing=_LINE_SPACING, min_px=_MIN_FONT_PX, max_px=_MAX_FONT_PX,
             )
-            font_px = min(params.font_size_px, fit_a, fit_b)
+            font_px = min(params.font_size_px, *((fit_a, fit_b) if use_a else (fit_b,)))
             if font_px < params.font_size_px:
                 warnings.append(
                     RenderWarning(
@@ -366,7 +394,7 @@ class CableFlagRenderer(LabelRenderer):
             ),
             default=0,
         )
-        for max_width_px in (avail_a[0], avail_b[0]):
+        for max_width_px in (avail_a[0], avail_b[0]) if use_a else (avail_b[0],):
             if widest_px > max_width_px:
                 raise ValueError(
                     f"text too long for a {params.flag_length_mm}mm flag on a "
@@ -377,6 +405,19 @@ class CableFlagRenderer(LabelRenderer):
         cy = height_px / 2
         cx_a = b1 / 2
         cx_b = (b2 + b3) / 2
+        qr_a_svg = qr_b_svg = ""
+        if qr_group:
+            qy = _fmt_num(cy - qr_size_px / 2)
+            qx_a = padding_px if qr_both else _fmt_num((b1 - qr_size_px) / 2)
+            qr_a_svg = f'<g transform="translate({qx_a},{qy})">{qr_group}</g>'
+            if qr_both:
+                qx_b = b3 - padding_px - qr_size_px
+                qr_b_svg = (
+                    f'<g transform="rotate(180, {_fmt_num(qx_b + qr_size_px / 2)}, '
+                    f'{_fmt_num(cy)})"><g transform="translate({qx_b},{qy})">{qr_group}</g></g>'
+                )
+                cx_a += qr_size_px / 2  # text region right of flag A's QR
+                cx_b -= qr_size_px / 2  # text region left of flag B's QR
         group_a = _text_group(cx_a, cy, lines, params.font_family, font_px, params.bold)
         group_b = _text_group(cx_b, cy, lines, params.font_family, font_px, params.bold)
 
@@ -391,6 +432,8 @@ class CableFlagRenderer(LabelRenderer):
 
         fold_guides = _dashed_fold_guide(b1, height_px) + _dashed_fold_guide(b2, height_px)
 
-        body = svg_a + svg_b + fold_guides
+        if not use_a:
+            svg_a = ""  # flag A carries only the QR
+        body = qr_a_svg + svg_a + qr_b_svg + svg_b + fold_guides
         svg = _svg_document(width_px, height_px, body)
         return RenderedLabel(svg=svg, width_px=width_px, height_px=height_px, warnings=warnings)

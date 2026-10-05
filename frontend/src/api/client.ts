@@ -11,8 +11,11 @@ import type {
   HistoryJob,
   HistoryListParams,
   HistoryListResponse,
+  HomeboxBulkCreateRequest,
+  HomeboxBulkCreateResponse,
   HomeboxEntityPage,
   HomeboxEntitySummary,
+  HomeboxNamedRef,
   HomeboxPathSegment,
   HomeboxSettings,
   HomeboxSettingsUpdate,
@@ -149,6 +152,9 @@ export function extractErrorDetail(body: unknown, fallback: string): string {
   return fallback;
 }
 
+// `init.signal` (an AbortSignal, e.g. TanStack Query's own `signal` so a
+// superseded query aborts its in-flight fetch) rides through the `...init`
+// spread below straight into fetch().
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // `...init` spreads FIRST so the computed `headers` below always wins --
   // reversed, an `init.headers` key (even `undefined`, which every call
@@ -260,10 +266,11 @@ export function deleteImage(imageId: string): Promise<void> {
   return request<void>(`/images/${imageId}`, { method: "DELETE" });
 }
 
-export function postPreview(body: PreviewRequest): Promise<PreviewResponse> {
+export function postPreview(body: PreviewRequest, signal?: AbortSignal): Promise<PreviewResponse> {
   return request<PreviewResponse>("/render/preview", {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -277,10 +284,11 @@ export function postPrint(body: PrintRequest): Promise<PrintJobResponse> {
 /** POST /api/print/estimate (task 2.9): the SAME body postPrint() accepts,
  * returning a tape-usage estimate WITHOUT creating a job -- what the
  * JobTray calls before committing to an actual print. */
-export function postPrintEstimate(body: PrintRequest): Promise<PrintEstimateResponse> {
+export function postPrintEstimate(body: PrintRequest, signal?: AbortSignal): Promise<PrintEstimateResponse> {
   return request<PrintEstimateResponse>("/print/estimate", {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -292,10 +300,11 @@ export function postPrintEstimate(body: PrintRequest): Promise<PrintEstimateResp
  * as postPrintEstimate -- no history entry, nothing enqueued). See
  * api/types.ts's ChainedPreviewResponse for the png_b64/segments UNIT TRAP
  * (always mm, never pixels). */
-export function postPrintPreview(body: PrintPreviewRequest): Promise<ChainedPreviewResponse> {
+export function postPrintPreview(body: PrintPreviewRequest, signal?: AbortSignal): Promise<ChainedPreviewResponse> {
   return request<ChainedPreviewResponse>("/print/preview", {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -495,6 +504,29 @@ export function getHomeboxEntityPath(id: string): Promise<HomeboxPathSegment[]> 
  * renders all of them as cards for the user to pick from. */
 export function getHomeboxAssetMatches(assetId: string): Promise<HomeboxEntitySummary[]> {
   return request<HomeboxEntitySummary[]>(`/homebox/assets/${encodeURIComponent(assetId)}`);
+}
+
+/** POST /api/homebox/entities/bulk -- sequential server-side; per-row
+ * failures come back in `results` (HTTP 200), only a bad request (422) or a
+ * disabled-writes deployment (403) throws. */
+export function postHomeboxBulkCreate(body: HomeboxBulkCreateRequest): Promise<HomeboxBulkCreateResponse> {
+  return request<HomeboxBulkCreateResponse>("/homebox/entities/bulk", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** POST target for a photo upload (multipart: `file`, `primary`) -- exported
+ * as a path builder so an XHR-progress uploader can share it. */
+export function homeboxAttachmentsPath(entityId: string): string {
+  return `${API_BASE}/homebox/entities/${encodeURIComponent(entityId)}/attachments`;
+}
+
+/** GET /api/homebox/tags (writes-enabled deployments only). */
+export function getHomeboxTags(): Promise<HomeboxNamedRef[]> {
+  return request<HomeboxNamedRef[]>("/homebox/tags");
+}
+
+/** GET /api/homebox/entity-types (writes-enabled deployments only). */
+export function getHomeboxEntityTypes(): Promise<HomeboxNamedRef[]> {
+  return request<HomeboxNamedRef[]>("/homebox/entity-types");
 }
 
 /** GET /api/homebox/settings -- `effective_qr_base_url` is what "Add to

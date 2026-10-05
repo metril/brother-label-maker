@@ -754,3 +754,20 @@ async def test_print_jobs_kind_defaults_to_print_and_accepts_feed_cut():
         assert kinds[feed_cut_job["id"]] == "feed_cut"
     finally:
         await db.close()
+
+
+async def test_start_job_if_queued_is_a_cas():
+    db = await Database.open(":memory:")
+    try:
+        job = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        assert await db.start_job_if_queued(job["id"]) is True
+        assert (await db.get_job(job["id"]))["status"] == "printing"
+        assert await db.start_job_if_queued(job["id"]) is False  # no longer queued
+
+        canceled = await db.create_print_job({"labels": []}, label_count=1, chain_mode="cut_each")
+        assert await db.cancel_job_if_queued(canceled["id"]) is True
+        assert await db.start_job_if_queued(canceled["id"]) is False
+        assert (await db.get_job(canceled["id"]))["status"] == "canceled"
+        assert await db.start_job_if_queued("does-not-exist") is False
+    finally:
+        await db.close()

@@ -21,6 +21,8 @@ and deps.get_homebox's 503 fires before any HomeBoxClient exists).
 
 from __future__ import annotations
 
+import re
+
 import httpx
 import pytest
 import respx
@@ -346,3 +348,196 @@ async def test_proxy_routes_502_not_500_on_unparseable_upstream(client, hb_mock)
     resp = await client.get("/api/homebox/entities")
     assert resp.status_code == 502
     assert "could not parse" in resp.json()["detail"]
+
+
+# -- writes (homebox_writes_enabled) ---------------------------------------
+
+_WRITES = pytest.mark.parametrize(
+    "app_config",
+    [{"homebox_url": BASE, "homebox_api_key": "hb_k", "homebox_writes_enabled": True}],
+    indirect=True,
+)
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+_HEIC = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 32
+
+
+def _created(name: str, asset_id: str = "000-001", **kw) -> dict:
+    return {"id": f"id-{name}", "name": name, "assetId": asset_id, **kw}
+
+
+@_CONFIGURED
+@pytest.mark.parametrize(
+    ("method", "path", "kwargs"),
+    [
+        ("post", "/api/homebox/entities/bulk", {"json": {"parent_id": "p", "names": ["a"]}}),
+        ("post", "/api/homebox/entities/e1/attachments", {"files": {"file": ("a.jpg", _JPEG)}}),
+        ("get", "/api/homebox/tags", {}),
+        ("get", "/api/homebox/entity-types", {}),
+    ],
+)
+async def test_write_routes_403_when_disabled(app_and_client, method, path, kwargs):
+    _, client = app_and_client
+    resp = await getattr(client, method)(path, **kwargs)
+    assert resp.status_code == 403
+    assert resp.json() == {"detail": "homebox writes disabled"}
+
+
+@_WRITES
+async def test_bulk_create_in_order_with_partial_failure(app_and_client, hb_mock):
+    route = hb_mock.post(f"{API}/entities").mock(
+        side_effect=[
+            httpx.Response(201, json=_created("A", "000-001")),
+            httpx.Response(422, text="name too long"),
+            httpx.Response(201, json=_created("C", "000-002")),
+        ]
+    )
+    _, client = app_and_client
+    resp = await client.post(
+        "/api/homebox/entities/bulk",
+        json={"parent_id": "p", "tag_ids": ["t1"], "names": [" A ", "B", "C"], "quantity": 1},
+    )
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert [r["ok"] for r in results] == [True, False, True]
+    assert results[0] == {
+        "index": 0, "ok": True, "error": None,
+        "entity": {"id": "id-A", "name": "A", "asset_id": "000-001"},
+    }
+    assert results[1]["entity"] is None
+    assert "422" in results[1]["error"]
+    assert route.call_count == 3
+    import json
+
+    sent = json.loads(route.calls[0].request.content)
+    assert sent == {"name": "A", "parentId": "p", "tagIds": ["t1"], "quantity": 1}
+
+
+@_WRITES
+async def test_bulk_create_aborts_on_upstream_auth_error(app_and_client, hb_mock):
+    route = hb_mock.post(f"{API}/entities").mock(return_value=httpx.Response(401))
+    _, client = app_and_client
+    resp = await client.post(
+        "/api/homebox/entities/bulk", json={"parent_id": "p", "names": ["a", "b", "c"]}
+    )
+    assert resp.status_code == 502
+    assert "rejected the API key" in resp.json()["detail"]
+    assert route.call_count == 1
+
+
+@_WRITES
+@pytest.mark.parametrize(
+    "names", [["x"] * 101, [], ["ok", "   "], ["y" * 256]], ids=["101", "none", "blank", "long"]
+)
+async def test_bulk_create_rejects_bad_names(app_and_client, names):
+    _, client = app_and_client
+    resp = await client.post("/api/homebox/entities/bulk", json={"parent_id": "p", "names": names})
+    assert resp.status_code == 422
+
+
+@_WRITES
+async def test_upload_photo_ok_builds_filename_and_returns_attachment_id(app_and_client, hb_mock):
+    hb_mock.get(f"{API}/entities/e1").mock(
+        return_value=httpx.Response(200, json=_created("A", "000-042"))
+    )
+    route = hb_mock.post(f"{API}/entities/e1/attachments").mock(
+        side_effect=lambda req: httpx.Response(
+            201,
+            json={
+                **_created("A", "000-042"),
+                "attachments": [{"id": "att9", "title": _filename_from(req)}],
+            },
+        )
+    )
+    _, client = app_and_client
+    resp = await client.post(
+        "/api/homebox/entities/e1/attachments",
+        files={"file": ("whatever.bin", _PNG, "application/octet-stream")},
+        data={"primary": "true"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"entity_id": "e1", "attachment_id": "att9", "primary": True}
+    name = _filename_from(route.calls[0].request)
+    assert re.fullmatch(r"000-042-\d{8}T\d{6}Z\.png", name)
+    assert b"image/png" in route.calls[0].request.content
+    assert b'name="primary"\r\n\r\ntrue' in route.calls[0].request.content
+
+
+def _filename_from(req) -> str:
+    return re.search(rb'filename="([^"]+)"', req.content).group(1).decode()
+
+
+@_WRITES
+async def test_upload_photo_heic_by_magic_even_with_wrong_header(app_and_client, hb_mock):
+    hb_mock.get(f"{API}/entities/e1").mock(return_value=httpx.Response(200, json=_created("A", "")))
+    route = hb_mock.post(f"{API}/entities/e1/attachments").mock(
+        return_value=httpx.Response(201, json=_created("A", ""))
+    )
+    _, client = app_and_client
+    resp = await client.post(
+        "/api/homebox/entities/e1/attachments",
+        files={"file": ("x.txt", _HEIC, "text/plain")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["attachment_id"] is None
+    assert re.fullmatch(r"id-A-\d{8}T\d{6}Z\.heic", _filename_from(route.calls[0].request))
+
+
+@_WRITES
+async def test_upload_photo_bad_magic_is_415_even_if_header_says_jpeg(app_and_client):
+    _, client = app_and_client
+    resp = await client.post(
+        "/api/homebox/entities/e1/attachments",
+        files={"file": ("a.jpg", b"GIF89a" + b"\x00" * 20, "image/jpeg")},
+    )
+    assert resp.status_code == 415
+
+
+@_WRITES
+async def test_upload_photo_over_cap_is_413(app_and_client, monkeypatch):
+    monkeypatch.setattr("labelmaker.api.router_homebox.MAX_PHOTO_BYTES", 1024)
+    _, client = app_and_client
+    resp = await client.post(
+        "/api/homebox/entities/e1/attachments",
+        files={"file": ("a.jpg", _JPEG + b"\x00" * 2048, "image/jpeg")},
+    )
+    assert resp.status_code == 413
+
+
+@_WRITES
+async def test_tags_and_entity_types_and_upstream_422(app_and_client, hb_mock):
+    hb_mock.get(f"{API}/tags").mock(
+        return_value=httpx.Response(200, json=[{"id": "t1", "name": "x", "color": "#fff"}])
+    )
+    hb_mock.get(f"{API}/entity-types").mock(return_value=httpx.Response(422, text="bad"))
+    _, client = app_and_client
+    resp = await client.get("/api/homebox/tags")
+    assert resp.json() == [{"id": "t1", "name": "x"}]
+    assert (await client.get("/api/homebox/entity-types")).status_code == 422
+
+
+_OIDC_WRITES = pytest.mark.parametrize(
+    "app_config",
+    [
+        {
+            "homebox_url": BASE,
+            "homebox_api_key": "hb_k",
+            "homebox_writes_enabled": True,
+            "auth_mode": "oidc",
+            "oidc_issuer": "https://idp.test",
+            "oidc_client_id": "cid",
+            "oidc_client_secret": "secret",
+            "session_secret": "unit-test-session-secret-do-not-reuse",
+        }
+    ],
+    indirect=True,
+)
+
+
+@_OIDC_WRITES
+async def test_write_routes_require_auth_in_oidc_mode(client):
+    resp = await client.post(
+        "/api/homebox/entities/bulk", json={"parent_id": "p", "names": ["a"]}
+    )
+    assert resp.status_code == 401
+    assert (await client.get("/api/homebox/tags")).status_code == 401

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, getHomeboxEntityPath, getHomeboxSettings } from "../api/client";
+import { HomeboxBulkCreate } from "../components/HomeboxBulkCreate";
 import { HomeboxEntityRow } from "../components/HomeboxEntityRow";
 import { HomeboxLocationTree } from "../components/HomeboxLocationTree";
 import { Pending } from "../components/ui/Pending";
@@ -16,9 +17,17 @@ import {
   typeHeading,
 } from "../components/ui/styles";
 import { useHomeboxAssetMatches, useHomeboxEntities } from "../hooks/useHomeboxEntities";
+import { useSettingsQuery } from "../hooks/useSettings";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
 import { useHomeboxTree } from "../hooks/useHomeboxTree";
-import { buildBreadcrumb, buildHomeboxLabelDefinition, describeHomeboxEntity, matchesAssetIdShape } from "../lib/homebox";
+import {
+  buildBreadcrumb,
+  buildHomeboxCableLabelDefinition,
+  buildHomeboxLabelDefinition,
+  describeHomeboxEntity,
+  matchesAssetIdShape,
+  type HomeboxLabelKind,
+} from "../lib/homebox";
 import { useDesignerStore } from "../stores/designer";
 import { useTrayStore } from "../stores/tray";
 import type { HomeboxEntitySummary, HomeboxTreeItem } from "../api/types";
@@ -45,6 +54,7 @@ export function Homebox() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Map<string, HomeboxEntitySummary>>(new Map());
+  const [labelKinds, setLabelKinds] = useState<Record<string, HomeboxLabelKind>>({});
   const [addedCount, setAddedCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -63,6 +73,9 @@ export function Homebox() {
   const statusReady = statusData?.configured === true && statusData.reachable === true && statusData.healthy === true;
   const isAssetIdShape = matchesAssetIdShape(q);
 
+  const settingsQuery = useSettingsQuery();
+  const writesEnabled = settingsQuery.data?.settings.find((row) => row.key === "homebox_writes_enabled")?.value === true;
+
   const tree = useHomeboxTree(statusReady);
   const entities = useHomeboxEntities({
     q: q || undefined,
@@ -80,7 +93,12 @@ export function Homebox() {
       // structuredClone: a tray item is a frozen copy (stores/tray.ts) --
       // Designer.tsx clones its definition the same way, so the live
       // designer-store tape object reference never leaks into the tray.
-      return targets.map((entity, i) => buildHomeboxLabelDefinition(entity, buildBreadcrumb(paths[i]!), settings.effective_qr_base_url, structuredClone(tape)));
+      return targets.map((entity, i) => {
+        const kind = labelKinds[entity.id] ?? "homebox_asset";
+        return kind === "homebox_asset"
+          ? buildHomeboxLabelDefinition(entity, buildBreadcrumb(paths[i]!), settings.effective_qr_base_url, structuredClone(tape))
+          : buildHomeboxCableLabelDefinition(entity, kind, settings.effective_qr_base_url, structuredClone(tape));
+      });
     },
     onSuccess: (definitions, targets) => {
       definitions.forEach((definition, i) => {
@@ -199,6 +217,7 @@ export function Homebox() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {writesEnabled && <HomeboxBulkCreate parent={selectedLocation} />}
           <div className={panel}>
             <label htmlFor="homebox-search" className={`${fieldLabelText} mb-1 block`}>
               Search
@@ -233,7 +252,14 @@ export function Homebox() {
               ) : (
                 <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {assetMatches.data.map((entity) => (
-                    <HomeboxEntityRow key={entity.id} entity={entity} checked={selected.has(entity.id)} onToggle={() => toggleSelect(entity)} />
+                    <HomeboxEntityRow
+                      key={entity.id}
+                      entity={entity}
+                      checked={selected.has(entity.id)}
+                      onToggle={() => toggleSelect(entity)}
+                      labelKind={labelKinds[entity.id] ?? "homebox_asset"}
+                      onLabelKindChange={(kind) => setLabelKinds((prev) => ({ ...prev, [entity.id]: kind }))}
+                    />
                   ))}
                 </ul>
               )}
@@ -268,7 +294,14 @@ export function Homebox() {
               <>
                 <ul className="flex flex-col gap-2">
                   {pageItems.map((entity) => (
-                    <HomeboxEntityRow key={entity.id} entity={entity} checked={selected.has(entity.id)} onToggle={() => toggleSelect(entity)} />
+                    <HomeboxEntityRow
+                      key={entity.id}
+                      entity={entity}
+                      checked={selected.has(entity.id)}
+                      onToggle={() => toggleSelect(entity)}
+                      labelKind={labelKinds[entity.id] ?? "homebox_asset"}
+                      onLabelKindChange={(kind) => setLabelKinds((prev) => ({ ...prev, [entity.id]: kind }))}
+                    />
                   ))}
                 </ul>
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">

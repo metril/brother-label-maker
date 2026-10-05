@@ -3,6 +3,19 @@
 #
 # Trigger:
 #   - push of a tag matching `v*` (e.g. v1.2.3) -- the normal release path.
+#   - workflow_call -- the automatic path. auto-release.yml computes the next
+#     semver from conventional commits on every push to main, creates the
+#     tag + GitHub Release, then calls this workflow with `version` (e.g.
+#     "0.2.0", NO leading v) and `move_latest: true`. This direct call is
+#     needed because a tag pushed with GITHUB_TOKEN deliberately does NOT
+#     fire the `push: tags` trigger below (GitHub suppresses events caused
+#     by GITHUB_TOKEN to prevent recursive runs), so the tag auto-release
+#     creates would otherwise never be built. In this mode the jobs check
+#     out `refs/tags/v<version>` (not the caller's ref, which is main) and
+#     metadata-action is told the version explicitly via `value=`, because
+#     GITHUB_REF is main rather than a semver tag. The CALLER must grant
+#     at least `contents: read` + `packages: write` (a called workflow can
+#     only narrow the caller's token, never widen it).
 #   - workflow_dispatch -- manual re-run. Run this against an existing
 #     release tag (pick it from the "Use workflow from" ref selector, not
 #     a branch): the image tags below are all derived from `type=semver`,
@@ -23,6 +36,10 @@
 # CURRENT ref (it never consults the registry), so without the
 # `enable=push` guard a workflow_dispatch re-run of an old tag would move
 # `latest` BACKWARDS onto that old version for every `:latest` puller.
+# For workflow_call, github.event_name is the CALLER's event (push, on
+# main), so that guard alone would wrongly fire; the rule is therefore
+# (push AND not a workflow_call AND no '-' in the tag) OR the caller's
+# explicit `move_latest: true`.
 #
 # docs/usb-setup.md and the deploy docs (task 4.4) reference the published
 # image as `ghcr.io/<owner>/brother-label-maker:latest`.
@@ -41,6 +58,16 @@ on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version to build, without the leading v (e.g. 0.2.0); the v<version> tag must already exist"
+        type: string
+        required: true
+      move_latest:
+        description: "Also move the :latest image tag onto this version"
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -62,6 +89,9 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v7
+        with:
+          # workflow_call: test/build the tagged commit, not main's tip.
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
 
       - name: Install uv
         # Exact tag, not a floating major: astral-sh/setup-uv stopped
@@ -89,6 +119,9 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v7
+        with:
+          # workflow_call: test/build the tagged commit, not main's tip.
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
 
       - name: Install Node
         uses: actions/setup-node@v7
@@ -120,6 +153,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # workflow_call: test/build the tagged commit, not main's tip.
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -146,9 +182,9 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(github.ref_name, '-') }}
+            type=semver,pattern={{version}}${{ inputs.version && format(',value=v{0}', inputs.version) || '' }}
+            type=semver,pattern={{major}}.{{minor}}${{ inputs.version && format(',value=v{0}', inputs.version) || '' }}
+            type=raw,value=latest,enable=${{ (github.event_name == 'push' && !inputs.version && !contains(github.ref_name, '-')) || inputs.move_latest == true }}
 
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v7

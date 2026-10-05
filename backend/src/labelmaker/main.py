@@ -98,6 +98,17 @@ def _require_oidc_config(cfg: AppConfig) -> None:
         )
 
 
+# Python's `mimetypes` table varies by platform/version (a minimal Docker
+# image may have no /etc/mime.types at all), and browsers refuse
+# `WebAssembly.instantiateStreaming` on anything but application/wasm (the
+# QR scanner's zxing .wasm) and ignore a manifest not served as JSON-ish --
+# so these two are pinned rather than guessed.
+_STATIC_MEDIA_TYPES = {
+    ".wasm": "application/wasm",
+    ".webmanifest": "application/manifest+json",
+}
+
+
 def _resolve_static_dir() -> Path | None:
     """`frontend/dist`, resolved relative to the repo root (not cwd) so
     `uv run uvicorn ...` works the same from any directory -- overridable via
@@ -355,7 +366,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 is_real_file = False
 
             if is_real_file:
-                return FileResponse(candidate)
+                media_type = _STATIC_MEDIA_TYPES.get(candidate.suffix.lower())
+                return FileResponse(candidate, media_type=media_type)
             return FileResponse(static_dir / "index.html")
 
     return app

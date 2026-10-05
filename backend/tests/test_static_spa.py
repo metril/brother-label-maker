@@ -33,6 +33,8 @@ async def spa_client(tmp_path, monkeypatch):
     assets_dir = static_dir / "assets"
     assets_dir.mkdir()
     (assets_dir / "app.js").write_text("console.log('hi');")
+    (assets_dir / "zxing_reader-abc.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+    (static_dir / "manifest.webmanifest").write_text('{"start_url": "/capture"}')
 
     monkeypatch.setenv("STATIC_DIR", str(static_dir))
 
@@ -83,6 +85,24 @@ async def test_real_static_asset_still_served(spa_client):
     assert resp.status_code == 200
     assert resp.text == "console.log('hi');"
     assert "javascript" in resp.headers["content-type"]
+
+
+async def test_wasm_and_webmanifest_get_explicit_media_types(spa_client):
+    wasm = await spa_client.get("/assets/zxing_reader-abc.wasm")
+    assert wasm.status_code == 200
+    assert wasm.headers["content-type"] == "application/wasm"
+    assert wasm.content.startswith(b"\x00asm")
+
+    manifest = await spa_client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+
+
+async def test_capture_route_falls_through_to_index_html(spa_client):
+    resp = await spa_client.get("/capture")
+    assert resp.status_code == 200
+    assert "Label Studio" in resp.text
+    assert resp.headers["content-type"].startswith("text/html")
 
 
 async def test_real_api_endpoint_still_wins_over_the_catch_all(spa_client):

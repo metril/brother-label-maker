@@ -106,6 +106,7 @@ class SettingsOverrides(BaseModel):
     # max_length mirrors router_homebox.py's own HomeBoxSettingsUpdate.qr_base_url bound.
     homebox_url: str | None = Field(default=None, max_length=255)
     homebox_api_key: str | None = Field(default=None, max_length=500)
+    homebox_writes_enabled: bool | None = None
     keep_printer_awake: bool | None = None
     keep_awake_interval_min: int | None = Field(default=None, ge=1, le=60)
 
@@ -152,6 +153,7 @@ class EffectiveSettings(BaseModel):
     els_tape_mm: float
     homebox_url: str | None
     homebox_api_key: str | None
+    homebox_writes_enabled: bool
     keep_printer_awake: bool
     keep_awake_interval_min: int
 

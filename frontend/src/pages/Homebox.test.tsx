@@ -194,4 +194,48 @@ describe("Homebox page", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("HomeBox server error (HTTP 503)");
   });
+
+  it("shows the bulk-create panel only when homebox_writes_enabled is on", async () => {
+    server.use(
+      http.get("/api/homebox/entities", () => HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 })),
+    );
+    const { unmount } = renderWithProviders(<Homebox />, { route: "/homebox" });
+    await screen.findByText("No entities to show.");
+    expect(screen.queryByRole("heading", { name: /Bulk create/ })).not.toBeInTheDocument();
+    unmount();
+
+    server.use(
+      http.get("/api/homebox/tags", () => HttpResponse.json([])),
+      http.get("/api/settings", () =>
+        HttpResponse.json({
+          settings: [{ key: "homebox_writes_enabled", value: true, source: "db", editable: true }],
+        }),
+      ),
+    );
+    renderWithProviders(<Homebox />, { route: "/homebox" });
+    expect(await screen.findByRole("heading", { name: /Bulk create/ })).toBeInTheDocument();
+  });
+
+  it("a row's cable label type builds a cable_wrap definition when added to the tray", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/homebox/entities", () =>
+        HttpResponse.json({ items: [entitySummary()], page: 1, page_size: 50, total: 1 }),
+      ),
+      http.get("/api/homebox/settings", () =>
+        HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "https://homebox.example.com" }),
+      ),
+    );
+    renderWithProviders(<Homebox />, { route: "/homebox" });
+
+    await user.selectOptions(await screen.findByLabelText("Label type for Impact Driver"), "cable_wrap");
+    await user.click(screen.getByLabelText("Select Impact Driver"));
+    await user.click(await screen.findByRole("button", { name: "Add 1 to tray" }));
+
+    await waitFor(() => expect(useTrayStore.getState().items).toHaveLength(1));
+    expect(useTrayStore.getState().items[0]!.definition).toMatchObject({
+      type: "cable_wrap",
+      params: { lines: ["Impact Driver", "000-001"], qr_data: "https://homebox.example.com/a/000-001" },
+    });
+  });
 });

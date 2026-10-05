@@ -275,7 +275,7 @@ a clear error naming which env var is missing.
 
 ## Container image
 
-Published to GHCR on tagged releases, built for `linux/amd64` and
+Published to GHCR on every release, built for `linux/amd64` and
 `linux/arm64` (`.github/workflows/release.yml`):
 
 ```
@@ -284,9 +284,17 @@ ghcr.io/metril/brother-label-maker:<major>.<minor>
 ghcr.io/metril/brother-label-maker:<version>          # e.g. 1.2.3
 ```
 
-`latest` only ever moves on a real tag push of a non-prerelease version —
-running the release workflow manually (`workflow_dispatch`) against an old
-tag never moves it backwards.
+Releases are automatic: every merge to `main` that contains `feat`, `fix`,
+`perf` or `revert` commits (conventional commits; `!:` / `BREAKING CHANGE`
+bumps major) makes `.github/workflows/auto-release.yml` compute the next
+version, push the `v<version>` tag, create a GitHub Release with generated
+notes, and publish `:<version>`, `:<major>.<minor>` and `:latest`. The first
+release is `0.1.0`. Pushes with only `docs`/`chore`/`test`/`ci`/`refactor`/
+`style` commits publish nothing. Keep PR titles and commit messages in conventional-commit form so they are picked up. Pushing a `v*` tag by hand still works too.
+
+`latest` only moves on a new release (automatic, or a manual non-prerelease
+tag push) — running the release workflow manually (`workflow_dispatch`)
+against an old tag never moves it backwards.
 
 Two one-time notes for the maintainer: the image exists only from the first
 `v*` tag push onward, and GHCR packages created by `GITHUB_TOKEN` are

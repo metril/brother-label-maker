@@ -278,3 +278,24 @@ async def test_cancellation_propagates_cleanly(db, cfg, fast_intervals):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert task.cancelled()
+
+
+async def test_interval_change_applies_without_waiting_out_the_old_interval(
+    usb_overlay, monkeypatch
+):
+    monkeypatch.setattr(keepalive, "_RECHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(keepalive, "_SECONDS_PER_MINUTE", 0.5)
+    await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 2})
+    calls: list[None] = []
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
+    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+
+    task = asyncio.create_task(run_keepalive(state))
+    await asyncio.sleep(0.1)
+    await usb_overlay.set_many({"keep_awake_interval_min": 1})  # 0.5s, vs the old 1.0s sleep
+    await asyncio.sleep(0.7)  # old code: still asleep (1.0s); new: polled at ~0.5s
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert len(calls) >= 1

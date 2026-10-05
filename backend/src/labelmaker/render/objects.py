@@ -83,6 +83,8 @@ _SMALL_MODULE_PX = 2
 # constant, not `tape.print_dots`).
 _MAX_HEAD_DOTS = 128
 
+_FIT_MAX_MODULE_PX = 20  # qr_fit_group module cap
+
 _QR_ERROR_CORRECTION = qrcode.constants.ERROR_CORRECT_M
 
 # Code39's own charset (ISO/IEC 16388): digits, uppercase A-Z, and
@@ -222,6 +224,24 @@ def qr_object(
     return BarcodeResult(
         svg_group=svg_group, width_px=size_px, height_px=size_px, warnings=warnings
     )
+
+
+def qr_fit_group(data: str, height_px: int) -> tuple[str, int, list[RenderWarning]]:
+    """QR sized to the largest module (<= `_FIT_MAX_MODULE_PX`) that fits
+    `height_px`, quiet zone included. Returns the code's own (0,0)-relative
+    SVG group, its square pixel size, and `qr_object`'s own warnings. Raises
+    ValueError if even 1px modules don't fit. Shared by homebox_asset.py,
+    cable_wrap.py and cable_flag.py."""
+    total_modules = qr_object(data, module_px=1).width_px
+    module_px = height_px // total_modules
+    if module_px < 1:
+        raise ValueError(
+            f"QR code needs at least {total_modules}px of print height (only "
+            f"{height_px}px available on this tape) -- try a taller tape"
+        )
+    module_px = min(module_px, _FIT_MAX_MODULE_PX)
+    result = qr_object(data, module_px=module_px)
+    return result.svg_group, result.width_px, result.warnings
 
 
 def _bars_object(

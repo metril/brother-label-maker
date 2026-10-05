@@ -486,6 +486,8 @@ export const homeboxStatusConfiguredHandler = http.get("/api/homebox/status", ()
 
 export const homeboxTreeHandler = http.get("/api/homebox/entities/tree", () => HttpResponse.json([]));
 
+export const homeboxEntityTypesHandler = http.get("/api/homebox/entity-types", () => HttpResponse.json([]));
+
 export const homeboxEntitiesHandler = http.get("/api/homebox/entities", () =>
   HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 }),
 );
@@ -551,6 +553,7 @@ export const defaultSettingsBody: SettingsResponse = {
     settingsRow("els_tape_mm", 24.0),
     settingsRow("homebox_url", null),
     { key: "homebox_api_key", set: false, source: "default", editable: true },
+    settingsRow("homebox_writes_enabled", false),
     settingsRow("keep_printer_awake", false),
     settingsRow("keep_awake_interval_min", 5),
     settingsRow("auth_mode", "none", "default", false),
@@ -618,6 +621,7 @@ export const defaultHandlers = [
   deleteHistoryHandler,
   homeboxStatusConfiguredHandler,
   homeboxTreeHandler,
+  homeboxEntityTypesHandler,
   homeboxEntitiesHandler,
   homeboxEntityPathHandler,
   homeboxAssetMatchesHandler,

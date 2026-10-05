@@ -3,6 +3,7 @@ import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-qu
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ApiError } from "./api/client";
 import { AppShell } from "./components/AppShell";
+import { Capture } from "./pages/Capture";
 import { Designer } from "./pages/Designer";
 import { Diagnostics } from "./pages/Diagnostics";
 import { Gallery } from "./pages/Gallery";
@@ -59,18 +60,27 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <JobEventsProvider>
         <BrowserRouter>
-          <AppShell>
-            <Routes>
-              <Route path="/" element={<Designer />} />
-              <Route path="/presets" element={<Presets />} />
-              <Route path="/history" element={<History />} />
-              <Route path="/gallery" element={<Gallery />} />
-              <Route path="/library" element={<Library />} />
-              <Route path="/homebox" element={<Homebox />} />
-              <Route path="/diagnostics" element={<Diagnostics />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </AppShell>
+          <Routes>
+            {/* Phone capture screen: full-bleed, deliberately OUTSIDE AppShell. */}
+            <Route path="/capture" element={<Capture />} />
+            <Route
+              path="*"
+              element={
+                <AppShell>
+                  <Routes>
+                    <Route path="/" element={<Designer />} />
+                    <Route path="/presets" element={<Presets />} />
+                    <Route path="/history" element={<History />} />
+                    <Route path="/gallery" element={<Gallery />} />
+                    <Route path="/library" element={<Library />} />
+                    <Route path="/homebox" element={<Homebox />} />
+                    <Route path="/diagnostics" element={<Diagnostics />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </AppShell>
+              }
+            />
+          </Routes>
         </BrowserRouter>
       </JobEventsProvider>
     </QueryClientProvider>

@@ -46,6 +46,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, error_message
+from labelmaker.api.router_images import _read_capped
 from labelmaker.driver.geometry import MIN_FEED_MM, all_tapes, dots_to_mm
 from labelmaker.render import (
     FontInfo,
@@ -354,8 +355,11 @@ async def expand_sequence(body: ExpandRequest) -> dict:
         raise HTTPException(status_code=422, detail=error_message(exc)) from exc
 
 
+MAX_CSV_UPLOAD_BYTES = 1024 * 1024  # 1 MiB
+
+
 @router.post("/serialize/csv")
-async def upload_serialize_csv(file: UploadFile) -> dict:
+async def upload_serialize_csv(request: Request, file: UploadFile) -> dict:
     """Stateless CSV echo for task 2.4's CSV-kind Sequence: parses an
     uploaded CSV with stdlib `csv`, into the same {columns, rows, row_count}
     shape the frontend (2.11) turns around and posts back as
@@ -363,7 +367,12 @@ async def upload_serialize_csv(file: UploadFile) -> dict:
     holds the parsed rows client-side until the user submits a print/preview
     request that embeds them.
     """
-    raw = await file.read()
+    raw = await _read_capped(request, file, max_bytes=MAX_CSV_UPLOAD_BYTES, status_code=413)
+    # Decode + csv parse is CPU-bound; keep it off the event loop.
+    return await anyio.to_thread.run_sync(_parse_csv_upload, raw)
+
+
+def _parse_csv_upload(raw: bytes) -> dict:
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:

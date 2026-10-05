@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { usePrintJob } from "./usePrintJob";
 import { JobEventsProvider } from "./useJobEvents";
 import { server } from "../test/msw/server";
@@ -56,6 +56,38 @@ function stillQueuedHandler(jobId: string) {
 }
 
 describe("usePrintJob", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("the 30s timeout restarts on every WS frame, so it only fires after 30s of silence", async () => {
+    server.use(
+      http.post("/api/print", () => HttpResponse.json({ job_id: "job-slow" }, { status: 202 })),
+      // Never answers -- only WS frames count as status activity here.
+      http.get("/api/print/jobs/:jobId", async () => {
+        await delay("infinite");
+        return HttpResponse.json({});
+      }),
+    );
+
+    const { result } = renderHook(() => usePrintJob("body-a"), { wrapper: createWrapper() });
+    act(() => result.current.submit(BODY, 1));
+    await waitFor(() => expect(result.current.jobId).toBe("job-slow"));
+    const socket = await latestSocket();
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    act(() => socket.emit({ event: "job.started", job_id: "job-slow" }));
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    act(() => socket.emit({ event: "job.progress", job_id: "job-slow", sent: 1, total: 10 }));
+    // 40s since submit, but only 20s since the last frame -- still alive.
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(result.current.phase).toBe("printing");
+
+    await act(() => vi.advanceTimersByTimeAsync(11_000));
+    expect(result.current.phase).toBe("failed");
+    expect(result.current.errorText).toBe("timed out waiting for print status");
+  });
+
   it("submit POSTs the body and moves to queued once the job id comes back", async () => {
     let capturedBody: unknown;
     server.use(

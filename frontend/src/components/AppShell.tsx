@@ -10,7 +10,7 @@ import { TypeRail } from "./TypeRail";
 import { eyebrow, helpText, iconButtonClass, panel, primaryButtonClass, typeHeading } from "./ui/styles";
 import { useAuth } from "../hooks/useAuth";
 import { useHomeboxStatus } from "../hooks/useHomeboxStatus";
-import { useJobEventsContext } from "../hooks/useJobEvents";
+import { useJobConnectionState } from "../hooks/useJobEvents";
 import { useTheme } from "../hooks/useTheme";
 import type { Theme } from "../hooks/useTheme";
 
@@ -210,7 +210,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * zero-auth default; only a REAL `oidc` deployment with no valid session
  * ever renders SignInPanel instead of the app below. */
 export function AppShell({ children }: AppShellProps) {
-  const { connectionState } = useJobEventsContext();
+  const connectionState = useJobConnectionState();
   const { data: homeboxStatus } = useHomeboxStatus();
   const homeboxEnabled = homeboxStatus?.configured === true;
   const { data: auth } = useAuth();

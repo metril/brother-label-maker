@@ -470,22 +470,22 @@ async def test_worker_survives_a_failure_outside_the_per_job_try_block(
     # I3: that outer except used to just `pass`, silently leaving job1 stuck
     # at "queued" forever with no trace in the logs. It now logs (asserted
     # via caplog below) and best-effort marks the job failed instead --
-    # job1's SECOND update_job call (the outer except's own best-effort
-    # failure-marking one) is calls["n"] == 2, which _flaky_update_job lets
-    # through to the real implementation, so it actually succeeds here.
+    # job1's failure-marking update_job call is unpatched (only the
+    # "mark printing" compare-and-set, start_job_if_queued, is flaky here),
+    # so it actually succeeds.
     from labelmaker.db.database import Database
 
     app, client = app_and_client
-    original_update_job = Database.update_job
+    original_start = Database.start_job_if_queued
     calls = {"n": 0}
 
-    async def _flaky_update_job(self, job_id, **kwargs):
+    async def _flaky_start(self, job_id):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("simulated db hiccup on the first update_job call")
-        return await original_update_job(self, job_id, **kwargs)
+        return await original_start(self, job_id)
 
-    monkeypatch.setattr(Database, "update_job", _flaky_update_job)
+    monkeypatch.setattr(Database, "start_job_if_queued", _flaky_start)
     caplog.set_level(logging.ERROR, logger="labelmaker.jobs.worker")
 
     resp1 = await client.post("/api/print", json={"labels": [_text_label("ONE")]})
@@ -763,3 +763,68 @@ def _icon_png_bytes(width: int = 20, height: int = 20) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (width, height), (30, 60, 90)).save(buf, format="PNG")
     return buf.getvalue()
+
+
+# --- worker race / post-print error regressions ---
+
+
+async def test_worker_does_not_print_a_job_canceled_between_get_and_start(
+    app_and_client, monkeypatch
+):
+    from labelmaker.db.database import Database
+
+    app, _client = app_and_client
+    db = app.state.db
+    job = await db.create_print_job(
+        definition={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
+        label_count=1,
+        chain_mode="cut_each",
+    )
+    job_id = job["id"]
+    orig = Database.start_job_if_queued
+
+    async def _cancel_then_start(self, jid):
+        await self.cancel_job_if_queued(jid)  # the cancel lands in the race window
+        return await orig(self, jid)
+
+    monkeypatch.setattr(Database, "start_job_if_queued", _cancel_then_start)
+    recorder = _RecordingSocket()
+    app.state.bus.register(recorder)
+
+    await app.state.queue.put(job_id)
+    await asyncio.wait_for(app.state.queue.join(), timeout=5)
+
+    assert (await db.get_job(job_id))["status"] == "canceled"
+    assert not any(e.get("event") == "job.started" for e in recorder.events)
+
+
+async def test_post_print_error_status_marks_job_failed(app_and_client, monkeypatch):
+    import dataclasses
+
+    from labelmaker.driver import status as status_mod
+    from labelmaker.jobs import worker
+
+    app, client = app_and_client
+    real_print = worker._print
+    error_block = bytearray(REFERENCE_STATUS_BLOCK)
+    error_block[18] = status_mod.StatusType.ERROR_OCCURRED.value
+    error_block[8] = 0x01  # "No media"
+    error_status = status_mod.parse_status(bytes(error_block))
+
+    def _print_then_error(*args, **kwargs):
+        result = real_print(*args, **kwargs)
+        return dataclasses.replace(result, post_print_events=[error_status])
+
+    monkeypatch.setattr(worker, "_print", _print_then_error)
+
+    resp = await client.post(
+        "/api/print",
+        json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
+    )
+    job = await _wait_for_terminal_job(client, resp.json()["job_id"])
+    assert job["status"] == "failed"
+    assert "No media" in job["error"]
+    assert job["tape_used_mm"]  # the tape was really consumed -- still recorded
+    assert job["strategy"] is not None  # backfill (written with the failure) happened
+    stream = await client.get(f"/api/print/jobs/{job['id']}/stream")
+    assert stream.status_code == 200  # .bin was written before failing

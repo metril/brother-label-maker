@@ -124,6 +124,30 @@ describe("Settings page", () => {
       await waitFor(() => expect(capturedBody).toEqual({ printer_flip_pins: false }));
     });
 
+    it("the HomeBox writes switch shows its helper text and PUTs homebox_writes_enabled", async () => {
+      const user = userEvent.setup();
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const homebox = await findSection("HomeBox");
+      const toggle = await within(homebox).findByRole("switch", { name: "Allow writes to HomeBox" });
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+      expect(
+        within(homebox).getByText(
+          "Lets this app create items and upload photos in HomeBox. Your HomeBox API key needs write access.",
+        ),
+      ).toBeInTheDocument();
+      await user.click(toggle);
+
+      await waitFor(() => expect(capturedBody).toEqual({ homebox_writes_enabled: true }));
+    });
+
     it("clicking Reset to env PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(

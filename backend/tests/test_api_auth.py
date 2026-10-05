@@ -142,11 +142,18 @@ def _mock_token_response(idp_mock, id_token: str) -> None:
     )
 
 
-async def _complete_login(client: httpx.AsyncClient, idp_mock, **id_token_kwargs) -> None:
+async def _complete_login(
+    client: httpx.AsyncClient,
+    idp_mock,
+    next_path: str | None = None,
+    expect_location: str = "/",
+    **id_token_kwargs,
+) -> None:
     """login -> callback, using the real state/nonce `/auth/login` hands
     back on its own 302 (see module docstring's "-- Why the full round trip
     needs a real login first --")."""
-    login_resp = await client.get("/api/auth/login")
+    login_params = {"next": next_path} if next_path is not None else None
+    login_resp = await client.get("/api/auth/login", params=login_params)
     assert login_resp.status_code == 302
     params = httpx.URL(login_resp.headers["location"]).params
 
@@ -156,7 +163,7 @@ async def _complete_login(client: httpx.AsyncClient, idp_mock, **id_token_kwargs
         "/api/auth/callback", params={"code": "auth-code-1", "state": params["state"]}
     )
     assert callback_resp.status_code == 302
-    assert callback_resp.headers["location"] == "/"
+    assert callback_resp.headers["location"] == expect_location
 
 
 # -- mode "none": the zero-auth default is untouched -----------------------
@@ -271,7 +278,13 @@ async def test_docs_and_openapi_are_withheld_in_oidc_mode(client):
     no schema/console CONTENT leaks, not any particular status code."""
     for path in ("/docs", "/redoc", "/openapi.json"):
         resp = await client.get(path)
-        assert "application/json" not in resp.headers.get("content-type", ""), path
+        # Without a built frontend/dist (CI) there is no SPA catch-all, so
+        # the path 404s with FastAPI's generic JSON {"detail": "Not Found"};
+        # with one it is index.html. Either is fine -- only a 200 JSON body
+        # (the schema itself) would be a leak.
+        assert not (
+            resp.status_code == 200 and "application/json" in resp.headers.get("content-type", "")
+        ), path
         assert "swagger" not in resp.text.lower(), path
         assert '"openapi"' not in resp.text, path
 
@@ -362,6 +375,28 @@ async def test_full_callback_round_trip_sets_session_and_me_flips_authenticated(
     # The session cookie now lets a previously-401'd route through.
     tapes_resp = await client.get("/api/tapes")
     assert tapes_resp.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("next_value", "expected"),
+    [
+        ("/capture", "/capture"),
+        ("/capture?x=1", "/capture?x=1"),
+        ("//evil.example", "/"),
+        ("/\\evil.example", "/"),
+        ("https://evil.example/", "/"),
+        ("javascript:alert(1)", "/"),
+        ("capture", "/"),
+        ("/a b", "/"),
+        ("", "/"),
+    ],
+)
+@_OIDC_CONFIGURED
+async def test_login_next_is_honoured_only_for_safe_relative_paths(
+    app_and_client, idp_mock, next_value, expected
+):
+    _, client = app_and_client
+    await _complete_login(client, idp_mock, next_path=next_value, expect_location=expected)
 
 
 @_OIDC_CONFIGURED

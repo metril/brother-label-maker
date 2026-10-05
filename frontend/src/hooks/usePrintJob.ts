@@ -25,7 +25,7 @@ export interface UsePrintJobResult {
   progress: PrintJobProgress | null;
   /** Set once phase reaches "failed" -- a request-time failure (the POST
    * itself 422ing), a `job.failed` event/poll, a `job.canceled` event/poll,
-   * or the 30s watchdog timing out. */
+   * or the 30s no-status-activity watchdog timing out. */
   errorText: string | null;
   /** The human-facing label count FROZEN at the moment `submit()` was
    * called -- review fix-up: the done-state success line used to re-derive
@@ -87,9 +87,9 @@ export interface UsePrintJobResult {
  * (useJobEvent, live push) and a 1s poll of GET /api/print/jobs/{id} as a
  * fallback, whichever source reports a terminal status first wins -- plus
  * POST /api/print/jobs/{id}/cancel while the job is still queued. A REAL
- * timer (not query data) enforces a 30s cap from submission to a terminal
- * state, same reasoning as the original (pre-2.12) PrintButton.tsx: TanStack
- * Query's structural sharing keeps `data` reference-stable across polls
+ * timer (not query data) enforces a 30s cap on SILENCE (restarted by every
+ * WS frame/successful poll) before a terminal state, same reasoning as the
+ * original (pre-2.12) PrintButton.tsx: TanStack Query's structural sharing keeps `data` reference-stable across polls
  * that return an unchanged payload, so a derivation effect keyed off
  * `pollQuery.data` itself would silently stop re-running for a job stuck
  * reporting the same status forever.
@@ -217,11 +217,15 @@ export function usePrintJob(bodyKey: string): UsePrintJobResult {
     }
   }, [active, jobId, wsStatus, wsError, wsSent, wsTotal, polledStatus, polledError, pollErrorMessage]);
 
-  // Hard 30s cap from submission to a terminal state -- a REAL timer,
-  // deliberately independent of any query/WS data reference (see this
-  // module's own docstring). Covers both the "queued" and "printing"
-  // windows as one continuous budget rather than resetting at the queued
-  // -> printing transition.
+  // 30s of SILENCE cap -- a REAL timer, deliberately independent of any
+  // query/WS data reference (see this module's own docstring), restarted on
+  // every WS frame (`wsEvent` is a fresh object per frame) and every
+  // successful poll (`dataUpdatedAt` ticks even when structural sharing
+  // keeps `data` itself reference-stable). A long or queued-behind-others
+  // print therefore never times out while status keeps arriving -- the old
+  // fixed 30s-from-submit budget reported those as failed, which let the
+  // user re-submit a job that was still going to print (duplicate print).
+  const pollUpdatedAt = pollQuery.dataUpdatedAt;
   useEffect(() => {
     if (!active) return;
     const timer = setTimeout(() => {
@@ -229,7 +233,7 @@ export function usePrintJob(bodyKey: string): UsePrintJobResult {
       setErrorText("timed out waiting for print status");
     }, POLL_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [active]);
+  }, [active, wsEvent, pollUpdatedAt]);
 
   // Review fix-up (2nd round): `printedBodyStale` is a PURE DERIVED value,
   // computed fresh on every render -- deliberately NOT a separate

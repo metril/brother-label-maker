@@ -125,7 +125,20 @@ async def run_keepalive(state) -> None:
             await anyio.sleep(_RECHECK_INTERVAL_S)
             continue
 
-        await anyio.sleep(effective.keep_awake_interval_min * _SECONDS_PER_MINUTE)
+        # Sleep in chunks of at most _RECHECK_INTERVAL_S, re-reading the
+        # overlay each chunk, so a changed interval (or a disable) applies
+        # within one chunk rather than after the whole old interval elapses.
+        elapsed = 0.0
+        while elapsed < effective.keep_awake_interval_min * _SECONDS_PER_MINUTE:
+            chunk = min(
+                effective.keep_awake_interval_min * _SECONDS_PER_MINUTE - elapsed,
+                _RECHECK_INTERVAL_S,
+            )
+            await anyio.sleep(chunk)
+            elapsed += chunk
+            effective = state.settings.effective()
+            if not effective.keep_printer_awake or effective.printer_mode != "usb":
+                break
 
         # L4 (2026-08 review): re-read the overlay AFTER the long sleep --
         # keep_printer_awake (or printer_mode) may have changed while this

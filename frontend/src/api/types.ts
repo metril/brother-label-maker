@@ -735,6 +735,44 @@ export interface HomeboxPathSegment {
   type: string;
 }
 
+/** GET /api/homebox/tags and /api/homebox/entity-types rows (write-enabled
+ * deployments only; 403 "homebox writes disabled" otherwise). */
+export interface HomeboxNamedRef {
+  id: string;
+  name: string;
+}
+
+/** POST /api/homebox/entities/bulk's request body (router_homebox.py's
+ * BulkCreateRequest): 1-100 names, each stripped and 1-255 chars. */
+export interface HomeboxBulkCreateRequest {
+  parent_id: string;
+  entity_type_id?: string | null;
+  tag_ids?: string[];
+  description?: string | null;
+  quantity?: number | null;
+  names: string[];
+}
+
+/** One row of the bulk result, in request order. `ok: false` rows carry
+ * HomeBox's own error text and no entity; later rows still ran. */
+export interface HomeboxBulkRowResult {
+  index: number;
+  ok: boolean;
+  entity: { id: string; name: string; asset_id: string } | null;
+  error: string | null;
+}
+
+export interface HomeboxBulkCreateResponse {
+  results: HomeboxBulkRowResult[];
+}
+
+/** POST /api/homebox/entities/{id}/attachments' response. */
+export interface HomeboxAttachmentResponse {
+  entity_id: string;
+  attachment_id: string | null;
+  primary: boolean;
+}
+
 /** GET/PUT /api/homebox/settings -- `qr_base_url` is the stored override
  * (null when unset); `effective_qr_base_url` already falls back to
  * `config.homebox_url` server-side (see router_homebox.py's

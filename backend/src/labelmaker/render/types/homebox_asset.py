@@ -127,14 +127,12 @@ from pydantic import BaseModel, Field
 from labelmaker.driver.geometry import MIN_LABEL_MM, TapeSpec, mm_to_dots
 from labelmaker.render.document import RenderedLabel, RenderWarning, _svg_document, _text_element
 from labelmaker.render.fonts import fit_font_size, font_path, measure_text
-from labelmaker.render.objects import qr_object
+from labelmaker.render.objects import qr_fit_group
 from labelmaker.render.types.base import LabelRenderer, register
 
 _LINE_SPACING = 1.15
 _MIN_FONT_PX = 6
 _MAX_FONT_PX = 128
-_MIN_MODULE_PX = 1
-_MAX_MODULE_PX = 20
 _PADDING_MM = 2.0
 _MIN_TAPE_MM = 12.0
 
@@ -185,24 +183,6 @@ class _TextRole(NamedTuple):
     weight: int
 
 
-def _qr_group(data: str, height_px: int) -> tuple[str, int, list[RenderWarning]]:
-    """QR sized to the largest module that fits `height_px` -- barcode_label.py's
-    own 2D `size_mode="auto"` formula (see this module's docstring), minus
-    its caption-band reservation (there is none here). Returns the code's
-    own (0,0)-relative SVG group, its square pixel size, and
-    `objects.qr_object`'s own warnings, unchanged."""
-    total_modules = qr_object(data, module_px=1).width_px
-    module_px = height_px // total_modules
-    if module_px < _MIN_MODULE_PX:
-        raise ValueError(
-            f"QR code needs at least {total_modules}px of print height (only "
-            f"{height_px}px available on this tape) -- try a taller tape"
-        )
-    module_px = min(module_px, _MAX_MODULE_PX)
-    result = qr_object(data, module_px=module_px)
-    return result.svg_group, result.width_px, result.warnings
-
-
 def _role_font_px(role: _TextRole, band_height_px: float, warnings: list[RenderWarning]) -> int:
     """One role's own auto-fit font size against its proportional height
     band (see module docstring's "-- Text column --" section) -- width is
@@ -242,7 +222,7 @@ class HomeboxAssetRenderer(LabelRenderer):
 
         qr_svg = ""
         if params.show_qr:
-            qr_group, qr_size_px, qr_warnings = _qr_group(params.qr_data, height_px)
+            qr_group, qr_size_px, qr_warnings = qr_fit_group(params.qr_data, height_px)
             warnings.extend(qr_warnings)
             qr_y = (height_px - qr_size_px) // 2
             qr_svg = f'<g transform="translate({padding_px},{qr_y})">{qr_group}</g>'

@@ -475,6 +475,16 @@ class Database:
         )
         return cur.rowcount == 1
 
+    async def start_job_if_queued(self, job_id: str) -> bool:
+        """Atomic compare-and-set queued -> printing, the worker-side twin of
+        `cancel_job_if_queued`: returns False if a cancel (or anything else)
+        already moved the row off "queued", so the worker must not print it."""
+        cur = await self._conn.execute(
+            "UPDATE print_jobs SET status = 'printing' WHERE id = ? AND status = 'queued'",
+            (job_id,),
+        )
+        return cur.rowcount == 1
+
     async def get_job(self, job_id: str) -> dict | None:
         cur = await self._conn.execute("SELECT * FROM print_jobs WHERE id = ?", (job_id,))
         row = await cur.fetchone()
