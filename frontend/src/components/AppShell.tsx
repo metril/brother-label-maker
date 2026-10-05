@@ -233,9 +233,18 @@ export function AppShell({ children }: AppShellProps) {
 
         <nav aria-label="Sections" className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {homeboxEnabled ? (
-            <NavLink to="/homebox" className={navLinkClass}>
-              HomeBox
-            </NavLink>
+            <>
+              <NavLink to="/homebox" className={navLinkClass}>
+                HomeBox
+              </NavLink>
+              <NavLink
+                to="/capture"
+                className={navLinkClass}
+                title="Phone: scan a label QR and attach a photo"
+              >
+                Capture
+              </NavLink>
+            </>
           ) : (
             <span
               aria-disabled="true"

@@ -27,7 +27,8 @@ manuals, then verified against real hardware (see
 - Optional [HomeBox](https://github.com/sysadminsmedia/homebox) integration:
   browse HomeBox entities and print labels for them directly, or run as a
   HomeBox External Label Service so HomeBox's own "print label" button
-  renders through this app.
+  renders through this app. A phone-friendly Capture page scans a label's QR
+  code and attaches a photo to that HomeBox item.
 
 ## Contents
 
@@ -212,6 +213,10 @@ HomeBox install. Set it before creating the key this app needs.
 needs to be changeable without a restart and because HomeBox's own QR
 base-URL resolution is fragile behind a reverse proxy. Unset, it falls back
 to `HOMEBOX_URL`.
+
+**Phone capture:** on your phone open `<app-url>/capture` (or tap **Capture**
+in the nav) and use Add to Home Screen for one-tap access. It scans a label's
+QR code and attaches a photo to that HomeBox item.
 
 ### HomeBox External Label Service (ELS)
 
