@@ -1,0 +1,201 @@
+# Auto release: on every push to main, work out whether the new commits are
+# releasable and, if so, tag, create a GitHub Release, and publish the image.
+#
+# Flow (two jobs):
+#   1. `version` -- computes the next semver from conventional commits since
+#      the highest stable (non-prerelease) `v*` tag reachable from HEAD, then creates the annotated tag and the
+#      GitHub Release (generated notes) using only git + the preinstalled
+#      `gh` CLI (no third-party actions).
+#   2. `publish` -- calls release.yml (workflow_call) to run the test gate and
+#      build/push the multi-arch image. It is invoked DIRECTLY because a tag
+#      pushed with GITHUB_TOKEN does not trigger release.yml's `push: tags`
+#      event (GitHub suppresses events raised by GITHUB_TOKEN). For the same
+#      reason the Release created here does not trigger other workflows.
+#
+# Bump rules (highest wins):
+#   - major: a `BREAKING CHANGE:` footer, or a `type!:` / `type(scope)!:`
+#            subject
+#   - minor: any `feat` / `feat(scope)` commit
+#   - patch: any `fix` / `perf` / `revert` commit (incl. git's default
+#            `Revert "..."` subject)
+#   - none:  anything else -- docs/chore/test/ci/refactor/style-only pushes
+#            publish nothing (release=false, `publish` is skipped).
+# Both the commit subjects and `* type: ...` lines in bodies are scanned
+# (a squash merge puts the PR's commit subjects in the body), so PR titles
+# and commits should follow conventional commits to be picked up.
+# If no `v*` tag exists yet, the first version is 0.1.0 whatever the bump
+# type (matches backend/pyproject.toml); a push with no releasable commits
+# still releases nothing. Prerelease tags (v1.3.0-rc.1) are never used as
+# the base.
+#
+# Permissions: `contents: write` is needed to push the tag and create the
+# Release. `publish` narrows to contents: read + packages: write, which is
+# exactly what release.yml's build-and-push job needs.
+#
+# Notes: if the release workflow fails after the tag exists, just re-run
+# this workflow (re-run button): when HEAD is already tagged it re-emits
+# that tag's version, so `publish` runs again while the tag/Release steps
+# skip what exists. `move_latest` is true on that path only when the tag
+# is also the repo's highest stable tag, so a re-run never moves `latest`
+# backwards. (Dispatching release.yml on the tag also works.) If
+# the repo's branch protection blocks GITHUB_TOKEN tag pushes (tag
+# rulesets), allow github-actions to create `v*` tags.
+
+name: Auto release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  # Serialise releases so two quick merges can't compute the same version;
+  # queue (don't cancel) so no release is dropped mid-flight. This group name
+  # differs from release.yml's own concurrency group on purpose -- a called
+  # workflow sharing the caller's group would deadlock.
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.bump.outputs.release }}
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      move_latest: ${{ steps.bump.outputs.move_latest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history + tags: `git describe` and the commit range below
+          # need them (the default shallow checkout has neither).
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute next version
+        id: bump
+        run: |
+          set -euo pipefail
+
+          # Highest stable (no '-') v* tag, by version order. `grep -v`
+          # exits 1 on no output, hence the `|| true` guard under pipefail.
+          top_stable() { git tag "$@" -l 'v[0-9]*' --sort=-v:refname | { grep -v -- '-' || true; } | head -1; }
+
+          # Base = highest stable tag reachable from HEAD (not the
+          # graph-nearest one, and never a prerelease such as v1.3.0-rc.1).
+          LAST=$(top_stable --merged HEAD)
+          if [ -n "$LAST" ]; then
+            RANGE="${LAST}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          echo "Previous tag: ${LAST:-<none>}; range: ${RANGE}"
+
+          # Recovery path: HEAD is already tagged (no commits since the tag),
+          # e.g. a previous run created the tag but the image build failed.
+          # Re-emit that version so a re-run re-invokes `publish`; the
+          # tag/release step below skips what already exists, and the image
+          # push is idempotent for the same commit.
+          if [ -n "$LAST" ] && [ "$(git rev-parse "${LAST}^{commit}")" = "$(git rev-parse HEAD)" ]; then
+            echo "HEAD is already tagged ${LAST}; re-emitting it so publish can re-run."
+            # Only move `latest` if this is also the repo's highest stable
+            # tag; otherwise a re-run would move it backwards.
+            if [ "$LAST" = "$(top_stable)" ]; then ML=true; else ML=false; fi
+            {
+              echo "move_latest=${ML}"
+              echo "release=true"
+              echo "version=${LAST#v}"
+              echo "tag=${LAST}"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SUBJECTS=$(git log --format=%s "$RANGE")
+          BODIES=$(git log --format=%b "$RANGE")
+
+          # Highest bump wins: major > minor > patch > none.
+          SCOPE='(\([^)]*\))?'
+          # Squash merges put the PR's commit subjects in the body as
+          # `* type: ...` bullets, so those lines count like subjects.
+          BULLETS=$(grep -E '^\* ' <<<"$BODIES" | sed 's/^\* //' || true)
+          MSGS="${SUBJECTS}"$'\n'"${BULLETS}"
+          if grep -Eq "^[a-z]+${SCOPE}!:" <<<"$MSGS" \
+            || grep -Eq '^BREAKING[ -]CHANGE(\([^)]*\))?:' <<<"$BODIES"; then
+            BUMP=major
+          elif grep -Eq "^feat${SCOPE}:" <<<"$MSGS"; then
+            BUMP=minor
+          elif grep -Eq "^(fix|perf|revert)${SCOPE}:|^Revert \"" <<<"$MSGS"; then
+            BUMP=patch
+          else
+            BUMP=none
+          fi
+          echo "Bump: ${BUMP}"
+
+          if [ "$BUMP" = none ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "No releasable commits (feat/fix/perf/revert/breaking); nothing to publish."
+            exit 0
+          fi
+
+          if [ -z "$LAST" ]; then
+            # First release: always 0.1.0, whatever the bump type.
+            NEXT=0.1.0
+          else
+            if [[ ! "$LAST" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "::error::Latest tag '$LAST' is not plain vMAJOR.MINOR.PATCH; cannot bump it."
+              exit 1
+            fi
+            MAJOR=${BASH_REMATCH[1]} MINOR=${BASH_REMATCH[2]} PATCH=${BASH_REMATCH[3]}
+            case "$BUMP" in
+              major) NEXT="$((MAJOR + 1)).0.0" ;;
+              minor) NEXT="${MAJOR}.$((MINOR + 1)).0" ;;
+              patch) NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+            esac
+          fi
+
+          {
+            echo "release=true"
+            echo "version=${NEXT}"
+            echo "move_latest=true"
+            echo "tag=v${NEXT}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Next version: ${NEXT}"
+
+      - name: Tag and create GitHub Release
+        if: steps.bump.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Idempotent: skip each creation if a previous (partial) run
+          # already made it, so a re-run can't fail on "already exists".
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin; not re-creating it."
+          else
+            git tag -a "$TAG" -m "Release ${TAG}" "$GITHUB_SHA"
+            git push origin "$TAG"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; not re-creating it."
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+          fi
+
+  publish:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    # Caller grants the ceiling for the called workflow's jobs.
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      move_latest: ${{ needs.version.outputs.move_latest == 'true' }}
