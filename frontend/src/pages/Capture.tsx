@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, extractErrorDetail, getHomeboxAssetMatches, getHomeboxEntityPath } from "../api/client";
 import type { HomeboxEntitySummary } from "../api/types";
 import { useAttachPhoto } from "../hooks/useAttachPhoto";
+import { useHomeboxEntities } from "../hooks/useHomeboxEntities";
 import { useHomeboxSettingsQuery } from "../hooks/useHomeboxSettings";
 import { useSettingsQuery } from "../hooks/useSettings";
 import { decodeImageFile, useQrScanner } from "../hooks/useQrScanner";
 import { normalizeAssetId, parseScan } from "../lib/assetRef";
 import type { ScanRef } from "../lib/assetRef";
 import { buildBreadcrumb } from "../lib/homebox";
+import { iconButtonClass } from "../components/ui/styles";
 
 /** Phone "Capture" page (route /capture, rendered OUTSIDE AppShell so it is
  * a full-bleed native-feeling screen): scan a printed label's QR (or type
@@ -85,6 +87,13 @@ export function Capture() {
   const scanFileInput = useRef<HTMLInputElement>(null);
   const lastRef = useRef<ScanRef | null>(null);
   const busy = useRef(false);
+  const navigate = useNavigate();
+  const [debouncedAsset, setDebouncedAsset] = useState("");
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedAsset(asset.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [asset]);
 
   const settings = useHomeboxSettingsQuery();
   const qrBase = settings.data?.effective_qr_base_url ?? null;
@@ -92,6 +101,10 @@ export function Capture() {
   const writesDisabled =
     appSettings.data !== undefined &&
     appSettings.data.settings.find((row) => row.key === "homebox_writes_enabled")?.value !== true;
+  const searchTerm = debouncedAsset.length >= 2 && asset.trim() === debouncedAsset ? debouncedAsset : "";
+  const search = useHomeboxEntities({ q: searchTerm, page: 1, pageSize: 20, enabled: searchTerm.length >= 2 });
+  const searching = asset.trim().length >= 2 && (searchTerm === "" || search.isFetching);
+  const results = searchTerm && !search.isPlaceholderData ? search.data?.items ?? [] : [];
   const upload = useAttachPhoto();
   const resetUpload = upload.reset;
 
@@ -122,6 +135,8 @@ export function Capture() {
     setCandidates([]);
     setProblem(null);
     resetUpload();
+    setAsset("");
+    setDebouncedAsset("");
     busy.current = false;
     setPhase("scan");
   }, [resetUpload]);
@@ -191,11 +206,17 @@ export function Capture() {
   });
   const breadcrumb = pathQuery.data ? buildBreadcrumb(pathQuery.data) : item?.parent?.name ?? "";
 
+  function closeCapture() {
+    const idx = (window.history.state as { idx?: number } | null)?.idx;
+    if (typeof idx === "number" && idx > 0) navigate(-1);
+    else navigate("/homebox");
+  }
+
   function onAssetSubmit(e: FormEvent) {
     e.preventDefault();
     const id = normalizeAssetId(asset);
     if (!id) {
-      setProblem({ kind: "info", message: "Enter the asset number, e.g. 123 or 000-123." });
+      setProblem({ kind: "info", message: "Enter an asset number (e.g. 123 or 000-123) or pick an item below." });
       return;
     }
     setAsset("");
@@ -250,6 +271,17 @@ export function Capture() {
         paddingRight: "env(safe-area-inset-right)",
       }}
     >
+      <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-deck-700 bg-deck-900 pl-4 pr-2">
+        <span className="text-[17px] font-semibold">Capture</span>
+        <button
+          type="button"
+          aria-label="Close capture"
+          onClick={closeCapture}
+          className={`${iconButtonClass} !h-11 !w-11 min-h-11 min-w-11 text-[24px] leading-none`}
+        >
+          ×
+        </button>
+      </header>
       <input
         ref={photoInput}
         type="file"
@@ -272,7 +304,7 @@ export function Capture() {
 
       {phase === "scan" && (
         <>
-          <div className="relative min-h-0 flex-1 bg-black">
+          <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
             {!cameraOff && (
               <video ref={scanner.videoRef} playsInline muted autoPlay className="absolute inset-0 h-full w-full object-cover" />
             )}
@@ -297,11 +329,11 @@ export function Capture() {
             <form onSubmit={onAssetSubmit} className="flex gap-2">
               <input
                 type="text"
-                inputMode="numeric"
                 enterKeyHint="go"
                 autoComplete="off"
-                placeholder="Enter asset #"
-                aria-label="Asset number"
+                autoCapitalize="none"
+                placeholder="Asset # or item name"
+                aria-label="Find item"
                 value={asset}
                 onChange={(e) => setAsset(e.target.value)}
                 className="min-h-14 min-w-0 flex-1 select-text rounded-xl border border-deck-600 bg-deck-800 px-4 text-[16px] text-deck-200 placeholder:text-deck-400"
@@ -310,6 +342,40 @@ export function Capture() {
                 Go
               </button>
             </form>
+            {asset.trim().length >= 2 && (
+              <div className="max-h-[30dvh] overflow-y-auto" aria-label="Search results">
+                {searching && results.length === 0 ? (
+                  <p role="status" className="px-1 py-2 text-[15px] text-deck-400">
+                    Searching…
+                  </p>
+                ) : search.isError ? (
+                  <p role="alert" className="px-1 py-2 text-[15px] text-deck-400">
+                    Search failed. Check your connection.
+                  </p>
+                ) : results.length === 0 ? (
+                  <p className="px-1 py-2 text-[15px] text-deck-400">No matches</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {results.map((r) => (
+                      <li key={r.id}>
+                        <button
+                          type="button"
+                          onClick={() => chooseItem(r)}
+                          className="flex min-h-12 w-full flex-col items-start justify-center rounded-xl border border-deck-600 bg-deck-800 px-4 py-2 text-left active:bg-deck-700"
+                        >
+                          <span className="text-[16px] text-deck-200">{r.name}</span>
+                          {(r.asset_id || r.parent?.name) && (
+                            <span className="text-[13px] text-deck-400">
+                              {[r.asset_id && `#${r.asset_id}`, r.parent?.name].filter(Boolean).join(" · ")}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             <button type="button" className={secondaryBtn} onClick={() => scanFileInput.current?.click()}>
               Scan from photo
             </button>
