@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { Route, Routes } from "react-router-dom";
 import { Capture } from "./Capture";
 import { renderWithProviders } from "../test/utils";
 import { server } from "../test/msw/server";
@@ -47,7 +48,7 @@ function useHomebox(opts: { matches?: unknown[]; writes?: boolean; attach?: () =
 }
 
 async function openItem(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Asset number"), "123{Enter}");
+  await user.type(screen.getByLabelText("Find item"), "123{Enter}");
   await screen.findByText("Impact Driver");
 }
 
@@ -66,7 +67,7 @@ describe("Capture", () => {
   it("without camera support shows manual entry and a hint", () => {
     useHomebox();
     renderWithProviders(<Capture />, { route: "/capture" });
-    expect(screen.getByLabelText("Asset number")).toHaveAttribute("inputmode", "numeric");
+    expect(screen.getByLabelText("Find item")).toHaveAttribute("placeholder", "Asset # or item name");
     expect(screen.getByRole("button", { name: "Scan from photo" })).toBeInTheDocument();
     expect(screen.getByText(/needs camera access over HTTPS/)).toBeInTheDocument();
   });
@@ -82,14 +83,14 @@ describe("Capture", () => {
     takePhoto();
     await user.click(await screen.findByRole("button", { name: "Upload" }));
     expect(await screen.findByText(/Saved to Impact Driver/)).toBeInTheDocument();
-    expect(await screen.findByLabelText("Asset number", undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Find item", undefined, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it("shows Not found for zero matches", async () => {
     useHomebox({ matches: [] });
     const user = userEvent.setup();
     renderWithProviders(<Capture />, { route: "/capture" });
-    await user.type(screen.getByLabelText("Asset number"), "9{Enter}");
+    await user.type(screen.getByLabelText("Find item"), "9{Enter}");
     expect(await screen.findByText(/Not found: asset 000-009/)).toBeInTheDocument();
   });
 
@@ -117,7 +118,50 @@ describe("Capture", () => {
     server.use(http.get("/api/homebox/assets/:assetId", () => HttpResponse.json({ detail: "no" }, { status: 401 })));
     const user = userEvent.setup();
     renderWithProviders(<Capture />, { route: "/capture" });
-    await user.type(screen.getByLabelText("Asset number"), "5{Enter}");
+    await user.type(screen.getByLabelText("Find item"), "5{Enter}");
     expect(await screen.findByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/api/auth/login?next=/capture");
+  });
+
+  it("close button leaves the capture page", async () => {
+    useHomebox();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/capture" element={<Capture />} />
+        <Route path="/homebox" element={<p>Browse page</p>} />
+      </Routes>,
+      { route: "/capture" },
+    );
+    await user.click(screen.getByRole("button", { name: "Close capture" }));
+    expect(await screen.findByText("Browse page")).toBeInTheDocument();
+  });
+
+  it("searches by item name and opens the chosen result", async () => {
+    useHomebox();
+    server.use(
+      http.get("/api/homebox/entities", ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q");
+        return HttpResponse.json({ items: q === "impact" ? [item] : [], page: 1, page_size: 20, total: q === "impact" ? 1 : 0 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Capture />, { route: "/capture" });
+    await user.type(screen.getByLabelText("Find item"), "impact");
+    await user.click(await screen.findByRole("button", { name: /Impact Driver/ }));
+    expect(await screen.findByRole("switch", { name: /Set as primary/ })).toBeInTheDocument();
+  });
+
+  it("clears search text and results after scanning another", async () => {
+    useHomebox();
+    server.use(
+      http.get("/api/homebox/entities", () => HttpResponse.json({ items: [item], page: 1, page_size: 20, total: 1 })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Capture />, { route: "/capture" });
+    await user.type(screen.getByLabelText("Find item"), "impact");
+    await user.click(await screen.findByRole("button", { name: /Impact Driver/ }));
+    await user.click(await screen.findByRole("button", { name: "Scan another" }));
+    expect(screen.getByLabelText("Find item")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /Impact Driver/ })).not.toBeInTheDocument();
   });
 });
