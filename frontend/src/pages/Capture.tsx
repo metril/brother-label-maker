@@ -326,56 +326,61 @@ export function Capture() {
             style={{ paddingBottom: "max(env(safe-area-inset-bottom), 16px)" }}
           >
             {problem && <ProblemBanner problem={problem} onRetry={() => lastRef.current && void resolve(lastRef.current)} />}
-            <form onSubmit={onAssetSubmit} className="flex gap-2">
-              <input
-                type="text"
-                enterKeyHint="go"
-                autoComplete="off"
-                autoCapitalize="none"
-                placeholder="Asset # or item name"
-                aria-label="Find item"
-                value={asset}
-                onChange={(e) => setAsset(e.target.value)}
-                className="min-h-14 min-w-0 flex-1 select-text rounded-xl border border-deck-600 bg-deck-800 px-4 text-[16px] text-deck-200 placeholder:text-deck-400"
-              />
-              <button type="submit" className="min-h-14 rounded-xl bg-amber-500 px-6 text-[17px] font-semibold text-on-accent active:bg-amber-300">
-                Go
-              </button>
-            </form>
-            {asset.trim().length >= 2 && (
-              <div className="max-h-[30dvh] overflow-y-auto" aria-label="Search results">
-                {searching && results.length === 0 ? (
-                  <p role="status" className="px-1 py-2 text-[15px] text-deck-400">
-                    Searching…
-                  </p>
-                ) : search.isError ? (
-                  <p role="alert" className="px-1 py-2 text-[15px] text-deck-400">
-                    Search failed. Check your connection.
-                  </p>
-                ) : results.length === 0 ? (
-                  <p className="px-1 py-2 text-[15px] text-deck-400">No matches</p>
-                ) : (
-                  <ul className="flex flex-col gap-2">
-                    {results.map((r) => (
-                      <li key={r.id}>
-                        <button
-                          type="button"
-                          onClick={() => chooseItem(r)}
-                          className="flex min-h-12 w-full flex-col items-start justify-center rounded-xl border border-deck-600 bg-deck-800 px-4 py-2 text-left active:bg-deck-700"
-                        >
-                          <span className="text-[16px] text-deck-200">{r.name}</span>
-                          {(r.asset_id || r.parent?.name) && (
-                            <span className="text-[13px] text-deck-400">
-                              {[r.asset_id && `#${r.asset_id}`, r.parent?.name].filter(Boolean).join(" · ")}
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            <div className="relative">
+              <form onSubmit={onAssetSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  enterKeyHint="go"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  placeholder="Asset # or item name"
+                  aria-label="Find item"
+                  value={asset}
+                  onChange={(e) => setAsset(e.target.value)}
+                  className="min-h-14 min-w-0 flex-1 select-text rounded-xl border border-deck-600 bg-deck-800 px-4 text-[16px] text-deck-200 placeholder:text-deck-400"
+                />
+                <button type="submit" className="min-h-14 rounded-xl bg-amber-500 px-6 text-[17px] font-semibold text-on-accent active:bg-amber-300">
+                  Go
+                </button>
+              </form>
+              {asset.trim().length >= 2 && (
+                <div
+                  className="absolute inset-x-0 bottom-full z-10 mb-2 max-h-[30dvh] overflow-y-auto rounded-xl bg-deck-900 p-2 shadow-lg"
+                  aria-label="Search results"
+                >
+                  {searching && results.length === 0 ? (
+                    <p role="status" className="px-1 py-2 text-[15px] text-deck-400">
+                      Searching…
+                    </p>
+                  ) : search.isError ? (
+                    <p role="alert" className="px-1 py-2 text-[15px] text-deck-400">
+                      Search failed. Check your connection.
+                    </p>
+                  ) : results.length === 0 ? (
+                    <p className="px-1 py-2 text-[15px] text-deck-400">No matches</p>
+                  ) : (
+                    <ul className="flex flex-col gap-2">
+                      {results.map((r) => (
+                        <li key={r.id}>
+                          <button
+                            type="button"
+                            onClick={() => chooseItem(r)}
+                            className="flex min-h-12 w-full flex-col items-start justify-center rounded-xl border border-deck-600 bg-deck-800 px-4 py-2 text-left active:bg-deck-700"
+                          >
+                            <span className="text-[16px] text-deck-200">{r.name}</span>
+                            {(r.asset_id || r.parent?.name) && (
+                              <span className="text-[13px] text-deck-400">
+                                {[r.asset_id && `#${r.asset_id}`, r.parent?.name].filter(Boolean).join(" · ")}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
             <button type="button" className={secondaryBtn} onClick={() => scanFileInput.current?.click()}>
               Scan from photo
             </button>
