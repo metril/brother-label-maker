@@ -22,7 +22,7 @@ come from render.estimate.estimate() -- the ONE authoritative model for "how
 much tape does this job use" (task 2.9). This module NEVER re-derives them;
 it only turns the SAME numbers into pixels for the composite image.
 
-Review fix-up (M2, docs/code-review-2026-08.md): api/router_print.py's
+Review fix-up (M2, the 2026-08 code review): api/router_print.py's
 preview_print_job used to call this module's build_chained_preview() AFTER
 already running an equivalent render_definition() pass of its own (for
 pre-flight validation + tape-usage estimation, api/router_print.py's
@@ -319,7 +319,7 @@ def build_chained_preview(
     rejects this (same message) BEFORE this function is ever called from the
     API (which in fact now calls build_chained_preview_from_rendered
     instead, precisely to avoid re-running this function's render pass --
-    see M2, docs/code-review-2026-08.md), so this branch should be
+    see M2, the 2026-08 code review), so this branch should be
     unreachable via POST /print/preview, but keeps this function safe to
     call directly (e.g. from tests) too.
     """

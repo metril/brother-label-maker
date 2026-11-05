@@ -27,7 +27,7 @@ class AppConfig(BaseSettings):
     # classic printed successfully; e310bt remains untested.
     printer_init_strategy: Literal["classic", "e310bt"] = "classic"
     # Verified 2026-07-28: msb_first printed clean glyphs (a wrong bit order
-    # scrambles within each 8-pin byte -- see docs/protocol-notes.md RESULTS).
+    # scrambles within each 8-pin byte -- see the protocol notes RESULTS).
     printer_bit_order: Literal["msb_first", "lsb_first"] = "msb_first"
     # Verified 2026-07-28: flip_pins=False printed mirrored across the tape
     # width; True is correct for this printer. RasterConfig's dataclass

@@ -34,7 +34,7 @@ from labelmaker.render.serialize import Sequence, expand_definition, ordered_val
 
 router = APIRouter(prefix="/print", tags=["print"])
 
-# H1 (docs/code-review-2026-08.md): POST /print/preview composites every
+# H1 (the 2026-08 code review): POST /print/preview composites every
 # label into one PIL strip and then upscales it by `scale` (1..8) -- nothing
 # previously bounded the product, and the request's own legal caps multiply
 # out to tens of gigabytes (100 labels x 1000mm each x scale=8) or, even at
@@ -166,7 +166,7 @@ async def _validate_and_render(
     otherwise) -- in the same order build_job will eventually receive the
     images in.
 
-    Review fix-up (M2, docs/code-review-2026-08.md): split out of
+    Review fix-up (M2, the 2026-08 code review): split out of
     _validate_and_measure (below, now a thin wrapper over this) so POST
     /api/print/preview -- the one caller that goes on to actually
     rasterize+composite -- can reuse these SAME RenderedLabel objects
@@ -358,14 +358,14 @@ async def preview_print_job(
     every other render/rasterize call in this codebase. No job is created;
     nothing is enqueued or persisted (same as POST /api/print/estimate).
 
-    Review fix-up M2 (docs/code-review-2026-08.md): this used to call
+    Review fix-up M2 (the 2026-08 code review): this used to call
     _validate_and_measure for validation ALONE, discarding its render pass,
     then have build_chained_preview render every label again from scratch --
     every label rendered twice. _validate_and_render instead hands the SAME
     RenderedLabel objects straight to build_chained_preview_from_rendered,
     so each label is rendered exactly once total.
 
-    Review fix-up H1 (docs/code-review-2026-08.md): the composite's pixel
+    Review fix-up H1 (the 2026-08 code review): the composite's pixel
     footprint (post-`scale`) is computed from those SAME RenderedLabel
     objects -- via composite_dimensions(), pure arithmetic, no PIL object
     involved -- and checked against MAX_PREVIEW_PIXELS BEFORE any

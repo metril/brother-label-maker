@@ -1,6 +1,6 @@
 """Checkpoint CLI: `python -m labelmaker.driver.cli {probe,status,print-test,capture,feed-cut}`.
 
-This is the tool the physical-checkpoint procedure (docs/protocol-notes.md)
+This is the tool the physical-checkpoint procedure (the protocol notes)
 runs against the real PT-E720BT to resolve every `# UNVERIFIED:` decision left
 by the driver package: which init strategy (classic vs e310bt), raster bit
 order, pin-flip, and chain-mode behavior the hardware actually wants.
@@ -11,7 +11,7 @@ opens real USB.
 
 Test patterns (`build_pattern`) are pure PIL drawing with no font rendering:
 font-based label rendering is a Phase 1 concern. This is a deliberate
-deviation from the plan's "text" test pattern, noted in docs/protocol-notes.md.
+deviation from the plan's "text" test pattern, noted in the protocol notes.
 """
 
 from __future__ import annotations

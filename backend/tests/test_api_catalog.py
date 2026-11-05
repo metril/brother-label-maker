@@ -5,7 +5,7 @@ FONT_FAMILIES), TZe widths (TZE_WIDTHS_MM), and (2.7) the symbol icon
 library that had to be hand-kept in lockstep with the backend's own
 tables.
 
-The "H4/H5" tests below (docs/code-review-2026-08.md) cover the two
+The "H4/H5" tests below (the 2026-08 code review) cover the two
 symbol routes' serving-cost fixes: GET /api/symbols returning
 render/symbols.py's pre-encoded, mtime-cached response bytes instead of
 paying a deep-copy + re-encode of every model per request (H4), and both
@@ -119,7 +119,7 @@ async def test_symbol_svg_unknown_id_returns_404(client):
     assert resp.status_code == 404
 
 
-# --- H4/H5: serving-cost fixes (docs/code-review-2026-08.md) ----------------
+# --- H4/H5: serving-cost fixes (the 2026-08 code review) ----------------
 
 
 def _write_symbols_index(tmp_path, entries: list[dict]) -> None:

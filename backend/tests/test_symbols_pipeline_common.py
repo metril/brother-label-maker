@@ -91,7 +91,7 @@ def test_extract_fill_path_rejects_relative_m_on_non_first_survivor():
     # preceding subpath's `z` it resolves against that subpath's current
     # point instead, silently displacing everything that follows (this is
     # the exact shape of bootstrap_house's second path in the real source:
-    # docs/code-review-2026-08.md H3). Naive concatenation used to accept
+    # the 2026-08 code review H3). Naive concatenation used to accept
     # this; it must now be rejected rather than "fixed" by guessing.
     svg = (
         '<svg viewBox="0 0 24 24">'
@@ -121,7 +121,7 @@ def test_extract_fill_path_render_equivalence_gate_rejects_hollowed_overlap():
     # subpaths TOGETHER, so folding both rectangles into one evenodd path
     # makes the overlap region crossed by two boundaries (even count) and
     # therefore a HOLE -- exactly the mechanism that hollowed out 5 shipped
-    # icons (docs/code-review-2026-08.md M5, e.g.
+    # icons (the 2026-08 code review M5, e.g.
     # tabler_arrow_big_left_line's solid arrow rendering hollow). No
     # relative moveto and no mixed fill-rule declaration is involved here
     # -- structurally this is exactly the family test_symbols_pipeline_

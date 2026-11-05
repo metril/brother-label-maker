@@ -3,7 +3,7 @@
 #   docker compose -f docker/docker-compose.yml up --build
 #
 # See ../docs/usb-setup.md for host-side prerequisites (udev rule) this
-# depends on, and ../docs/protocol-notes.md for the physical checkpoint that
+# depends on, and ../the protocol notes for the physical checkpoint that
 # resolves PRINTER_INIT_STRATEGY.
 
 services:
@@ -21,7 +21,7 @@ services:
       # `PUT /api/settings {"homebox_api_key": "..."}`) -- never in this file.
       HOMEBOX_URL: https://homebox.azureolympos.com
       PRINTER_MODE: usb
-      # Verified 2026-07-28 (first physical print, docs/protocol-notes.md
+      # Verified 2026-07-28 (first physical print, the protocol notes
       # RESULTS): classic works; e310bt was never needed.
       PRINTER_INIT_STRATEGY: classic
       # Orientation knobs, resolved at the same checkpoint: msb_first bit

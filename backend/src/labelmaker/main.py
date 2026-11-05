@@ -232,7 +232,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             https_only=cfg.session_cookie_secure,
         )
 
-    # H5 (docs/code-review-2026-08.md): GET /api/symbols' ~1.5MB catalog (and
+    # H5 (the 2026-08 code review): GET /api/symbols' ~1.5MB catalog (and
     # anything else this size or larger) went out uncompressed with no
     # reverse proxy in front to compensate (docker/docker-compose.yml sets
     # none). Registered here -- BEFORE the CORSMiddleware call below -- so

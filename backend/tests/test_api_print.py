@@ -97,7 +97,7 @@ async def _wait_for_event(
     max_polls: int = 250,
     interval: float = 0.02,
 ) -> dict:
-    """H8 (docs/code-review-2026-08.md): bounded poll on `recorder.events`
+    """H8 (the 2026-08 code review): bounded poll on `recorder.events`
     for `event`/`job_id`, same discipline as `_wait_for_terminal_job` above
     -- worker.py's failure handler is two SEQUENTIAL awaits, `db.update_job`
     (itself several more aiosqlite round trips via the get_job() it ends
@@ -405,7 +405,7 @@ async def test_print_failure_marks_job_failed_and_broadcasts_job_failed(
     assert job["status"] == "failed"
     assert "printer caught fire" in job["error"]
 
-    # H8 (docs/code-review-2026-08.md): the DB status write and the
+    # H8 (the 2026-08 code review): the DB status write and the
     # job.failed broadcast are two sequential awaits in worker.py's failure
     # handler -- _wait_for_terminal_job above can observe the committed
     # "failed" row before the broadcast has actually happened, so wait on

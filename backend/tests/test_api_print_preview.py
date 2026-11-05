@@ -307,7 +307,7 @@ async def test_preview_segments_monotonic_and_last_end_matches_composite_length(
 
 
 # --- (h) H1: pixel-budget guard -- a legal-but-huge request 422s instead --
-# of building the composite -- docs/code-review-2026-08.md.
+# of building the composite -- the 2026-08 code review.
 
 
 async def test_preview_rejects_legal_but_huge_serialized_request_with_422_budget_cap(client):
@@ -360,7 +360,7 @@ async def test_preview_pixel_budget_uses_post_scale_dimensions(client):
 
 
 # --- (i) H1: MemoryError from the render/composite/encode calls maps to ----
-# 507, never a raw 500 -- docs/code-review-2026-08.md.
+# 507, never a raw 500 -- the 2026-08 code review.
 
 
 async def test_preview_memory_error_during_composite_maps_to_507_not_500(client, monkeypatch):

@@ -276,7 +276,7 @@ def extract_fill_path(svg_text: str) -> tuple[str, str] | None:
        preceding subpath's final command, it instead resolves against
        THAT subpath's current point, silently translating (and often
        displacing) everything that follows -- this shipped 17 visibly
-       corrupted icons before this check existed (docs/code-review-2026-08.md
+       corrupted icons before this check existed (the 2026-08 code review
        H3; e.g. bootstrap_house's roof ends up as a diagonal slash through
        the body). Correcting it would require converting the relative `m`
        to an absolute `M`, which needs the preceding subpath's terminal
@@ -298,7 +298,7 @@ def extract_fill_path(svg_text: str) -> tuple[str, str] | None:
        cancel to a hole once folded into one multi-subpath path even
        though every subpath is a plain absolute `M` and nothing above
        rejected it -- this hollowed out shipped icons before this gate
-       existed (docs/code-review-2026-08.md M5/M6; e.g.
+       existed (the 2026-08 code review M5/M6; e.g.
        tabler_arrow_big_left_line's solid arrow rendered as a hollow
        outline). The check is a REAL render through the same resvg call
        sequence `rasterize_check`/`symbol_object` use, not a geometric
@@ -455,7 +455,7 @@ def validate_shape(symbol_id: str, filename: str, svg_text: str) -> None:
 # before the merge is rejected as NOT equivalent. Set to 0 (exact match
 # required), not a hedge value, from an empirical sweep of every real
 # multi-path candidate across all four pinned Track D2 tarballs
-# (docs/code-review-2026-08.md's own four sources): 398 candidates total
+# (the 2026-08 code review's own four sources): 398 candidates total
 # (229 Tabler, 149 Bootstrap, 0 Remix -- Remix's curated set never has 2+
 # real glyph paths -- 20 Fluent), of which every genuinely safe one
 # (disjoint survivors, or an overlap whose winding direction happens not
