@@ -157,6 +157,10 @@ jobs:
           # workflow_call: test/build the tagged commit, not main's tip.
           ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
 
+      - name: Stamp release version
+        if: inputs.version
+        run: sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' backend/pyproject.toml
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
