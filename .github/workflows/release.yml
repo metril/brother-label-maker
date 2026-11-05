@@ -158,8 +158,12 @@ jobs:
           ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
 
       - name: Stamp release version
-        if: inputs.version
-        run: sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' backend/pyproject.toml
+        run: |
+          V="${{ inputs.version }}"
+          if [ -z "$V" ]; then V="${GITHUB_REF_NAME#v}"; fi
+          if [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            sed -i "s/^version = \".*\"/version = \"$V\"/" backend/pyproject.toml
+          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
