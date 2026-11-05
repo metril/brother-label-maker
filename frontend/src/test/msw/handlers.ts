@@ -36,7 +36,7 @@ export const tapesHandler = http.get("/api/tapes", () => HttpResponse.json(tapes
  * and window against. */
 const TRIMMED_SYMBOLS_PER_BUCKET = 8;
 
-/** H9 (docs/code-review-2026-08.md): the symbols fixture grew 858 -> 8362
+/** H9 (the 2026-08 code review): the symbols fixture grew 858 -> 8362
  * entries (2.1 MB) this round, and every one of the 48 test files pulls it
  * in through this module's `defaultHandlers`. Re-serializing all 8362
  * objects on every `GET /api/symbols` (plus react-query's structural

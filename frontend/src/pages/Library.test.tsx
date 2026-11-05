@@ -5,7 +5,7 @@ import { Library } from "./Library";
 import { renderWithProviders } from "../test/utils";
 import { trimmedSymbolsFixture } from "../test/msw/handlers";
 
-// Read off the trimmed slice (H9, docs/code-review-2026-08.md) -- the same
+// Read off the trimmed slice (H9, the 2026-08 code review) -- the same
 // slice test/msw/handlers.ts's default symbolsHandler actually serves --
 // rather than hardcoded, since this page's own count-line assertion just
 // proves the browse grid is mounted at all (see the comment below), so the

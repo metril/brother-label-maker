@@ -136,6 +136,9 @@ describe("Presets page", () => {
         posts++;
         return HttpResponse.json({ job_id: "job-dbl" }, { status: 202 });
       }),
+      http.get("/api/print/jobs/:jobId", () =>
+        HttpResponse.json({ id: "job-dbl", created_at: "2026-07-27T00:00:00.000000Z", status: "printing", error: null, definition: {}, label_count: 1, chain_mode: "cut_each" }),
+      ),
     );
     renderWithProviders(<Presets />);
 
@@ -200,5 +203,20 @@ describe("Presets page", () => {
 
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("falls back to polling when no terminal WS event arrives, so the card leaves 'printing'", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/presets", () => HttpResponse.json([preset()])),
+      http.post("/api/presets/preset-1/print", () => HttpResponse.json({ job_id: "job-77" }, { status: 202 })),
+      // default /api/print/jobs/:id handler reports "done"
+    );
+    renderWithProviders(<Presets />);
+
+    await user.click(await screen.findByRole("button", { name: "Print" }));
+
+    // No WS event is ever emitted (dropped connection): the poll resolves the status.
+    expect(await screen.findByText("Done")).toBeInTheDocument();
   });
 });

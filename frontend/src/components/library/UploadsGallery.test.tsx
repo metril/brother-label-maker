@@ -140,7 +140,7 @@ describe("UploadsGallery", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete upload img-new" })).toBeInTheDocument());
   });
 
-  // L20 (docs/code-review-2026-08.md): the three failure branches below had
+  // L20 (the 2026-08 code review): the three failure branches below had
   // no coverage at all -- every existing test above is happy-path.
 
   it("upload failure shows the backend's own error detail via role=alert", async () => {
@@ -178,7 +178,7 @@ describe("UploadsGallery", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load uploads.");
   });
 
-  // M11 (docs/code-review-2026-08.md): the useInfiniteQuery migration fixed
+  // M11 (the 2026-08 code review): the useInfiniteQuery migration fixed
   // a real corruption in the PREVIOUS hand-rolled page/appendedPageRef
   // component (see UploadsGallery.tsx's own module docstring), but nothing
   // in this file actually reproduced it -- every test above happens to pass

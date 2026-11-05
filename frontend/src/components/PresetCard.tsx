@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ApiError, deletePreset, postPresetPrint, putPreset } from "../api/client";
+import { ApiError, deletePreset, getPrintJob, postPresetPrint, putPreset } from "../api/client";
 import { useDialogController } from "../hooks/useDialogController";
 import { useJobEvent } from "../hooks/useJobEvents";
 import { useLabelTypes } from "../hooks/useLabelTypes";
 import { formatAbsoluteTime, formatRelativeTime } from "../lib/time";
 import { humanizeEnumValue } from "../schema/humanize";
-import { statusFromEvent } from "../lib/jobStatus";
+import { isTerminalEventType, statusFromEvent } from "../lib/jobStatus";
 import { useDesignerStore } from "../stores/designer";
 import { useTrayStore } from "../stores/tray";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -120,7 +120,21 @@ export function PresetCard({ preset, typeTitle }: PresetCardProps) {
 
   const tapeLabel =
     preset.tape_width_mm != null ? `${preset.tape_width_mm}mm ${humanizeEnumValue(preset.tape_family)}` : "Any tape";
-  const printStatus = printEvent ? statusFromEvent(printEvent.event) : null;
+  // Poll fallback (same as usePrintJob): a dropped WS loses the terminal event.
+  const eventTerminal = printEvent ? isTerminalEventType(printEvent.event) : false;
+  const pollQuery = useQuery({
+    queryKey: ["print-job-poll", printJobId],
+    queryFn: () => getPrintJob(printJobId as string),
+    enabled: printJobId !== null && !eventTerminal,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "done" || status === "failed" || status === "canceled" ? false : 1000;
+    },
+  });
+  const printStatus = eventTerminal
+    ? statusFromEvent(printEvent!.event)
+    : (pollQuery.data?.status ?? (printEvent ? statusFromEvent(printEvent.event) : null));
+  const printError = printEvent?.error ?? pollQuery.data?.error;
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-deck-800 bg-deck-900/60 p-4">
@@ -196,9 +210,9 @@ export function PresetCard({ preset, typeTitle }: PresetCardProps) {
           no reason at all, right next to the (very different) case above
           where the REQUEST itself never even reached a job (printMutation
           failing outright, e.g. a validation 422). */}
-      {printStatus === "failed" && printEvent?.error && (
+      {printStatus === "failed" && printError && (
         <p role="alert" className={errorText}>
-          {printEvent.error}
+          {printError}
         </p>
       )}
 

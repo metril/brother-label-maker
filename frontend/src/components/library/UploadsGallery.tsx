@@ -48,7 +48,7 @@ function formatBytes(bytes: number): string {
  * client-side behind a "Load more" button rather than a Prev/Next pager --
  * a thumbnail grid (like IconField's own symbol picker) reads better as one
  * continuously growing sheet than as a table with page controls. Built on
- * react-query's own `useInfiniteQuery` (M11, docs/code-review-2026-08.md)
+ * react-query's own `useInfiniteQuery` (M11, the 2026-08 code review)
  * -- every loaded page lives under the ONE `["images"]` query key, not one
  * `["images", page]` entry per page number, so `invalidateQueries({
  * queryKey: ["images"]})` after an upload/delete refetches EVERY page

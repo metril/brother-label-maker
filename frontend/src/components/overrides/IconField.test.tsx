@@ -13,7 +13,7 @@ import type { OverrideFieldProps } from "./types";
  * component's `filtered` computation, and symbols/SymbolBrowser.test.tsx's
  * identical helper) so count-line and presence/absence assertions below
  * stay correct however big/composed the fixture is. Runs against
- * `trimmedSymbolsFixture` (H9, docs/code-review-2026-08.md) -- the same
+ * `trimmedSymbolsFixture` (H9, the 2026-08 code review) -- the same
  * slice test/msw/handlers.ts's default symbolsHandler actually serves --
  * not the raw 8362-entry fixture. */
 function filterFixture(category: string, query: string) {
@@ -177,7 +177,7 @@ describe("IconField", () => {
     // which is sorted by id -- filtering a sorted array preserves relative
     // order, so the trimmed slice is sorted by id too, and entries 95/96
     // (0-indexed) straddle the initial 96-item window boundary the same
-    // way they would against the raw fixture. L18 (docs/code-review-2026-08.md):
+    // way they would against the raw fixture. L18 (the 2026-08 code review):
     // these two are picked purely POSITIONALLY (not for a verified-unique
     // display name, unlike the hand-picked probes elsewhere in this file),
     // so they're located by `data-testid` (keyed on the guaranteed-unique
