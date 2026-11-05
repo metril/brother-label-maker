@@ -2,7 +2,7 @@
 # device node.
 #
 # What: matches the PT-E720BT by its USB vendor:product id (04f9:224a, per
-# `lsusb` and docs/protocol-notes.md's checkpoint procedure) and sets the
+# `lsusb` and the protocol notes's checkpoint procedure) and sets the
 # device node's permissions to 0666 (rw for all users) whenever it's
 # plugged in.
 #
@@ -19,7 +19,7 @@
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #   # then unplug and replug the printer
 #
-# Keep this in sync with docs/protocol-notes.md's inline copy of the same
+# Keep this in sync with the protocol notes's inline copy of the same
 # rule (step 1, USB permissions fix).
 
 SUBSYSTEM=="usb", ATTRS{idVendor}=="04f9", ATTRS{idProduct}=="224a", MODE="0666"

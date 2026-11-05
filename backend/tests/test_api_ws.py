@@ -160,3 +160,31 @@ async def test_broadcast_drops_a_hung_client_without_stalling_others(monkeypatch
     assert hung not in bus._clients and ok in bus._clients
     await asyncio.sleep(0)  # let the scheduled close() run
     assert hung.closed is True
+
+
+async def test_broadcast_slow_client_does_not_delay_fast_client(monkeypatch):
+    import asyncio
+
+    from labelmaker.jobs import events as events_mod
+    from labelmaker.jobs.events import EventBus
+
+    monkeypatch.setattr(events_mod, "_SEND_TIMEOUT_S", 0.3)
+
+    class Slow:
+        async def send_json(self, data):
+            await asyncio.sleep(10)
+
+    class Fast:
+        def __init__(self):
+            self.got = []
+
+        async def send_json(self, data):
+            self.got.append(data)
+
+    bus = EventBus()
+    slow, fast = Slow(), Fast()
+    bus.register(slow)
+    bus.register(fast)
+    await asyncio.wait_for(bus.broadcast({"event": "x"}), timeout=1.0)
+    assert fast.got == [{"event": "x"}]
+    assert slow not in bus._clients

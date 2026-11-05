@@ -159,7 +159,7 @@ script committed for any of them, see each file's own header).
    LICENSES.md's "Multi-path merging" section for how this played out
    against the four real sources that needed it (Tabler especially: every
    filled icon ships an extra invisible bounding-box path, and this is also
-   where the corruption docs/code-review-2026-08.md's H3/M5 findings
+   where the corruption the 2026-08 code review's H3/M5 findings
    documented came from, before extract_fill_path gained the two gates
    above).
    **If your source is stroke-based rather than already-filled** (line
@@ -256,13 +256,13 @@ specifically for that: a same-fill multi-`<path>` source is rejected
 (skip+log, not hand-patched) if any non-first survivor's `d` starts with
 a relative `m` (naive string concatenation silently mis-resolves it --
 17 shipped icons were corrupted this way before this check existed, see
-docs/code-review-2026-08.md H3), or if rendering the merged single-`<path>`
+the 2026-08 code review H3), or if rendering the merged single-`<path>`
 candidate isn't PIXEL-EXACT against rendering the same survivors as
 separate sibling `<path>` elements at the same viewBox (fill-rule is
 resolved per-`<path>` over all of that path's own subpaths together, so a
 merge can silently change which regions end up filled even when every
 subpath is a plain absolute `M` -- 5 more shipped icons were hollowed out
-this way before this gate existed, see docs/code-review-2026-08.md M5/M6).
+this way before this gate existed, see the 2026-08 code review M5/M6).
 See `common.extract_fill_path`'s own docstring for the exact mechanics and
 the empirical sweep that set the render-equivalence gate's tolerance to 0
 (exact match, not a hedge value).

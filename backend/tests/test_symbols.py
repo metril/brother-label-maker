@@ -74,7 +74,7 @@ def test_list_symbols_meets_floor_and_every_source_contributes():
     # phosphor_ids.txt's currently-curated 55. The four Track D2 full-set
     # sources' floors sit a little below their currently-committed counts
     # (same margin-for-later-edits reasoning): tabler_ (>= 1000, currently
-    # 1050 -- down from 1054 pre-fix: docs/code-review-2026-08.md H3/M5's
+    # 1050 -- down from 1054 pre-fix: the 2026-08 code review H3/M5's
     # extract_fill_path render-equivalence + relative-m gates now skip+log
     # arrow-big-left-line/escalator-up/sitemap/sunrise rather than shipping
     # them geometrically corrupt), remix_ (>= 1500, currently 1539 --

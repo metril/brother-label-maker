@@ -260,7 +260,7 @@ def build_feed_cut_job(tape: TapeSpec, strategy: InitStrategy) -> JobStream:
         change a single byte of the output -- there is nothing for a
         non-default RasterConfig to affect here.
 
-    UNVERIFIED (repo convention -- see docs/protocol-notes.md): the EXACT
+    UNVERIFIED (repo convention -- see the protocol notes): the EXACT
     physical tape distance a real PT-E720BT advances for this job is not
     yet measured against hardware. It is almost certainly `MIN_FEED_MM`
     (~24.5mm, the mechanical head-to-cutter gap every cut inherently

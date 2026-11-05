@@ -169,7 +169,7 @@ def list_symbols() -> list[SymbolInfo]:
     This deep copy is real per-call work at 8362 entries -- callers that
     only need to serialize the catalog verbatim (GET /api/symbols) should
     use `list_symbols_json()` instead, which skips it entirely (see that
-    function's docstring and H4 in docs/code-review-2026-08.md).
+    function's docstring and H4 in the 2026-08 code review).
     """
     global _list_cache
     index_path = _current_index_path()
@@ -189,7 +189,7 @@ def list_symbols_json() -> bytes:
     so a cache miss here never re-reads/re-validates index.json a second
     time). GET /api/symbols (router_labels.py) hands this straight to
     `Response(content=..., media_type="application/json")`, which is what
-    makes it a real fix for H4 (docs/code-review-2026-08.md) rather than a
+    makes it a real fix for H4 (the 2026-08 code review) rather than a
     relocation of the cost: neither `list_symbols()`'s per-call deep copy
     (irrelevant here -- `bytes` is immutable, there's nothing to protect the
     cache from) nor FastAPI's `jsonable_encoder`/response-model re-encoding

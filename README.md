@@ -323,7 +323,7 @@ before ever touching real hardware — every place it had to guess is marked
 `# UNVERIFIED:` in the source. As of 2026-07-28, **the printer has printed**:
 the first real label (browser path, all defaults, 24mm TZe tape) resolved
 the init-strategy, bit-order, and pin-mapping questions all at once (see
-[docs/protocol-notes.md](docs/protocol-notes.md)'s RESULTS section for the
+[the protocol notes](the protocol notes)'s RESULTS section for the
 full reasoning) — those are now the verified `AppConfig` defaults described
 above.
 

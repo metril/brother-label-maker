@@ -114,7 +114,7 @@ export function SymbolBrowser(props: SymbolBrowserProps) {
     return CATEGORY_ORDER.filter((c) => present.has(c));
   }, [symbols]);
 
-  // L11 (docs/code-review-2026-08.md): re-filtering the whole catalog (8362
+  // L11 (the 2026-08 code review): re-filtering the whole catalog (8362
   // entries and growing) sat directly in the render body with no memo, so
   // it re-scanned on EVERY render -- not just when `query`/`category`
   // actually changed, but also on every windowCount grow from the sentinel
@@ -285,7 +285,7 @@ export function SymbolBrowser(props: SymbolBrowserProps) {
   const activeId = (markedId && visible.some((s) => s.id === markedId) ? markedId : visible[0]?.id) ?? null;
 
   function focusByIndex(index: number) {
-    // H7 (docs/code-review-2026-08.md): this used to wrap out-of-range
+    // H7 (the 2026-08 code review): this used to wrap out-of-range
     // indices with `(index + filtered.length) % filtered.length`, so
     // ArrowUp/ArrowLeft on the FIRST rendered option resolved to
     // `filtered.length - 1` -- past the rendered edge, which the branch
@@ -390,7 +390,7 @@ export function SymbolBrowser(props: SymbolBrowserProps) {
             }}
             type="button"
             role="option"
-            // L18 (docs/code-review-2026-08.md): the option's accessible
+            // L18 (the 2026-08 code review): the option's accessible
             // NAME (the symbol's display name, via the img's alt text in
             // browse mode's markup below) is not unique across the 8335-
             // icon catalog -- a test indexing the fixture positionally and

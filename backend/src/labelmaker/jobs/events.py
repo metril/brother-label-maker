@@ -43,12 +43,19 @@ class EventBus:
         """Send `event` to every registered client, dropping (unregistering)
         any that error out or time out (e.g. an already-closed or half-open WebSocket) instead of
         letting one dead connection break the broadcast for everyone else."""
-        dead: list[_JsonSendable] = []
-        for client in list(self._clients):
+        clients = list(self._clients)
+
+        async def _send(client: _JsonSendable) -> bool:
             try:
                 await asyncio.wait_for(client.send_json(event), timeout=_SEND_TIMEOUT_S)
+                return True
             except Exception:
-                dead.append(client)
+                return False
+
+        # Concurrent, so one stalled client costs at most one timeout in total
+        # instead of one per slow client, in sequence.
+        results = await asyncio.gather(*(_send(c) for c in clients), return_exceptions=True)
+        dead = [c for c, ok in zip(clients, results, strict=True) if ok is not True]
         for client in dead:
             self._clients.discard(client)
             # Also close the socket: otherwise it stays open but silently stops

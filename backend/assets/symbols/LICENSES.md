@@ -357,7 +357,7 @@ fold into a flat `d` concatenation, or a non-`<path>` drawable element
 (`<circle>`/`<rect>`/etc.) it doesn't know how to flatten at all. See that
 function's own docstring in `common.py` for the exact rule.
 
-**Correction (docs/code-review-2026-08.md H3/M5, fixed):** an earlier
+**Correction (the 2026-08 code review H3/M5, fixed):** an earlier
 version of this section claimed plain `d`-string concatenation was
 sufficient and that a hand spot-check of hole-shaped icons was the
 defense against a bad merge. Both were wrong in ways that shipped 22

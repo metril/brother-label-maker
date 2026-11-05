@@ -1,11 +1,13 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { JobEvent } from "../api/types";
 
 export type WsConnectionState = "connecting" | "live" | "reconnecting";
 
 const INITIAL_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 10_000;
+const MAX_EVENTS = 200;
 
 export interface UseJobEventsResult {
   connectionState: WsConnectionState;
@@ -24,12 +26,14 @@ function wsUrl(): string {
  * their own job without opening their own socket -- see JobEventsProvider. */
 export function useJobEvents(): UseJobEventsResult {
   const [connectionState, setConnectionState] = useState<WsConnectionState>("connecting");
+  const queryClient = useQueryClient();
   const [events, setEvents] = useState<Record<string, JobEvent>>({});
 
   useEffect(() => {
     let closedByUs = false;
     let backoffMs = INITIAL_BACKOFF_MS;
     let socket: WebSocket | null = null;
+    let hasConnected = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     function connect() {
@@ -39,13 +43,27 @@ export function useJobEvents(): UseJobEventsResult {
       socket.onopen = () => {
         backoffMs = INITIAL_BACKOFF_MS;
         setConnectionState("live");
+        // Events sent while disconnected are lost: refetch what they would have updated.
+        if (hasConnected) {
+          queryClient.invalidateQueries({ queryKey: ["print-job-poll"] });
+          queryClient.invalidateQueries({ queryKey: ["history"] });
+        }
+        hasConnected = true;
       };
 
       socket.onmessage = (event: MessageEvent<string>) => {
         try {
           const data = JSON.parse(event.data) as JobEvent;
           if (typeof data.job_id === "string" && typeof data.event === "string") {
-            setEvents((prev) => ({ ...prev, [data.job_id]: data }));
+            setEvents((prev) => {
+              const next = { ...prev };
+              // Re-insert so the most recently updated job is last, then drop the oldest.
+              delete next[data.job_id];
+              next[data.job_id] = data;
+              const keys = Object.keys(next);
+              for (const key of keys.slice(0, Math.max(0, keys.length - MAX_EVENTS))) delete next[key];
+              return next;
+            });
           }
         } catch {
           // ignore malformed frames
@@ -72,7 +90,7 @@ export function useJobEvents(): UseJobEventsResult {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, []);
+  }, [queryClient]);
 
   return { connectionState, events };
 }

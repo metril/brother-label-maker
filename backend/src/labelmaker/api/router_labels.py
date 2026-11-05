@@ -23,7 +23,7 @@ source tree. Both routes are conditional-GET-aware (weak ETag, plus
 Last-Modified on the per-icon route) and cache-control'd: GET /api/symbols
 returns render/symbols.py's pre-encoded, mtime-cached response bytes rather
 than paying a deep-copy + re-encode of 8362 models per request (H4,
-docs/code-review-2026-08.md), and both carry `Cache-Control` so a browser
+the 2026-08 code review), and both carry `Cache-Control` so a browser
 that already has a fresh copy can skip the transfer entirely, or at worst
 revalidate with a 304 (H5, same doc). Neither Cache-Control uses
 `immutable`/a year-long max-age: catalog and per-icon content can both

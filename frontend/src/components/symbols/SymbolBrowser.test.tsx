@@ -17,7 +17,7 @@ import { SymbolBrowser } from "./SymbolBrowser";
  * the fixture grew from 858 to 8362 entries (5 new icon sources) between
  * commits e62516b and 566655d, and hardcoded counts/identifiers went
  * stale along with it. Runs against `trimmedSymbolsFixture` (H9,
- * docs/code-review-2026-08.md) -- the same slice test/msw/handlers.ts's
+ * the 2026-08 code review) -- the same slice test/msw/handlers.ts's
  * default `symbolsHandler` actually serves -- not the raw 8362-entry
  * fixture; the one test in this file that needs the full catalog
  * (the scale test at the bottom) overrides the handler and reasons about
@@ -205,7 +205,7 @@ describe("SymbolBrowser: browse mode", () => {
     // which is sorted by id -- filtering a sorted array preserves relative
     // order, so the trimmed slice is sorted by id too, and entries 95/96
     // (0-indexed) straddle the initial 96-item window boundary the same
-    // way they would against the raw fixture. L18 (docs/code-review-2026-08.md):
+    // way they would against the raw fixture. L18 (the 2026-08 code review):
     // these two are picked purely POSITIONALLY (not for a verified-unique
     // display name, unlike the hand-picked probes elsewhere in this file),
     // so they're located by `data-testid` (keyed on the guaranteed-unique
@@ -357,7 +357,7 @@ describe("SymbolBrowser: H7 regression -- arrow nav at the first option", () => 
 
     await user.keyboard("{ArrowUp}");
 
-    // Before the fix (H7, docs/code-review-2026-08.md): focusByIndex(-1)
+    // Before the fix (H7, the 2026-08 code review): focusByIndex(-1)
     // wrapped to `filtered.length - 1` and grew the window in one step to
     // cover it -- i.e. the ENTIRE filtered set (8362 nodes against the
     // real catalog). Growth everywhere else in this component (forward

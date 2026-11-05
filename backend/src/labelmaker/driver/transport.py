@@ -389,7 +389,7 @@ class PyUsbTransport:
                     backend.finalize()
             raise PrinterNotFoundError(
                 f"USB error opening printer: {err} — check udev permissions "
-                f"(see docs/protocol-notes.md step 1)"
+                f"(see the protocol notes step 1)"
             ) from err
 
     def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:

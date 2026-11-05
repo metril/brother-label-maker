@@ -37,7 +37,7 @@ export function describeMedia(status: PrinterStatusDetail | null): string | null
 // anything it doesn't recognize), this ALWAYS returns something, and says
 // so explicitly when the byte is one driver/status.py's MediaType enum
 // doesn't recognize -- e.g. the reference status block's still-undecoded
-// 0x14 (docs/protocol-notes.md), which is the whole reason this UI exists:
+// 0x14 (the protocol notes), which is the whole reason this UI exists:
 // an operator capturing `status --raw` against real hardware needs to SEE
 // an unknown byte, not have it silently disappear.
 const MEDIA_TYPE_DECODED_LABEL: Record<number, string> = {
@@ -62,7 +62,7 @@ export function describeMediaTypeRaw(status: PrinterStatusDetail): string {
   return label ? `${label} (${hex})` : `unknown -- byte ${hex} is not decoded by this app`;
 }
 
-/** A plain-text block pasteable straight into docs/protocol-notes.md's
+/** A plain-text block pasteable straight into the protocol notes's
  * RESULTS tables (handoff §4's "raw status capture... to decode the media
  * byte") -- the Diagnostics page's copy-to-clipboard button copies exactly
  * this string. Deliberately plain lines, not JSON: this is meant for a

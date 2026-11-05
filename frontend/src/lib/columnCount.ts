@@ -1,6 +1,6 @@
 /** ArrowDown/ArrowUp's step size in an option grid: the number of tracks
  * the grid is CURRENTLY laid out into, so the keys move a full ROW rather
- * than always +-1 (L12, docs/code-review-2026-08.md) -- an 8-column grid
+ * than always +-1 (L12, the 2026-08 code review) -- an 8-column grid
  * should drop one row per ArrowDown, not one icon right (ArrowRight's own
  * behavior). A real browser resolves `getComputedStyle(grid)
  * .gridTemplateColumns` to a space-separated list of concrete per-track
