@@ -26,7 +26,7 @@ jobs:
         # publishing floating major tags after v7 (v8/v9 exist only as
         # exact release tags, e.g. this one -- confirmed by both a 404 on
         # the floating `v9` ref and a 200 on `v9.0.0`).
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           # No python-version(-file) here on purpose: setup-uv has no
           # python-version-file input -- only python-version, which would
