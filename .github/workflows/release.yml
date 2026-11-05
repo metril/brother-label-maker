@@ -97,7 +97,7 @@ jobs:
         # Exact tag, not a floating major: astral-sh/setup-uv stopped
         # publishing floating major tags after v7 (v8/v9 exist only as
         # exact release tags) -- see ci.yml for the fuller note.
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
 
