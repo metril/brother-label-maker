@@ -30,6 +30,9 @@ dependencies = [
     # a plain runtime dependency of starlette.middleware.sessions itself, not
     # bundled with the `starlette`/`fastapi` wheels.
     "itsdangerous>=2.1",
+    # Printer bridge mutual-TLS identities (driver/bridge_identity.py); was
+    # only transitive via authlib. Imported lazily, never on the USB/mock paths.
+    "cryptography>=44",
 ]
 
 [dependency-groups]
@@ -40,6 +43,7 @@ dev = [
     "pytest-cov>=5",
     "ruff>=0.4",
     "zxing-cpp>=3.1.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.ruff]

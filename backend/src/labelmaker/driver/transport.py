@@ -463,3 +463,193 @@ class PyUsbTransport:
                 pass
             if self._backend is not None:
                 self._backend.finalize()
+
+
+class RemoteTransport:
+    """Transport to a printer attached to a Pi running `driver/bridge.py`.
+
+    Mutual TLS 1.3 with pinned self-signed certificates: the app trusts only
+    the bridge's certificate and the bridge only the app's. `open()` does a
+    HELLO + OPEN round trip, so an unpaired app fails there (in TLS 1.3 a
+    rejected client certificate only shows up after the client's handshake
+    finishes). Writes are NEVER retried -- a retry could print a duplicate
+    label -- so a dropped connection mid-print fails the job.
+    """
+
+    def __init__(self, sock, *, op_slack_s: float = 5.0) -> None:
+        self._sock = sock
+        self._slack = op_slack_s
+        self._broken = False
+
+    @classmethod
+    def open(
+        cls,
+        address: str,
+        key_path,
+        cert_path,
+        pinned_cert_pem: str,
+        *,
+        connect_timeout: float = 3.0,
+        op_slack_s: float = 5.0,
+    ) -> "RemoteTransport":
+        import socket
+        import ssl
+
+        from labelmaker.driver import bridge_protocol as bp
+        from labelmaker.driver.bridge_identity import cert_pem_to_der, fingerprint
+
+        try:
+            host, port = bp.parse_address(address)
+            pinned_der = cert_pem_to_der(pinned_cert_pem)
+        except ValueError as err:
+            raise PrinterNotFoundError(f"invalid remote printer configuration: {err}") from err
+
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+        ctx.check_hostname = False  # the pin is stricter than any hostname check
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_cert_chain(str(cert_path), str(key_path))
+        ctx.load_verify_locations(cadata=pinned_cert_pem)
+
+        sock = None
+        try:
+            try:
+                raw = socket.create_connection((host, port), timeout=connect_timeout)
+            except OSError as err:
+                raise PrinterNotFoundError(
+                    f"cannot reach printer bridge at {host}:{port}: {err}"
+                ) from err
+            raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            try:
+                raw.settimeout(connect_timeout)
+                sock = ctx.wrap_socket(raw, do_handshake_on_connect=False)
+                sock.do_handshake()
+            except ssl.SSLCertVerificationError as err:
+                raw.close()
+                raise PrinterNotFoundError(
+                    "bridge certificate does not match the pinned certificate "
+                    "(re-copy it from the bridge's `show-cert`)"
+                ) from err
+            except (ssl.SSLError, OSError) as err:
+                raw.close()
+                raise PrinterNotFoundError(f"TLS handshake with bridge failed: {err}") from err
+            peer = sock.getpeercert(binary_form=True)
+            if not peer or fingerprint(peer) != fingerprint(pinned_der):
+                raise PrinterNotFoundError(
+                    "bridge certificate does not match the pinned certificate"
+                )
+
+            transport = cls(sock, op_slack_s=op_slack_s)
+            try:
+                transport._open_session(connect_timeout)
+            except PrinterNotFoundError:
+                raise
+            except (OSError, ssl.SSLError, bp.ProtocolError) as err:
+                raise PrinterNotFoundError(
+                    "bridge closed the connection during setup -- this app is probably not "
+                    f"paired on the bridge (pair its certificate and restart the bridge): {err}"
+                ) from err
+            return transport
+        except BaseException:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+            raise
+
+    def _open_session(self, timeout: float) -> None:
+        from labelmaker.driver import bridge_protocol as bp
+
+        self._sock.settimeout(timeout + self._slack)
+        for op, payload in ((bp.OP_HELLO, bytes([bp.PROTOCOL_VERSION])), (bp.OP_OPEN, b"")):
+            bp.send_frame(self._sock, op, payload)
+            kind, reply = bp.recv_frame(self._sock)
+            if kind == bp.REPLY_ERR:
+                code, message = bp.parse_err(reply)
+                raise PrinterNotFoundError(f"printer bridge refused: {message} (code {code})")
+            if kind != bp.REPLY_OK:
+                raise PrinterNotFoundError("printer bridge sent an unexpected reply")
+
+    def _call(self, op: int, payload: bytes, timeout_ms: int) -> bytes:
+        import ssl
+
+        from labelmaker.driver import bridge_protocol as bp
+
+        if self._broken:
+            raise TransportError("connection to printer bridge was lost")
+        try:
+            self._sock.settimeout(timeout_ms / 1000 + self._slack)
+            bp.send_frame(self._sock, op, payload)
+            kind, reply = bp.recv_frame(self._sock)
+        except (OSError, ssl.SSLError, bp.ProtocolError) as err:
+            self._broken = True
+            raise TransportError(f"printer bridge connection error: {err}") from err
+        if kind == bp.REPLY_ERR:
+            _code, message = bp.parse_err(reply)
+            raise TransportError(f"printer bridge error: {message}")
+        return reply
+
+    def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:
+        import struct
+
+        from labelmaker.driver import bridge_protocol as bp
+
+        # Frames are capped, so split even when the caller asked for no chunking.
+        limit = bp.MAX_FRAME - bp.WRITE_HEADER_LEN
+        size = min(chunk_size, limit) if chunk_size else limit
+        for piece in _split_into_chunks(bytes(data), size):
+            self._call(bp.OP_WRITE, struct.pack("!I", timeout_ms) + piece, timeout_ms)
+
+    def read(self, n: int, timeout_ms: int = 500) -> bytes:
+        import struct
+
+        from labelmaker.driver import bridge_protocol as bp
+
+        return self._call(bp.OP_READ, struct.pack("!II", n, timeout_ms), timeout_ms)
+
+    def close(self) -> None:
+        from labelmaker.driver import bridge_protocol as bp
+
+        try:
+            if not self._broken:
+                self._sock.settimeout(2.0)
+                bp.send_frame(self._sock, bp.OP_CLOSE)
+                bp.recv_frame(self._sock)
+        except Exception:
+            pass
+        finally:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+
+
+def open_real_transport(effective, data_dir) -> Transport:
+    """Open the real printer for `effective.printer_mode` ("usb" or
+    "remote"). `effective` only needs printer_mode, printer_bridge_address
+    and printer_bridge_cert attributes. `data_dir` locates the app's TLS
+    identity (`<data_dir>/bridge/client.{key,crt}`).
+
+    Raises PrinterNotFoundError for an incomplete or invalid remote config.
+    """
+    if effective.printer_mode != "remote":
+        return PyUsbTransport.open()
+    address = getattr(effective, "printer_bridge_address", None)
+    cert = getattr(effective, "printer_bridge_cert", None)
+    if not address or not cert:
+        raise PrinterNotFoundError(
+            "remote printer mode needs both the bridge address and the bridge "
+            "certificate (Settings -> Printer)"
+        )
+    from pathlib import Path
+
+    from labelmaker.driver.bridge_identity import ensure_identity
+
+    try:
+        key_path, cert_path = ensure_identity(Path(data_dir) / "bridge", "client")
+    except OSError as err:
+        raise PrinterNotFoundError(
+            f"cannot read or create this app's bridge identity: {err}"
+        ) from err
+    return RemoteTransport.open(address, key_path, cert_path, cert)
