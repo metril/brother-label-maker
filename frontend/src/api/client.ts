@@ -17,6 +17,7 @@ import type {
   HomeboxEntitySummary,
   HomeboxNamedRef,
   HomeboxPathSegment,
+  BridgeIdentity,
   HomeboxSettings,
   HomeboxSettingsUpdate,
   HomeboxStatus,
@@ -567,6 +568,12 @@ export function postAuthLogout(): Promise<void> {
 }
 
 // --- Settings (task 4.5) -------------------------------------------------
+
+/** GET /api/printer/bridge-identity -- this app's public certificate for
+ * pairing with a Pi printer bridge (generated server-side on first call). */
+export function getBridgeIdentity(): Promise<BridgeIdentity> {
+  return request<BridgeIdentity>("/printer/bridge-identity");
+}
 
 /** GET /api/settings -- every editable (DB-overlay) row plus a handful of
  * read-only, informational ones (see api/types.ts's SettingRow doc for the

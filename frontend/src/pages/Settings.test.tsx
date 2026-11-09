@@ -89,6 +89,60 @@ describe("Settings page", () => {
       expect(within(printer).getByRole("button", { name: "Reset to env" })).toBeInTheDocument();
     });
 
+    it("choosing Remote shows the bridge fields and saves mode, address and cert in one PUT", async () => {
+      const user = userEvent.setup();
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      await user.selectOptions(await within(printer).findByLabelText("Printer mode"), "remote");
+
+      // No PUT yet: the backend refuses remote mode without address + cert.
+      expect(capturedBody).toBeUndefined();
+      expect(await within(printer).findByLabelText("App certificate")).toHaveTextContent("APPCERT");
+      expect(within(printer).getByText("ab12cd34")).toBeInTheDocument();
+      const save = within(printer).getByRole("button", { name: "Save remote printer" });
+      expect(save).toBeDisabled();
+
+      await user.type(within(printer).getByLabelText("Bridge address"), "pi.local");
+      await user.click(within(printer).getByLabelText("Bridge certificate"));
+      await user.paste("-----BEGIN CERTIFICATE-----\nBRIDGE\n-----END CERTIFICATE-----");
+      await user.click(save);
+
+      await waitFor(() =>
+        expect(capturedBody).toEqual({
+          printer_mode: "remote",
+          printer_bridge_address: "pi.local",
+          printer_bridge_cert: "-----BEGIN CERTIFICATE-----\nBRIDGE\n-----END CERTIFICATE-----",
+        }),
+      );
+    });
+
+    it("shows a backend validation error for the remote config", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.put("/api/settings", () =>
+          HttpResponse.json({ detail: "printer_bridge_cert: not a valid PEM X.509 certificate" }, { status: 422 }),
+        ),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      await user.selectOptions(await within(printer).findByLabelText("Printer mode"), "remote");
+      await user.type(within(printer).getByLabelText("Bridge address"), "pi.local");
+      await user.click(within(printer).getByLabelText("Bridge certificate"));
+      await user.paste("junk");
+      await user.click(within(printer).getByRole("button", { name: "Save remote printer" }));
+
+      expect(await within(printer).findByRole("alert")).toHaveTextContent("not a valid PEM");
+    });
+
     it("changing a Select immediately PUTs the new value", async () => {
       const user = userEvent.setup();
       let capturedBody: unknown;

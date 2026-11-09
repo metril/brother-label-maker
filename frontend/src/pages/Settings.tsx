@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, putHomeboxSettings } from "../api/client";
 import type { SettingRow, SettingsSource } from "../api/types";
 import { Pending } from "../components/ui/Pending";
-import { NumberInput, Select, TextInput } from "../components/ui/inputs";
+import { NumberInput, Select, Textarea, TextInput } from "../components/ui/inputs";
 import { Switch } from "../components/ui/Switch";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import {
@@ -17,6 +17,7 @@ import {
   typeHeading,
 } from "../components/ui/styles";
 import { HOMEBOX_SETTINGS_QUERY_KEY, useHomeboxSettingsQuery } from "../hooks/useHomeboxSettings";
+import { useBridgeIdentity } from "../hooks/useBridgeIdentity";
 import { useSettingsQuery, useUpdateSettings } from "../hooks/useSettings";
 
 const SECONDARY_BUTTON_CLASS =
@@ -168,6 +169,7 @@ function SwitchSettingRow({
 const PRINTER_MODE_OPTIONS = [
   { value: "mock", label: "Mock" },
   { value: "usb", label: "USB" },
+  { value: "remote", label: "Remote (Pi bridge)" },
 ];
 const INIT_STRATEGY_OPTIONS = [
   { value: "classic", label: "Classic" },
@@ -249,6 +251,160 @@ function KeepAwakeIntervalField({ rows }: { rows: SettingRow[] }) {
   );
 }
 
+// --- Printer mode + remote bridge fields -------------------------------
+// Picking "Remote" doesn't PUT by itself: the backend refuses remote mode
+// without a bridge address and certificate, so the mode is saved together
+// with them (one PUT) from this row's own Save button.
+
+function PrinterModeRow({ rows }: { rows: SettingRow[] }) {
+  const modeRow = findRow(rows, "printer_mode");
+  const serverMode = typeof modeRow?.value === "string" ? modeRow.value : "mock";
+  const serverAddress = (findRow(rows, "printer_bridge_address")?.value as string | null | undefined) ?? "";
+  const serverCert = (findRow(rows, "printer_bridge_cert")?.value as string | null | undefined) ?? "";
+  const mutation = useUpdateSettings();
+  const [pendingRemote, setPendingRemote] = useState(false);
+  const [address, setAddress] = useState(serverAddress);
+  const [cert, setCert] = useState(serverCert);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+
+  useEffect(() => setAddress(serverAddress), [serverAddress]);
+  useEffect(() => setCert(serverCert), [serverCert]);
+
+  const shownMode = pendingRemote ? "remote" : serverMode;
+  const remote = shownMode === "remote";
+  const identity = useBridgeIdentity(remote);
+
+  function handleModeChange(next: string) {
+    if (next === "remote" && !(serverAddress && serverCert)) {
+      setPendingRemote(true); // wait for the address + certificate
+      return;
+    }
+    setPendingRemote(false);
+    mutation.mutate({ printer_mode: next });
+  }
+
+  function handleSaveRemote() {
+    mutation.mutate(
+      { printer_mode: "remote", printer_bridge_address: address.trim(), printer_bridge_cert: cert.trim() },
+      { onSuccess: () => setPendingRemote(false) },
+    );
+  }
+
+  async function handleCopy(text: string) {
+    // navigator.clipboard needs a secure context; plain-http LAN has none.
+    if (!navigator.clipboard) {
+      setCopyMessage("Copy is unavailable over plain http -- select the text and copy it manually.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyMessage("Copied to clipboard.");
+    } catch {
+      setCopyMessage("Could not copy -- select the text and copy it manually.");
+    }
+  }
+
+  return (
+    <div className="border-b border-deck-800 py-2 text-[13px]">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center text-deck-200">
+          Printer mode
+          {modeRow && <ProvenanceBadge source={modeRow.source} />}
+        </span>
+        <div className="flex items-center gap-2">
+          <Select
+            value={shownMode}
+            onChange={handleModeChange}
+            options={PRINTER_MODE_OPTIONS}
+            ariaLabel="Printer mode"
+            disabled={mutation.isPending}
+          />
+          {modeRow?.source === "db" && !pendingRemote && (
+            <ResetToEnvButton onClick={() => mutation.mutate({ printer_mode: null })} disabled={mutation.isPending} />
+          )}
+        </div>
+      </div>
+      {remote && (
+        <div className="mt-3 flex flex-col gap-3">
+          <div>
+            <label htmlFor="bridge-address" className={fieldLabelText}>
+              Bridge address
+            </label>
+            <TextInput
+              id="bridge-address"
+              value={address}
+              onChange={setAddress}
+              placeholder="pi.local or 10.0.0.5:9177"
+              maxLength={255}
+            />
+          </div>
+          <div>
+            <label htmlFor="bridge-cert" className={fieldLabelText}>
+              Bridge certificate
+            </label>
+            <p className={helpText}>
+              Paste the output of <code className="font-mono">show-cert</code> from the Pi. Public certificate only --
+              never a private key.
+            </p>
+            <Textarea
+              id="bridge-cert"
+              value={cert}
+              onChange={setCert}
+              rows={6}
+              placeholder="-----BEGIN CERTIFICATE-----"
+              maxLength={8000}
+            />
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={handleSaveRemote}
+              disabled={address.trim() === "" || cert.trim() === "" || mutation.isPending}
+              className={primaryButtonClass}
+            >
+              Save remote printer
+            </button>
+          </div>
+          <div>
+            <span className={fieldLabelText}>This app&apos;s certificate</span>
+            <p className={helpText}>
+              Give this to the bridge: <code className="font-mono">bridge pair -</code>, then restart the bridge.
+            </p>
+            {identity.isPending ? (
+              <Pending />
+            ) : identity.isError || !identity.data ? (
+              <p role="alert" className={errorText}>
+                Could not load this app&apos;s certificate.
+              </p>
+            ) : (
+              <>
+                <pre
+                  aria-label="App certificate"
+                  className="mt-1 overflow-x-auto rounded-md border border-deck-600 bg-deck-800 p-2 font-mono text-[11px] text-deck-200"
+                >
+                  {identity.data.cert_pem}
+                </pre>
+                <p className={helpText}>
+                  SHA-256 fingerprint: <span className="font-mono">{identity.data.fingerprint}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(identity.data.cert_pem)}
+                  className={`mt-2 ${SECONDARY_BUTTON_CLASS}`}
+                >
+                  Copy certificate
+                </button>
+                {copyMessage && <p className={helpText}>{copyMessage}</p>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      <SettingErrorText mutation={mutation} />
+    </div>
+  );
+}
+
 function PrinterSection({ rows }: { rows: SettingRow[] }) {
   return (
     <section className={panel}>
@@ -258,7 +414,7 @@ function PrinterSection({ rows }: { rows: SettingRow[] }) {
         printer&apos;s hardware-verified combination is Classic / MSB first / Flip pins on.
       </p>
       <div className="mt-3">
-        <SelectSettingRow label="Printer mode" fieldKey="printer_mode" rows={rows} options={PRINTER_MODE_OPTIONS} />
+        <PrinterModeRow rows={rows} />
         <SelectSettingRow
           label="Init strategy"
           fieldKey="printer_init_strategy"
@@ -277,8 +433,8 @@ function PrinterSection({ rows }: { rows: SettingRow[] }) {
         />
         <KeepAwakeIntervalField rows={rows} />
         <p className={helpText}>
-          Sends a status request every N minutes to stop the printer&apos;s auto power-off idle timer (USB mode
-          only).
+          Sends a status request every N minutes to stop the printer&apos;s auto power-off idle timer (USB or remote
+          mode).
         </p>
       </div>
     </section>

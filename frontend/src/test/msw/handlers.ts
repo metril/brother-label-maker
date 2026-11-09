@@ -547,6 +547,8 @@ function settingsRow(
 export const defaultSettingsBody: SettingsResponse = {
   settings: [
     settingsRow("printer_mode", "mock"),
+    settingsRow("printer_bridge_address", null),
+    settingsRow("printer_bridge_cert", null),
     settingsRow("printer_init_strategy", "classic"),
     settingsRow("printer_bit_order", "msb_first"),
     settingsRow("printer_flip_pins", true),
@@ -562,6 +564,13 @@ export const defaultSettingsBody: SettingsResponse = {
     settingsRow("cors_origins", ["http://localhost:5173"], "default", false),
   ],
 };
+
+export const bridgeIdentityHandler = http.get("/api/printer/bridge-identity", () =>
+  HttpResponse.json({
+    cert_pem: "-----BEGIN CERTIFICATE-----\nAPPCERT\n-----END CERTIFICATE-----\n",
+    fingerprint: "ab12cd34",
+  }),
+);
 
 export const getSettingsHandler = http.get("/api/settings", () => HttpResponse.json(defaultSettingsBody));
 
@@ -601,6 +610,7 @@ export const defaultHandlers = [
   imagesListHandler,
   deleteImageHandler,
   printerStatusConnectedHandler,
+  bridgeIdentityHandler,
   previewHandler,
   printEstimateHandler,
   printPreviewHandler,
