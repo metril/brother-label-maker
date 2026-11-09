@@ -31,10 +31,8 @@ function findRow(rows: SettingRow[], key: string): SettingRow | undefined {
 }
 
 /** A small mono tag naming WHERE a setting's current effective value comes
- * from -- `"db"` (an override saved from this page), `"env"` (this app's
- * environment), or `"default"` (the class's own hardcoded fallback).
- * Replaces the old fixed "env" tag every row used to carry unconditionally
- * -- now every editable row can genuinely be any of the three. */
+ * from -- `"db"` (saved from this page), `"default"` (the built-in default), or
+ * `"env"` (read-only Runtime rows only, set via the environment). */
 function ProvenanceBadge({ source }: { source: SettingsSource }) {
   return (
     <span className="ml-1.5 rounded border border-deck-700 px-1 py-0.5 font-condensed text-[9px] uppercase tracking-wide text-deck-400">
@@ -43,15 +41,14 @@ function ProvenanceBadge({ source }: { source: SettingsSource }) {
   );
 }
 
-function ResetToEnvButton({
+function ResetButton({
   onClick,
   disabled,
-  label = "Reset to env",
+  label = "Reset to default",
 }: {
   onClick: () => void;
   disabled?: boolean;
-  /** Defaults to "Reset to env" -- accurate for every field that has a real
-   * AppConfig/env tier to fall back to. The two DB-only fields
+  /** Defaults to "Reset to default". The two DB-only fields
    * (keep_printer_awake/keep_awake_interval_min, see settings_overlay.py)
    * have no env tier at all -- provenance() for those only ever reports
    * "db" or "default" -- so their own reset buttons pass "Reset to
@@ -113,7 +110,7 @@ function SelectSettingRow({ label, fieldKey, rows, options }: SelectSettingRowPr
             disabled={mutation.isPending}
           />
           {row?.source === "db" && (
-            <ResetToEnvButton onClick={() => mutation.mutate({ [fieldKey]: null })} disabled={mutation.isPending} />
+            <ResetButton onClick={() => mutation.mutate({ [fieldKey]: null })} disabled={mutation.isPending} />
           )}
         </div>
       </div>
@@ -153,7 +150,7 @@ function SwitchSettingRow({
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton
+          <ResetButton
             onClick={() => mutation.mutate({ [fieldKey]: null })}
             disabled={mutation.isPending}
             {...(resetLabel ? { label: resetLabel } : {})}
@@ -217,7 +214,7 @@ function KeepAwakeIntervalField({ rows }: { rows: SettingRow[] }) {
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton
+          <ResetButton
             onClick={() => mutation.mutate({ keep_awake_interval_min: null })}
             disabled={mutation.isPending}
             label="Reset to default"
@@ -320,7 +317,7 @@ function PrinterModeRow({ rows }: { rows: SettingRow[] }) {
             disabled={mutation.isPending}
           />
           {modeRow?.source === "db" && !pendingRemote && (
-            <ResetToEnvButton onClick={() => mutation.mutate({ printer_mode: null })} disabled={mutation.isPending} />
+            <ResetButton onClick={() => mutation.mutate({ printer_mode: null })} disabled={mutation.isPending} />
           )}
         </div>
       </div>
@@ -464,7 +461,7 @@ function HomeboxUrlField({ rows }: { rows: SettingRow[] }) {
   const [raw, setRaw] = useState(serverValue ?? "");
 
   // Resyncs FROM the server value only when it actually changes (a fresh
-  // load, a successful save, or a "Reset to env"/Clear) -- never clobbers
+  // load, a successful save, or a "Reset to default"/Clear) -- never clobbers
   // an in-progress, not-yet-saved edit, same reasoning as ui/inputs.tsx's
   // NumberInput.
   useEffect(() => {
@@ -507,7 +504,7 @@ function HomeboxUrlField({ rows }: { rows: SettingRow[] }) {
           Save
         </button>
         <button type="button" onClick={handleClear} disabled={mutation.isPending} className={SECONDARY_BUTTON_CLASS}>
-          Clear (use env)
+          Clear
         </button>
       </div>
     </div>
@@ -687,7 +684,7 @@ function HomeboxSection({ rows }: { rows: SettingRow[] }) {
 
 // --- ELS section: els_enabled (Switch, task 4.5 Track A -- moved here from
 // the read-only Runtime section now that it's DB-editable) + els_tape_mm
-// (buffered number + Save + Reset to env) ---
+// (buffered number + Save + Reset to default) ---
 
 function ElsTapeMmField({ rows }: { rows: SettingRow[] }) {
   const row = findRow(rows, "els_tape_mm");
@@ -714,7 +711,7 @@ function ElsTapeMmField({ rows }: { rows: SettingRow[] }) {
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton onClick={() => mutation.mutate({ els_tape_mm: null })} disabled={mutation.isPending} />
+          <ResetButton onClick={() => mutation.mutate({ els_tape_mm: null })} disabled={mutation.isPending} />
         )}
       </div>
       <div className="flex items-center gap-2">
@@ -789,7 +786,7 @@ function RuntimeSection({ rows }: { rows: SettingRow[] }) {
   return (
     <section className={panel}>
       <h2 className={panelHeading}>Runtime</h2>
-      <p className={helpText}>Every row below is set via the environment -- change it there and restart the app, not here.</p>
+      <p className={helpText}>Every row below is set at startup via the environment (or the container) -- change it there and restart the app, not here.</p>
       <div className="mt-3">
         <ReadOnlyRow label="Auth mode" row={findRow(rows, "auth_mode")} />
         <ReadOnlyRow label="CORS origins" row={findRow(rows, "cors_origins")} />

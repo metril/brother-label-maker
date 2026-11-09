@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { ApiError, getHomeboxEntityPath, getHomeboxSettings } from "../api/client";
 import { HomeboxBulkCreate } from "../components/HomeboxBulkCreate";
@@ -169,10 +170,9 @@ export function Homebox() {
         <h1 className={typeHeading}>HomeBox</h1>
         <div className={panel}>
           <p className="text-[13px] text-deck-400">
-            HomeBox isn't configured yet. Set <code className="font-mono text-deck-200">HOMEBOX_URL</code> (the instance's own
-            root URL) and <code className="font-mono text-deck-200">HOMEBOX_API_KEY</code> (an{" "}
-            <code className="font-mono text-deck-200">hb_</code>-prefixed read-only API key, from HomeBox's own user settings)
-            in this app's environment, then restart it.
+            HomeBox isn't configured yet. Set the instance's root URL and an{" "}
+            <code className="font-mono text-deck-200">hb_</code>-prefixed read-only API key (from HomeBox's own user settings) on
+            the <Link to="/settings" className="underline decoration-dotted hover:text-amber-300">Settings page</Link>.
           </p>
         </div>
       </div>

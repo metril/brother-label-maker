@@ -204,14 +204,14 @@ async def test_probe_names_the_version_problem_on_pre_merge_servers(client):
 async def test_probe_distinguishes_not_homebox_from_old_homebox(client):
     respx.get(f"{API}/entities").mock(return_value=httpx.Response(404))
     respx.get(f"{API}/items").mock(return_value=httpx.Response(404))
-    with pytest.raises(HomeBoxUnavailableError, match="HOMEBOX_URL"):
+    with pytest.raises(HomeBoxUnavailableError, match="HomeBox URL"):
         await client.probe()
 
 
 @respx.mock
 async def test_auth_errors_are_named(client):
     respx.get(f"{API}/entities").mock(return_value=httpx.Response(401))
-    with pytest.raises(HomeBoxAuthError, match="HOMEBOX_API_KEY"):
+    with pytest.raises(HomeBoxAuthError, match="API key"):
         await client.list_entities()
 
 

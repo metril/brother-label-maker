@@ -27,17 +27,8 @@ async def db():
 
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
-    """A hermetic AppConfig for provenance testing: `printer_bit_order`/
-    `printer_flip_pins` are explicit constructor kwargs (deterministically
-    "env" provenance -- see AppConfig.model_fields_set), while
-    `printer_init_strategy`/`els_tape_mm`/`homebox_url`/`homebox_api_key`
-    are left OUT entirely, with their own env vars explicitly deleted, so
-    they deterministically fall through to "default" provenance regardless
-    of what's exported in the dev shell running this test (same
-    hermeticity concern as conftest.py's own `_DEFAULT_APP_CONFIG_KWARGS`).
-    """
-    for env_name in ("PRINTER_INIT_STRATEGY", "ELS_TAPE_MM", "HOMEBOX_URL", "HOMEBOX_API_KEY"):
-        monkeypatch.delenv(env_name, raising=False)
+    """A hermetic AppConfig: two ctor kwargs, the rest class defaults. Neither
+    reports "env" (overridable fields have no env tier)."""
     return AppConfig(
         printer_mode="mock",
         data_dir=tmp_path / "data",
@@ -89,7 +80,7 @@ async def test_reload_drops_a_bogus_stored_row_and_falls_back(db, cfg, caplog):
 
     # Falls back to env/default instead of surfacing "banana".
     assert overlay.effective().printer_mode == cfg.printer_mode
-    assert overlay.provenance("printer_mode") == "env"
+    assert overlay.provenance("printer_mode") == "default"
 
     records = [r for r in caplog.records if r.name == "labelmaker.settings_overlay"]
     assert any(
@@ -100,10 +91,10 @@ async def test_reload_drops_a_bogus_stored_row_and_falls_back(db, cfg, caplog):
 # -- provenance() ------------------------------------------------------------
 
 
-async def test_provenance_env_default_then_db(db, cfg):
+async def test_provenance_default_then_db(db, cfg):
     overlay = await SettingsOverlay.create(cfg, db)
-    assert overlay.provenance("printer_bit_order") == "env"  # explicit kwarg
-    assert overlay.provenance("printer_init_strategy") == "default"  # untouched, no env var
+    assert overlay.provenance("printer_bit_order") == "default"  # ctor kwarg is still a default
+    assert overlay.provenance("printer_init_strategy") == "default"  # untouched
     assert overlay.provenance("keep_printer_awake") == "default"  # DB-only, unset
 
     await overlay.set_many({"printer_init_strategy": "e310bt"})
@@ -143,13 +134,13 @@ async def test_set_many_none_deletes_override_and_reverts(db, cfg):
 
     await overlay.set_many({"printer_bit_order": None})
     assert overlay.effective().printer_bit_order == cfg.printer_bit_order
-    assert overlay.provenance("printer_bit_order") == "env"
+    assert overlay.provenance("printer_bit_order") == "default"
 
     # The DB row is genuinely gone, not just shadowed in this instance's
     # memory -- reconstructing from the same db must also see the revert.
     reloaded = await SettingsOverlay.create(cfg, db)
     assert reloaded.effective().printer_bit_order == cfg.printer_bit_order
-    assert reloaded.provenance("printer_bit_order") == "env"
+    assert reloaded.provenance("printer_bit_order") == "default"
 
 
 async def test_set_many_partial_update_leaves_other_fields_untouched(db, cfg):
@@ -168,7 +159,7 @@ async def test_set_many_rejects_unknown_key_and_applies_nothing(db, cfg):
         await overlay.set_many({"printer_bit_order": "lsb_first", "bogus": 1})
 
     # Nothing applied -- not even the valid field in the same invalid batch.
-    assert overlay.provenance("printer_bit_order") == "env"
+    assert overlay.provenance("printer_bit_order") == "default"
     assert await db.all_settings() == {}
 
 

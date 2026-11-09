@@ -1,6 +1,10 @@
-"""App configuration: a pydantic-settings model read from the process
-environment, field names matching the planned docker-compose service's env
-vars exactly -- no prefix (`PRINTER_MODE`, not e.g. `LABELMAKER_PRINTER_MODE`).
+"""App configuration: a pydantic-settings model. Only the startup-time
+fields in `ENV_FIELDS` are read from the process environment (no prefix, the
+env var is the upper-cased field name). Everything else (printer, HomeBox,
+ELS) is edited on the Settings page and stored in the DB overlay
+(settings_overlay.py); those fields here are just hardcoded defaults, which
+tests may still pass as constructor kwargs. A removed env var is ignored by
+`AppConfig` and imported once by `legacy_env.import_legacy_env`.
 
 `get_config()` is a process-wide cached accessor for the real server entry
 point (`main.app = create_app()`); tests never use it -- they build their own
@@ -12,20 +16,69 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+# The only AppConfig fields an operator can set from the environment (needed at
+# startup). STATIC_DIR is read straight from os.environ by main.py.
+ENV_FIELDS = frozenset(
+    {
+        "data_dir",
+        "cors_origins",
+        "auth_mode",
+        "oidc_issuer",
+        "oidc_client_id",
+        "oidc_client_secret",
+        "oidc_scopes",
+        "session_secret",
+        "session_max_age_s",
+        "session_cookie_secure",
+    }
+)
+
+
+class _AllowlistSource(PydanticBaseSettingsSource):
+    """Wraps an env/dotenv source, dropping every field outside ENV_FIELDS."""
+
+    def __init__(self, inner: PydanticBaseSettingsSource) -> None:
+        super().__init__(inner.settings_cls)
+        self._inner = inner
+
+    def get_field_value(self, field: Any, field_name: str) -> Any:  # pragma: no cover
+        return self._inner.get_field_value(field, field_name)
+
+    def __call__(self) -> dict[str, Any]:
+        return {k: v for k, v in self._inner().items() if k in ENV_FIELDS}
 
 
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="")
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            _AllowlistSource(env_settings),
+            _AllowlistSource(dotenv_settings),
+            _AllowlistSource(file_secret_settings),
+        )
+
+    # printer_* , homebox_* and els_* below are Settings-page fields: plain
+    # defaults here (not read from the environment), overridden by the DB overlay.
     printer_mode: Literal["mock", "usb", "remote"] = "mock"
-    # PRINTER_MODE=remote: a Pi running driver/bridge.py owns the USB printer.
+    # printer_mode=remote: a Pi running driver/bridge.py owns the USB printer.
     # Address is host[:port] (default 9177); the cert is the bridge's PUBLIC
     # certificate (PEM, from `bridge show-cert`). This app's own key lives
-    # only under <data_dir>/bridge/, never in env or the DB.
+    # only under <data_dir>/bridge/, never in the DB.
     printer_bridge_address: str | None = None
     printer_bridge_cert: str | None = None
     data_dir: Path = Path("./data")

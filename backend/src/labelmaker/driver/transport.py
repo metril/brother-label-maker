@@ -3,7 +3,7 @@ test doubles.
 
 `usb.core` / `usb.util` are imported lazily -- inside methods, never at
 module import time -- so that importing this module, using `CaptureTransport`
-/`MockPrinterTransport` (the test doubles and the `PRINTER_MODE=mock`
+/`MockPrinterTransport` (the test doubles and the mock-mode
 backend), and running the test suite / CI never require libusb to be
 installed. `MockPrinterTransport`'s default status reply lazily imports
 `labelmaker.driver.status.REFERENCE_STATUS_BLOCK` for the same reason status
@@ -77,7 +77,7 @@ class Transport(Protocol):
 
 
 class CaptureTransport:
-    """Test double and the `PRINTER_MODE=mock` backend transport.
+    """Test double and the mock-mode backend transport.
 
     Records every write; serves scripted replies from a FIFO read queue.
     """
@@ -112,7 +112,7 @@ class CaptureTransport:
 
 
 class MockPrinterTransport(CaptureTransport):
-    """The `PRINTER_MODE=mock` backend transport: a CaptureTransport that
+    """The mock-mode backend transport: a CaptureTransport that
     additionally behaves like a real printer's status-request cycle, so
     request_status() never times out against it and post-print drains never
     stall.

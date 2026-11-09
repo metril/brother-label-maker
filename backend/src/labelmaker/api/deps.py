@@ -48,7 +48,7 @@ def get_keepalive_status(request: Request) -> dict:
 
 def get_homebox(request: Request) -> HomeBoxClient:
     """503 (not 404) when unconfigured: the route exists, the deployment
-    just hasn't been given HOMEBOX_URL/HOMEBOX_API_KEY -- the message says
+    just hasn't been given a HomeBox URL/API key -- the message says
     exactly that so the fix is obvious from the error alone. Routes that
     must answer 200 even when unconfigured (GET /api/homebox/status) skip
     this dependency and check the config themselves."""
@@ -57,8 +57,8 @@ def get_homebox(request: Request) -> HomeBoxClient:
         raise HTTPException(
             status_code=503,
             detail=(
-                "HomeBox integration is not configured -- set HOMEBOX_URL and "
-                "HOMEBOX_API_KEY (an hb_-prefixed API key) in the environment"
+                "HomeBox integration is not configured -- set the HomeBox URL and "
+                "API key (an hb_-prefixed key) on the Settings page"
             ),
         )
     return client

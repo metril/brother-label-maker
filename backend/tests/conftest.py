@@ -50,20 +50,12 @@ def _isolated_render_registry():
     _REGISTRY.clear()
     _REGISTRY.update(snapshot)
 
-# I4: app_config's own explicit defaults for the three checkpoint-pending
-# fields (printer_init_strategy/printer_bit_order/printer_flip_pins).
-# AppConfig is a pydantic-settings BaseSettings model -- ANY field not
-# passed explicitly to its constructor falls back to whatever the process
-# environment says (env_prefix="", so e.g. a real `PRINTER_INIT_STRATEGY`
-# set in a dev's shell or a CI runner's env would silently win). Byte-parity
-# tests (test_api_print.py) hand-derive expected streams assuming specific
-# values for these three -- if the ambient environment disagreed with that
-# assumption, those tests would fail for a reason with nothing to do with
-# the code under test. Pinning them here, explicitly, on every app_config
-# the suite builds makes the whole suite hermetic against that. The same
-# applies to homebox_url/homebox_api_key: an ambient HOMEBOX_URL/
-# HOMEBOX_API_KEY in a dev shell or CI runner must not silently enable the
-# HomeBox integration (and its outbound calls) in tests unrelated to it.
+
+# app_config pins the Settings-page fields explicitly on every AppConfig the
+# suite builds (they are plain defaults, not env-driven, but byte-parity
+# tests hand-derive streams assuming these exact values). Auth fields ARE
+# env-driven, so pinning them keeps the suite hermetic against an ambient
+# AUTH_MODE=oidc etc.
 _DEFAULT_APP_CONFIG_KWARGS = {
     "printer_init_strategy": "classic",
     "printer_bit_order": "msb_first",
@@ -89,6 +81,16 @@ _DEFAULT_APP_CONFIG_KWARGS = {
     "oidc_scopes": "openid profile email",
     "session_secret": None,
 }
+
+
+@pytest.fixture(autouse=True)
+def _no_legacy_env(monkeypatch):
+    """Removed env vars are imported at app startup (legacy_env.py); an
+    ambient one in a dev shell must not leak into tests."""
+    from labelmaker.legacy_env import LEGACY_ENV_FIELDS
+
+    for name in LEGACY_ENV_FIELDS:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

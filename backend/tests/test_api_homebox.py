@@ -109,7 +109,7 @@ async def test_status_configured_upstream_down_is_still_200(app_and_client, hb_m
 async def test_entities_unconfigured_returns_503_with_setup_hint(client):
     resp = await client.get("/api/homebox/entities")
     assert resp.status_code == 503
-    assert "HOMEBOX_URL" in resp.json()["detail"]
+    assert "Settings page" in resp.json()["detail"]
 
 
 # -- entities list ----------------------------------------------------------
@@ -154,7 +154,7 @@ async def test_upstream_401_maps_to_502_with_actionable_detail(app_and_client, h
     _, client = app_and_client
     resp = await client.get("/api/homebox/entities")
     assert resp.status_code == 502
-    assert "HOMEBOX_API_KEY" in resp.json()["detail"]
+    assert "API key" in resp.json()["detail"]
 
 
 # -- single entity ------------------------------------------------------
@@ -304,7 +304,7 @@ async def test_settings_unconfigured_effective_is_null_and_rejects_bad_scheme(cl
 
 @_CONFIGURED
 async def test_status_stays_200_when_upstream_answers_html(client, hb_mock):
-    """An SSO login page / default vhost at HOMEBOX_URL: /v1/status answers
+    """An SSO login page / default vhost at the HomeBox URL: /v1/status answers
     200 but with HTML. The contract is ALWAYS 200 -- this must report
     reachable=False with a diagnostic, never a 500 (review finding #1)."""
     hb_mock.get(f"{API}/status").mock(

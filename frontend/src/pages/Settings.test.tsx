@@ -84,9 +84,9 @@ describe("Settings page", () => {
       expect(within(printer).getByLabelText("Init strategy")).toHaveValue("classic");
       expect(within(printer).getByLabelText("Bit order")).toHaveValue("lsb_first");
       expect(within(printer).getByRole("switch", { name: "Flip pins" })).toHaveAttribute("aria-checked", "true");
-      // "db" provenance shows a Reset to env affordance; the other rows,
+      // "db" provenance shows a Reset to default affordance; the other rows,
       // still at their default provenance, do not.
-      expect(within(printer).getByRole("button", { name: "Reset to env" })).toBeInTheDocument();
+      expect(within(printer).getByRole("button", { name: "Reset to default" })).toBeInTheDocument();
     });
 
     it("choosing Remote shows the bridge fields and saves mode, address and cert in one PUT", async () => {
@@ -202,7 +202,7 @@ describe("Settings page", () => {
       await waitFor(() => expect(capturedBody).toEqual({ homebox_writes_enabled: true }));
     });
 
-    it("clicking Reset to env PUTs null for that field", async () => {
+    it("clicking Reset to default PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(
         http.get("/api/settings", () =>
@@ -220,7 +220,7 @@ describe("Settings page", () => {
 
       const printer = await findSection("Printer");
       await within(printer).findByLabelText("Bit order");
-      await user.click(within(printer).getByRole("button", { name: "Reset to env" }));
+      await user.click(within(printer).getByRole("button", { name: "Reset to default" }));
 
       await waitFor(() => expect(capturedBody).toEqual({ printer_bit_order: null }));
     });
@@ -371,7 +371,7 @@ describe("Settings page", () => {
       renderWithProviders(<Settings />, { route: "/settings" });
 
       await screen.findByLabelText("HomeBox URL");
-      await user.click(within(fieldContainer("HomeBox URL")).getByRole("button", { name: "Clear (use env)" }));
+      await user.click(within(fieldContainer("HomeBox URL")).getByRole("button", { name: "Clear" }));
 
       await waitFor(() => expect(capturedBody).toEqual({ homebox_url: null }));
     });
@@ -524,7 +524,7 @@ describe("Settings page", () => {
       await waitFor(() => expect(capturedBody).toEqual({ els_enabled: true }));
     });
 
-    it("clicking Reset to env on ELS enabled PUTs null for that field", async () => {
+    it("clicking Reset to default on ELS enabled PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(
         http.get("/api/settings", () =>
@@ -542,7 +542,7 @@ describe("Settings page", () => {
 
       const els = await findSection("ELS");
       await within(els).findByRole("switch", { name: "ELS enabled" });
-      await user.click(within(els).getByRole("button", { name: "Reset to env" }));
+      await user.click(within(els).getByRole("button", { name: "Reset to default" }));
 
       await waitFor(() => expect(capturedBody).toEqual({ els_enabled: null }));
     });

@@ -1,10 +1,10 @@
 """A DB-backed overlay over `AppConfig` (task 4.5): lets an operator change a
 small, curated set of settings from the running app (Settings page ->
-GET/PUT /api/settings, api/router_settings.py) without editing the
-environment and restarting the container.
+GET/PUT /api/settings, api/router_settings.py) without restarting the container.
 
-`AppConfig` (config.py) stays the single source of env-derived defaults and
-is never mutated -- this module adds a second, DB-backed layer ON TOP of it.
+`AppConfig` (config.py) stays the single source of hardcoded defaults (these
+fields are not read from the environment) and is never mutated -- this module
+adds a second, DB-backed layer ON TOP of it.
 Every overridable field lives in the generic `settings` KV table
 (db/database.py's get_setting/set_setting/all_settings/delete_setting) under
 the key `"cfg.<field>"`, so no new migration is needed. `SettingsOverrides`
@@ -301,20 +301,11 @@ class SettingsOverlay:
                 await self._db.set_setting(key, value)
                 self._overrides[field] = value
 
-    def provenance(self, field: str) -> Literal["db", "env", "default"]:
-        """`"db"` when an override is currently stored; else `"env"` when
-        `AppConfig` itself resolved that field from an explicitly-provided
-        value (env var, dotenv, or an explicit constructor kwarg -- see
-        `model_fields_set` on a pydantic-settings model); else
-        `"default"` (the class's own hardcoded default, or -- for the two
-        DB-only fields, which have no `AppConfig` field at all --
-        `_DB_ONLY_DEFAULTS`)."""
+    def provenance(self, field: str) -> Literal["db", "default"]:
+        """`"db"` when an override is currently stored; else `"default"`.
+        Overridable fields have no env tier any more (config.py's
+        ENV_FIELDS), so AppConfig's value for them is always a hardcoded
+        default -- or, in tests only, a constructor kwarg."""
         if field not in OVERRIDABLE_FIELDS:
             raise ValueError(f"unknown settings field: {field!r}")
-        if field in self._overrides:
-            return "db"
-        if field in _DB_ONLY_DEFAULTS:
-            return "default"
-        if field in self._cfg.model_fields_set:
-            return "env"
-        return "default"
+        return "db" if field in self._overrides else "default"
