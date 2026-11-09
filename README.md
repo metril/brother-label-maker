@@ -148,8 +148,8 @@ docker compose -f docker/docker-compose.yml up --build -d
 (`--build` applies to that file's `build:` section; a compose file using the
 GHCR `image:` as above just needs `up -d`.)
 
-Printer on a Raspberry Pi instead of the server? Run the bridge there and use
-`PRINTER_MODE=remote`: see [docs/raspberry-pi-bridge.md](docs/raspberry-pi-bridge.md).
+Printer on a Raspberry Pi instead of the server? See
+[Printer on a Raspberry Pi](#printer-on-a-raspberry-pi).
 
 See [docs/usb-setup.md](docs/usb-setup.md) for the full reasoning behind
 this shape (why a directory mount + cgroup rule instead of `--privileged` or
@@ -164,6 +164,61 @@ order, and pin mapping are all hardware-verified and baked in as the
 to set any of these three env vars for a stock PT-E720BT — they exist as
 override knobs for experimentation, not normal deployment.
 
+## Printer on a Raspberry Pi
+
+Run the app on a server and plug the PT-E720BT into a Raspberry Pi or other
+Linux box. A small bridge on the Pi owns the USB connection, and the app talks
+to it with `PRINTER_MODE=remote`. Printing, status, cut and keep-awake work as
+they do over local USB.
+
+Traffic uses mutual TLS 1.3 with pinned self-signed certificates. Each side
+generates its own key, only public certificates are exchanged, and each side
+accepts only the one certificate it was paired with. There is no plaintext
+mode. Private keys stay on their host (`<DATA_DIR>/bridge/client.key` on the
+app, `/data/bridge.key` on the bridge).
+
+Set `BRIDGE` to shorten the commands below, on the Pi, with this repo's
+`docker/docker-compose.bridge.yml`:
+
+```bash
+BRIDGE="docker compose -f docker/docker-compose.bridge.yml"
+```
+
+1. **Get the bridge certificate** on the Pi:
+   `$BRIDGE run --rm -T bridge python -m labelmaker.driver.bridge show-cert`
+2. **Configure the app:** in Settings, set the printer mode to **Remote**, enter
+   the bridge address (`host`, `host:port` or `[v6]:port`; default port 9177),
+   paste the bridge certificate, and save. The page then shows this app's
+   certificate.
+3. **Pair:** copy the app's certificate to `app.crt` on the Pi, then:
+   `$BRIDGE run --rm -T bridge python -m labelmaker.driver.bridge pair - < app.crt`
+4. **Start the bridge:** `$BRIDGE up -d`. It refuses to start until step 3 is done.
+5. **Check:** Diagnostics or `GET /api/printer/status` shows `connected: true`.
+
+The app can instead be configured with `PRINTER_MODE=remote`,
+`PRINTER_BRIDGE_ADDRESS` and `PRINTER_BRIDGE_CERT`. The bridge reads
+`BRIDGE_PORT` (9177), `BRIDGE_DIR` (`/data`) and `BRIDGE_HOST` (`0.0.0.0`).
+
+**Behavior**
+
+- One client at a time. A second waits up to 5s, then gets "busy".
+- The bridge releases USB when the client disconnects or is idle for 60s.
+- Writes are never retried. A network drop mid-print fails the job rather than
+  risk a duplicate label.
+- Prefer a wired connection for the Pi.
+
+**Replacing a certificate:** delete `bridge.key` and `bridge.crt` from the bridge
+volume, or `client.key` and `client.crt` from `<DATA_DIR>/bridge`, then pair
+again and restart the bridge. Pinning a new app certificate revokes the old one.
+
+| Symptom | Cause and fix |
+|---|---|
+| "not paired" | The bridge doesn't trust this app's certificate. Redo step 3 and restart the bridge. |
+| "bridge certificate does not match the pinned certificate" | The saved certificate is stale. Re-run step 1 and paste it in Settings. |
+| "cannot reach printer bridge" | Wrong address or port, bridge not running, or a firewall on 9177. |
+| "bridge is serving another client" | Another app or CLI is connected. Wait or stop it. |
+| "no USB printer found" or permission errors on the Pi | See `docs/usb-setup.md`. If `usblp` can't be detached in the container, blacklist it on the Pi. |
+
 ## Environment variable reference
 
 `AppConfig` (`backend/src/labelmaker/config.py`) reads every setting
@@ -174,7 +229,7 @@ just the field name, uppercased.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `PRINTER_MODE` | `mock` | `mock` (no hardware, safe for design/preview), `usb` (talks to a real printer) or `remote` (a Raspberry Pi bridge owns the printer; see [docs/raspberry-pi-bridge.md](docs/raspberry-pi-bridge.md)). |
+| `PRINTER_MODE` | `mock` | `mock` (no hardware, safe for design/preview), `usb` (talks to a real printer) or `remote` (a Raspberry Pi bridge owns the printer; see [Printer on a Raspberry Pi](#printer-on-a-raspberry-pi)). |
 | `PRINTER_BRIDGE_ADDRESS` | unset | `remote` mode: bridge `host[:port]` (default port 9177). |
 | `PRINTER_BRIDGE_CERT` | unset | `remote` mode: the bridge's public certificate (PEM). |
 | `DATA_DIR` | `./data` (image sets this to `/data`, matching the Dockerfile's `VOLUME /data`) | Where the SQLite db and print-job artifacts live. |

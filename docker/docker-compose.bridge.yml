@@ -1,9 +1,8 @@
 # Raspberry Pi printer bridge: runs on the machine the PT-E720BT is plugged
-# into and serves it to the app over mutual TLS (see ../docs/raspberry-pi-bridge.md).
-# Same released image as the app, different command:
-#   docker compose -f docker/docker-compose.bridge.yml up -d
-# First run, before pairing, the bridge exits ("not paired"); see the doc for
-# `show-cert` / `pair`. Update to the newest release:
+# into and serves it to the app over mutual TLS. Same released image as the
+# app, different command. Pair it BEFORE the first `up -d` (the bridge refuses
+# to start unpaired): see "Printer on a Raspberry Pi" in ../README.md.
+# Update to the newest release:
 #   docker compose -f docker/docker-compose.bridge.yml pull && \
 #     docker compose -f docker/docker-compose.bridge.yml up -d
 #

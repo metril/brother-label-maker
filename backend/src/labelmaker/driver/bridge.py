@@ -148,6 +148,10 @@ class BridgeServer:
             conn.settimeout(self._idle_timeout)
             logger.info("client connected from %s", peer[0])
             self._session(conn)
+        except ssl.SSLEOFError:
+            # Connected and left without a handshake: the compose healthcheck
+            # does this every 30s, so a warning would bury real rejections.
+            logger.debug("connection from %s closed before the TLS handshake", peer[0])
         except ssl.SSLError as err:
             logger.warning("TLS handshake with %s failed (unpaired certificate?): %s", peer[0], err)
         except (OSError, bp.ProtocolError) as err:

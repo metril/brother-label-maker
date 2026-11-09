@@ -5,6 +5,7 @@ bridge's 5s/60s timeouts are injected as milliseconds."""
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import ssl
@@ -273,6 +274,16 @@ def test_stalled_handshake_does_not_block_others_and_is_dropped(env):
         pass
     stalled.close()
     assert len(env.transports) == 1  # only the legitimate client opened USB
+
+
+def test_connect_without_handshake_logs_no_warning(env, caplog):
+    caplog.set_level(logging.DEBUG, logger="labelmaker.bridge")
+    socket.create_connection(("127.0.0.1", env.server.port), timeout=3).close()
+    deadline = time.monotonic() + 3
+    while "closed before the TLS handshake" not in caplog.text:
+        assert time.monotonic() < deadline, caplog.text
+        time.sleep(0.01)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 def test_client_rejects_unpinned_server_certificate(env):
