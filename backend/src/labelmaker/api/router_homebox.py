@@ -70,7 +70,7 @@ async def _proxy[T](call: Awaitable[T]) -> T:
     - HomeBoxValidationError (write payload rejected) -> 422.
     - Any other HomeBoxError (auth, version, unavailable) -> 502: the app
       is fine, the HomeBox side of the bridge is not.
-    - ValueError -> 502 too: whatever answered at HOMEBOX_URL replied with
+    - ValueError -> 502 too: whatever answered at the HomeBox URL replied with
       non-JSON (json.JSONDecodeError) or a non-HomeBox shape
       (pydantic.ValidationError subclasses ValueError) -- e.g. an SSO
       proxy's login page or a typo'd host serving HTML. Without this, the
@@ -129,7 +129,7 @@ async def homebox_status(settings: SettingsDep) -> dict:
         return {"configured": True, "reachable": False, "healthy": None, "version": None,
                 "error": str(exc)}
     except Exception as exc:  # noqa: B902 -- non-JSON / non-HomeBox response shape
-        # Whatever answered at HOMEBOX_URL is not a HomeBox API (SSO login
+        # Whatever answered at the HomeBox URL is not a HomeBox API (SSO login
         # page, default vhost, ...). This endpoint's contract is "always
         # 200"; a 500 here would read as "the app is broken" instead of
         # "HomeBox is misconfigured".

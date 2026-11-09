@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, putHomeboxSettings } from "../api/client";
 import type { SettingRow, SettingsSource } from "../api/types";
 import { Pending } from "../components/ui/Pending";
-import { NumberInput, Select, TextInput } from "../components/ui/inputs";
+import { NumberInput, Select, Textarea, TextInput } from "../components/ui/inputs";
 import { Switch } from "../components/ui/Switch";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import {
@@ -17,6 +17,7 @@ import {
   typeHeading,
 } from "../components/ui/styles";
 import { HOMEBOX_SETTINGS_QUERY_KEY, useHomeboxSettingsQuery } from "../hooks/useHomeboxSettings";
+import { useBridgeIdentity } from "../hooks/useBridgeIdentity";
 import { useSettingsQuery, useUpdateSettings } from "../hooks/useSettings";
 
 const SECONDARY_BUTTON_CLASS =
@@ -30,10 +31,8 @@ function findRow(rows: SettingRow[], key: string): SettingRow | undefined {
 }
 
 /** A small mono tag naming WHERE a setting's current effective value comes
- * from -- `"db"` (an override saved from this page), `"env"` (this app's
- * environment), or `"default"` (the class's own hardcoded fallback).
- * Replaces the old fixed "env" tag every row used to carry unconditionally
- * -- now every editable row can genuinely be any of the three. */
+ * from -- `"db"` (saved from this page), `"default"` (the built-in default), or
+ * `"env"` (read-only Runtime rows only, set via the environment). */
 function ProvenanceBadge({ source }: { source: SettingsSource }) {
   return (
     <span className="ml-1.5 rounded border border-deck-700 px-1 py-0.5 font-condensed text-[9px] uppercase tracking-wide text-deck-400">
@@ -42,15 +41,14 @@ function ProvenanceBadge({ source }: { source: SettingsSource }) {
   );
 }
 
-function ResetToEnvButton({
+function ResetButton({
   onClick,
   disabled,
-  label = "Reset to env",
+  label = "Reset to default",
 }: {
   onClick: () => void;
   disabled?: boolean;
-  /** Defaults to "Reset to env" -- accurate for every field that has a real
-   * AppConfig/env tier to fall back to. The two DB-only fields
+  /** Defaults to "Reset to default". The two DB-only fields
    * (keep_printer_awake/keep_awake_interval_min, see settings_overlay.py)
    * have no env tier at all -- provenance() for those only ever reports
    * "db" or "default" -- so their own reset buttons pass "Reset to
@@ -112,7 +110,7 @@ function SelectSettingRow({ label, fieldKey, rows, options }: SelectSettingRowPr
             disabled={mutation.isPending}
           />
           {row?.source === "db" && (
-            <ResetToEnvButton onClick={() => mutation.mutate({ [fieldKey]: null })} disabled={mutation.isPending} />
+            <ResetButton onClick={() => mutation.mutate({ [fieldKey]: null })} disabled={mutation.isPending} />
           )}
         </div>
       </div>
@@ -152,7 +150,7 @@ function SwitchSettingRow({
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton
+          <ResetButton
             onClick={() => mutation.mutate({ [fieldKey]: null })}
             disabled={mutation.isPending}
             {...(resetLabel ? { label: resetLabel } : {})}
@@ -168,6 +166,7 @@ function SwitchSettingRow({
 const PRINTER_MODE_OPTIONS = [
   { value: "mock", label: "Mock" },
   { value: "usb", label: "USB" },
+  { value: "remote", label: "Remote (Pi bridge)" },
 ];
 const INIT_STRATEGY_OPTIONS = [
   { value: "classic", label: "Classic" },
@@ -215,7 +214,7 @@ function KeepAwakeIntervalField({ rows }: { rows: SettingRow[] }) {
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton
+          <ResetButton
             onClick={() => mutation.mutate({ keep_awake_interval_min: null })}
             disabled={mutation.isPending}
             label="Reset to default"
@@ -249,6 +248,160 @@ function KeepAwakeIntervalField({ rows }: { rows: SettingRow[] }) {
   );
 }
 
+// --- Printer mode + remote bridge fields -------------------------------
+// Picking "Remote" doesn't PUT by itself: the backend refuses remote mode
+// without a bridge address and certificate, so the mode is saved together
+// with them (one PUT) from this row's own Save button.
+
+function PrinterModeRow({ rows }: { rows: SettingRow[] }) {
+  const modeRow = findRow(rows, "printer_mode");
+  const serverMode = typeof modeRow?.value === "string" ? modeRow.value : "mock";
+  const serverAddress = (findRow(rows, "printer_bridge_address")?.value as string | null | undefined) ?? "";
+  const serverCert = (findRow(rows, "printer_bridge_cert")?.value as string | null | undefined) ?? "";
+  const mutation = useUpdateSettings();
+  const [pendingRemote, setPendingRemote] = useState(false);
+  const [address, setAddress] = useState(serverAddress);
+  const [cert, setCert] = useState(serverCert);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+
+  useEffect(() => setAddress(serverAddress), [serverAddress]);
+  useEffect(() => setCert(serverCert), [serverCert]);
+
+  const shownMode = pendingRemote ? "remote" : serverMode;
+  const remote = shownMode === "remote";
+  const identity = useBridgeIdentity(remote);
+
+  function handleModeChange(next: string) {
+    if (next === "remote" && !(serverAddress && serverCert)) {
+      setPendingRemote(true); // wait for the address + certificate
+      return;
+    }
+    setPendingRemote(false);
+    mutation.mutate({ printer_mode: next });
+  }
+
+  function handleSaveRemote() {
+    mutation.mutate(
+      { printer_mode: "remote", printer_bridge_address: address.trim(), printer_bridge_cert: cert.trim() },
+      { onSuccess: () => setPendingRemote(false) },
+    );
+  }
+
+  async function handleCopy(text: string) {
+    // navigator.clipboard needs a secure context; plain-http LAN has none.
+    if (!navigator.clipboard) {
+      setCopyMessage("Copy is unavailable over plain http -- select the text and copy it manually.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyMessage("Copied to clipboard.");
+    } catch {
+      setCopyMessage("Could not copy -- select the text and copy it manually.");
+    }
+  }
+
+  return (
+    <div className="border-b border-deck-800 py-2 text-[13px]">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center text-deck-200">
+          Printer mode
+          {modeRow && <ProvenanceBadge source={modeRow.source} />}
+        </span>
+        <div className="flex items-center gap-2">
+          <Select
+            value={shownMode}
+            onChange={handleModeChange}
+            options={PRINTER_MODE_OPTIONS}
+            ariaLabel="Printer mode"
+            disabled={mutation.isPending}
+          />
+          {modeRow?.source === "db" && !pendingRemote && (
+            <ResetButton onClick={() => mutation.mutate({ printer_mode: null })} disabled={mutation.isPending} />
+          )}
+        </div>
+      </div>
+      {remote && (
+        <div className="mt-3 flex flex-col gap-3">
+          <div>
+            <label htmlFor="bridge-address" className={fieldLabelText}>
+              Bridge address
+            </label>
+            <TextInput
+              id="bridge-address"
+              value={address}
+              onChange={setAddress}
+              placeholder="pi.local or 10.0.0.5:9177"
+              maxLength={255}
+            />
+          </div>
+          <div>
+            <label htmlFor="bridge-cert" className={fieldLabelText}>
+              Bridge certificate
+            </label>
+            <p className={helpText}>
+              Paste the output of <code className="font-mono">show-cert</code> from the Pi. Public certificate only --
+              never a private key.
+            </p>
+            <Textarea
+              id="bridge-cert"
+              value={cert}
+              onChange={setCert}
+              rows={6}
+              placeholder="-----BEGIN CERTIFICATE-----"
+              maxLength={8000}
+            />
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={handleSaveRemote}
+              disabled={address.trim() === "" || cert.trim() === "" || mutation.isPending}
+              className={primaryButtonClass}
+            >
+              Save remote printer
+            </button>
+          </div>
+          <div>
+            <span className={fieldLabelText}>This app&apos;s certificate</span>
+            <p className={helpText}>
+              Give this to the bridge: <code className="font-mono">bridge pair -</code>, then restart the bridge.
+            </p>
+            {identity.isPending ? (
+              <Pending />
+            ) : identity.isError || !identity.data ? (
+              <p role="alert" className={errorText}>
+                Could not load this app&apos;s certificate.
+              </p>
+            ) : (
+              <>
+                <pre
+                  aria-label="App certificate"
+                  className="mt-1 overflow-x-auto rounded-md border border-deck-600 bg-deck-800 p-2 font-mono text-[11px] text-deck-200"
+                >
+                  {identity.data.cert_pem}
+                </pre>
+                <p className={helpText}>
+                  SHA-256 fingerprint: <span className="font-mono">{identity.data.fingerprint}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(identity.data.cert_pem)}
+                  className={`mt-2 ${SECONDARY_BUTTON_CLASS}`}
+                >
+                  Copy certificate
+                </button>
+                {copyMessage && <p className={helpText}>{copyMessage}</p>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      <SettingErrorText mutation={mutation} />
+    </div>
+  );
+}
+
 function PrinterSection({ rows }: { rows: SettingRow[] }) {
   return (
     <section className={panel}>
@@ -258,7 +411,7 @@ function PrinterSection({ rows }: { rows: SettingRow[] }) {
         printer&apos;s hardware-verified combination is Classic / MSB first / Flip pins on.
       </p>
       <div className="mt-3">
-        <SelectSettingRow label="Printer mode" fieldKey="printer_mode" rows={rows} options={PRINTER_MODE_OPTIONS} />
+        <PrinterModeRow rows={rows} />
         <SelectSettingRow
           label="Init strategy"
           fieldKey="printer_init_strategy"
@@ -277,8 +430,8 @@ function PrinterSection({ rows }: { rows: SettingRow[] }) {
         />
         <KeepAwakeIntervalField rows={rows} />
         <p className={helpText}>
-          Sends a status request every N minutes to stop the printer&apos;s auto power-off idle timer (USB mode
-          only).
+          Sends a status request every N minutes to stop the printer&apos;s auto power-off idle timer (USB or remote
+          mode).
         </p>
       </div>
     </section>
@@ -308,7 +461,7 @@ function HomeboxUrlField({ rows }: { rows: SettingRow[] }) {
   const [raw, setRaw] = useState(serverValue ?? "");
 
   // Resyncs FROM the server value only when it actually changes (a fresh
-  // load, a successful save, or a "Reset to env"/Clear) -- never clobbers
+  // load, a successful save, or a "Reset to default"/Clear) -- never clobbers
   // an in-progress, not-yet-saved edit, same reasoning as ui/inputs.tsx's
   // NumberInput.
   useEffect(() => {
@@ -351,7 +504,7 @@ function HomeboxUrlField({ rows }: { rows: SettingRow[] }) {
           Save
         </button>
         <button type="button" onClick={handleClear} disabled={mutation.isPending} className={SECONDARY_BUTTON_CLASS}>
-          Clear (use env)
+          Clear
         </button>
       </div>
     </div>
@@ -531,7 +684,7 @@ function HomeboxSection({ rows }: { rows: SettingRow[] }) {
 
 // --- ELS section: els_enabled (Switch, task 4.5 Track A -- moved here from
 // the read-only Runtime section now that it's DB-editable) + els_tape_mm
-// (buffered number + Save + Reset to env) ---
+// (buffered number + Save + Reset to default) ---
 
 function ElsTapeMmField({ rows }: { rows: SettingRow[] }) {
   const row = findRow(rows, "els_tape_mm");
@@ -558,7 +711,7 @@ function ElsTapeMmField({ rows }: { rows: SettingRow[] }) {
           {row && <ProvenanceBadge source={row.source} />}
         </span>
         {row?.source === "db" && (
-          <ResetToEnvButton onClick={() => mutation.mutate({ els_tape_mm: null })} disabled={mutation.isPending} />
+          <ResetButton onClick={() => mutation.mutate({ els_tape_mm: null })} disabled={mutation.isPending} />
         )}
       </div>
       <div className="flex items-center gap-2">
@@ -633,7 +786,7 @@ function RuntimeSection({ rows }: { rows: SettingRow[] }) {
   return (
     <section className={panel}>
       <h2 className={panelHeading}>Runtime</h2>
-      <p className={helpText}>Every row below is set via the environment -- change it there and restart the app, not here.</p>
+      <p className={helpText}>Every row below is set at startup via the environment (or the container) -- change it there and restart the app, not here.</p>
       <div className="mt-3">
         <ReadOnlyRow label="Auth mode" row={findRow(rows, "auth_mode")} />
         <ReadOnlyRow label="CORS origins" row={findRow(rows, "cors_origins")} />

@@ -70,7 +70,7 @@ def initial_keepalive_status(enabled: bool) -> dict:
     }
 
 
-async def _poll_once(state) -> None:
+async def _poll_once(state, effective) -> None:
     """One keep-awake attempt. Reuses api/router_printer.py's own
     `_fetch_usb_status` (USB_LOCK with a short acquire timeout, then
     PyUsbTransport.open -> get_status -> close, run off the event loop via
@@ -88,7 +88,7 @@ async def _poll_once(state) -> None:
     """
     now = datetime.now(UTC).isoformat()
     try:
-        await anyio.to_thread.run_sync(_fetch_usb_status)
+        await anyio.to_thread.run_sync(_fetch_usb_status, effective, state.config.data_dir)
     except _StatusLockTimeout:
         state.keepalive_status.update(
             last_attempt_at=now, last_result="skipped_busy", last_error=None
@@ -105,7 +105,7 @@ async def run_keepalive(state) -> None:
     every iteration (so a `PUT /api/settings` from the Settings page takes
     effect without a restart -- never more than one `_RECHECK_INTERVAL_S`
     or one poll interval stale); if `keep_printer_awake` is off, or
-    `printer_mode` isn't `"usb"` (mock mode has no idle timer to fight, and
+    `printer_mode` isn't `"usb"`/`"remote"` (mock mode has no idle timer to fight, and
     this poller must never open a mock transport either), stay inert --
     zero USB traffic -- and just re-check again after a short wait.
     Otherwise sleep the configured `keep_awake_interval_min` and then make
@@ -121,7 +121,7 @@ async def run_keepalive(state) -> None:
         effective = state.settings.effective()
         state.keepalive_status["enabled"] = effective.keep_printer_awake
 
-        if not effective.keep_printer_awake or effective.printer_mode != "usb":
+        if not effective.keep_printer_awake or effective.printer_mode not in ("usb", "remote"):
             await anyio.sleep(_RECHECK_INTERVAL_S)
             continue
 
@@ -137,7 +137,7 @@ async def run_keepalive(state) -> None:
             await anyio.sleep(chunk)
             elapsed += chunk
             effective = state.settings.effective()
-            if not effective.keep_printer_awake or effective.printer_mode != "usb":
+            if not effective.keep_printer_awake or effective.printer_mode not in ("usb", "remote"):
                 break
 
         # L4 (2026-08 review): re-read the overlay AFTER the long sleep --
@@ -150,7 +150,7 @@ async def run_keepalive(state) -> None:
         # the disable immediately rather than only at the next loop top.
         effective = state.settings.effective()
         state.keepalive_status["enabled"] = effective.keep_printer_awake
-        if not effective.keep_printer_awake or effective.printer_mode != "usb":
+        if not effective.keep_printer_awake or effective.printer_mode not in ("usb", "remote"):
             continue
 
-        await _poll_once(state)
+        await _poll_once(state, effective)

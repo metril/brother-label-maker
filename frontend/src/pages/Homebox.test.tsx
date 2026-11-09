@@ -163,8 +163,7 @@ describe("Homebox page", () => {
     );
     renderWithProviders(<Homebox />, { route: "/homebox" });
 
-    expect(await screen.findByText("HOMEBOX_URL")).toBeInTheDocument();
-    expect(screen.getByText("HOMEBOX_API_KEY")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Settings page" })).toHaveAttribute("href", "/settings");
   });
 
   it("shows the status error prominently when HomeBox is configured but unreachable", async () => {
@@ -175,7 +174,7 @@ describe("Homebox page", () => {
           reachable: false,
           healthy: null,
           version: null,
-          error: "HomeBox rejected the API key (HTTP 401) -- check HOMEBOX_API_KEY",
+          error: "HomeBox rejected the API key (HTTP 401) -- check the API key",
         }),
       ),
     );

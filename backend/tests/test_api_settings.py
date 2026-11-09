@@ -15,6 +15,8 @@ import pytest
 # reviewed change to this test, not a silent drift.
 _EXPECTED_ROW_KEYS = {
     "printer_mode",
+    "printer_bridge_address",
+    "printer_bridge_cert",
     "printer_init_strategy",
     "printer_bit_order",
     "printer_flip_pins",
@@ -71,12 +73,9 @@ async def test_get_settings_reflects_app_config_defaults(client):
     # DB-only fields, no override stored yet -> their hardcoded defaults.
     assert rows["keep_printer_awake"]["value"] is False
     assert rows["keep_awake_interval_min"]["value"] == 5
-    # Every conftest-pinned field is explicitly provided to AppConfig's
-    # constructor (see _DEFAULT_APP_CONFIG_KWARGS's own docstring), so it
-    # reads as "env" provenance here even though it equals the class
-    # default -- this mirrors real deployments where an operator export
-    # sets the SAME value the class would have defaulted to anyway.
-    assert rows["printer_flip_pins"]["source"] == "env"
+    # Overridable fields have no env tier: AppConfig's value (even a test's
+    # constructor kwarg) is a hardcoded default, never reported as "env".
+    assert rows["printer_flip_pins"]["source"] == "default"
     assert rows["data_dir"]["editable"] is False
     assert rows["cors_origins"]["editable"] is False
     assert rows["auth_mode"]["editable"] is False
@@ -100,13 +99,13 @@ async def test_get_settings_never_leaks_oidc_or_session_material(client):
     [{"homebox_url": "https://hb.test", "homebox_api_key": "hb_env_key_plant"}],
     indirect=True,
 )
-async def test_get_settings_reports_homebox_env_config_without_leaking_the_key(client):
+async def test_get_settings_reports_homebox_config_without_leaking_the_key(client):
     resp = await client.get("/api/settings")
     rows = _rows_by_key(resp.json())
     assert rows["homebox_url"]["value"] == "https://hb.test"
-    assert rows["homebox_url"]["source"] == "env"
+    assert rows["homebox_url"]["source"] == "default"
     assert rows["homebox_api_key"]["set"] is True
-    assert rows["homebox_api_key"]["source"] == "env"
+    assert rows["homebox_api_key"]["source"] == "default"
     assert "value" not in rows["homebox_api_key"]
     assert "hb_env_key_plant" not in resp.text
 
@@ -134,7 +133,7 @@ async def test_put_printer_flip_pins_roundtrip_changes_provenance(client):
     resp = await client.get("/api/settings")
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
-    assert row["source"] == "env"
+    assert row["source"] == "default"
 
     resp = await client.put("/api/settings", json={"printer_flip_pins": True})
     assert resp.status_code == 200
@@ -152,7 +151,7 @@ async def test_put_printer_flip_pins_roundtrip_changes_provenance(client):
     assert resp.status_code == 200
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
-    assert row["source"] == "env"
+    assert row["source"] == "default"
 
 
 async def test_put_els_enabled_roundtrip_gates_the_els_route(client):
@@ -190,8 +189,8 @@ async def test_put_is_a_true_partial_update(client):
     rows = _rows_by_key(resp.json())
     assert rows["printer_bit_order"]["value"] == "lsb_first"
     assert rows["printer_bit_order"]["source"] == "db"
-    assert rows["printer_flip_pins"]["source"] == "env"
-    assert rows["printer_mode"]["source"] == "env"
+    assert rows["printer_flip_pins"]["source"] == "default"
+    assert rows["printer_mode"]["source"] == "default"
 
 
 # -- PUT: validation --------------------------------------------------------
@@ -266,7 +265,7 @@ async def test_put_invalid_batch_applies_nothing(client):
     resp = await client.get("/api/settings")
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
-    assert row["source"] == "env"
+    assert row["source"] == "default"
 
 
 # -- PUT homebox_url/homebox_api_key rebuilds app.state.homebox -----------

@@ -61,9 +61,19 @@ export interface TextLabelParams {
   [key: string]: unknown;
 }
 
+/** The printer transport: in-memory mock, local USB, or a Pi printer bridge. */
+export type PrinterMode = "mock" | "usb" | "remote";
+
+/** GET /api/printer/bridge-identity: this app's PUBLIC bridge certificate
+ * (paste it into the bridge's `pair`) and its SHA-256 fingerprint. */
+export interface BridgeIdentity {
+  cert_pem: string;
+  fingerprint: string;
+}
+
 export interface HealthResponse {
   status: string;
-  printer_mode: "mock" | "usb";
+  printer_mode: PrinterMode;
   /** task 4.2: this app's own installed version (backend/main.py's
    * APP_VERSION, read from pyproject.toml via importlib.metadata) -- the
    * Diagnostics page's "App" section shows this next to backend
@@ -578,7 +588,7 @@ export interface KeepAliveStatus {
 
 export interface PrinterStatusResponse {
   connected: boolean;
-  printer_mode: "mock" | "usb";
+  printer_mode: PrinterMode;
   status: PrinterStatusDetail | null;
   error: string | null;
   keep_alive: KeepAliveStatus;

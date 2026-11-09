@@ -17,15 +17,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      # HOMEBOX_API_KEY deliberately absent: it's a secret and lives in the
-      # DB settings overlay (Settings page), never in this file.
-      HOMEBOX_URL: https://homebox.azureolympos.com
-      PRINTER_MODE: usb
-      PRINTER_INIT_STRATEGY: classic
-      PRINTER_FLIP_PINS: "true"
-      # Only needed if the frontend is served from a different origin.
-      # CORS_ORIGINS: '["https://labels.example.com"]'
     volumes:
       # Whole USB tree, not a single device node -- node paths renumber on
       # every replug/reboot.

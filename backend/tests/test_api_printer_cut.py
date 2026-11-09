@@ -148,7 +148,7 @@ async def test_feed_cut_usb_no_printer_job_fails_cleanly_with_error_surfaced(
         raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
 
     monkeypatch.setattr(
-        "labelmaker.jobs.worker.PyUsbTransport.open", staticmethod(_raise_not_found)
+        "labelmaker.driver.transport.PyUsbTransport.open", staticmethod(_raise_not_found)
     )
 
     config = AppConfig(printer_mode="usb", data_dir=tmp_path / "data")

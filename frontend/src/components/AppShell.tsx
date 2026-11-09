@@ -248,7 +248,7 @@ export function AppShell({ children }: AppShellProps) {
           ) : (
             <span
               aria-disabled="true"
-              title="HomeBox inventory integration — set HOMEBOX_URL and HOMEBOX_API_KEY to enable it"
+              title="HomeBox inventory integration — set the URL and API key on the Settings page to enable it"
               className="cursor-not-allowed select-none rounded-md px-3 py-1.5 font-condensed text-[13px] font-medium uppercase tracking-wide text-deck-600"
             >
               HomeBox

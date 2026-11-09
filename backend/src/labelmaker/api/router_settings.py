@@ -45,7 +45,7 @@ from pydantic import ValidationError
 from labelmaker.api.deps import AppConfigDep, SettingsDep
 from labelmaker.config import AppConfig
 from labelmaker.homebox import build_client
-from labelmaker.settings_overlay import SettingsOverlay, SettingsOverrides
+from labelmaker.settings_overlay import SettingsConflictError, SettingsOverlay, SettingsOverrides
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -122,6 +122,8 @@ async def put_settings(
             f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}" for e in exc.errors()
         )
         raise HTTPException(status_code=422, detail=detail) from exc
+    except SettingsConflictError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if "homebox_url" in body or "homebox_api_key" in body:
         # Build the new client BEFORE closing the old one, so

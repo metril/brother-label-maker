@@ -84,9 +84,63 @@ describe("Settings page", () => {
       expect(within(printer).getByLabelText("Init strategy")).toHaveValue("classic");
       expect(within(printer).getByLabelText("Bit order")).toHaveValue("lsb_first");
       expect(within(printer).getByRole("switch", { name: "Flip pins" })).toHaveAttribute("aria-checked", "true");
-      // "db" provenance shows a Reset to env affordance; the other rows,
+      // "db" provenance shows a Reset to default affordance; the other rows,
       // still at their default provenance, do not.
-      expect(within(printer).getByRole("button", { name: "Reset to env" })).toBeInTheDocument();
+      expect(within(printer).getByRole("button", { name: "Reset to default" })).toBeInTheDocument();
+    });
+
+    it("choosing Remote shows the bridge fields and saves mode, address and cert in one PUT", async () => {
+      const user = userEvent.setup();
+      let capturedBody: unknown;
+      server.use(
+        http.put("/api/settings", async ({ request }) => {
+          capturedBody = await request.json();
+          return HttpResponse.json(defaultSettingsBody);
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      await user.selectOptions(await within(printer).findByLabelText("Printer mode"), "remote");
+
+      // No PUT yet: the backend refuses remote mode without address + cert.
+      expect(capturedBody).toBeUndefined();
+      expect(await within(printer).findByLabelText("App certificate")).toHaveTextContent("APPCERT");
+      expect(within(printer).getByText("ab12cd34")).toBeInTheDocument();
+      const save = within(printer).getByRole("button", { name: "Save remote printer" });
+      expect(save).toBeDisabled();
+
+      await user.type(within(printer).getByLabelText("Bridge address"), "pi.local");
+      await user.click(within(printer).getByLabelText("Bridge certificate"));
+      await user.paste("-----BEGIN CERTIFICATE-----\nBRIDGE\n-----END CERTIFICATE-----");
+      await user.click(save);
+
+      await waitFor(() =>
+        expect(capturedBody).toEqual({
+          printer_mode: "remote",
+          printer_bridge_address: "pi.local",
+          printer_bridge_cert: "-----BEGIN CERTIFICATE-----\nBRIDGE\n-----END CERTIFICATE-----",
+        }),
+      );
+    });
+
+    it("shows a backend validation error for the remote config", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.put("/api/settings", () =>
+          HttpResponse.json({ detail: "printer_bridge_cert: not a valid PEM X.509 certificate" }, { status: 422 }),
+        ),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+
+      const printer = await findSection("Printer");
+      await user.selectOptions(await within(printer).findByLabelText("Printer mode"), "remote");
+      await user.type(within(printer).getByLabelText("Bridge address"), "pi.local");
+      await user.click(within(printer).getByLabelText("Bridge certificate"));
+      await user.paste("junk");
+      await user.click(within(printer).getByRole("button", { name: "Save remote printer" }));
+
+      expect(await within(printer).findByRole("alert")).toHaveTextContent("not a valid PEM");
     });
 
     it("changing a Select immediately PUTs the new value", async () => {
@@ -148,7 +202,7 @@ describe("Settings page", () => {
       await waitFor(() => expect(capturedBody).toEqual({ homebox_writes_enabled: true }));
     });
 
-    it("clicking Reset to env PUTs null for that field", async () => {
+    it("clicking Reset to default PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(
         http.get("/api/settings", () =>
@@ -166,7 +220,7 @@ describe("Settings page", () => {
 
       const printer = await findSection("Printer");
       await within(printer).findByLabelText("Bit order");
-      await user.click(within(printer).getByRole("button", { name: "Reset to env" }));
+      await user.click(within(printer).getByRole("button", { name: "Reset to default" }));
 
       await waitFor(() => expect(capturedBody).toEqual({ printer_bit_order: null }));
     });
@@ -317,7 +371,7 @@ describe("Settings page", () => {
       renderWithProviders(<Settings />, { route: "/settings" });
 
       await screen.findByLabelText("HomeBox URL");
-      await user.click(within(fieldContainer("HomeBox URL")).getByRole("button", { name: "Clear (use env)" }));
+      await user.click(within(fieldContainer("HomeBox URL")).getByRole("button", { name: "Clear" }));
 
       await waitFor(() => expect(capturedBody).toEqual({ homebox_url: null }));
     });
@@ -470,7 +524,7 @@ describe("Settings page", () => {
       await waitFor(() => expect(capturedBody).toEqual({ els_enabled: true }));
     });
 
-    it("clicking Reset to env on ELS enabled PUTs null for that field", async () => {
+    it("clicking Reset to default on ELS enabled PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(
         http.get("/api/settings", () =>
@@ -488,7 +542,7 @@ describe("Settings page", () => {
 
       const els = await findSection("ELS");
       await within(els).findByRole("switch", { name: "ELS enabled" });
-      await user.click(within(els).getByRole("button", { name: "Reset to env" }));
+      await user.click(within(els).getByRole("button", { name: "Reset to default" }));
 
       await waitFor(() => expect(capturedBody).toEqual({ els_enabled: null }));
     });

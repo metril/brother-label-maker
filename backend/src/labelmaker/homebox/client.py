@@ -228,7 +228,8 @@ class HomeBoxClient:
         if resp.status_code in (401, 403):
             raise HomeBoxAuthError(
                 f"HomeBox rejected the API key (HTTP {resp.status_code}) -- check "
-                "HOMEBOX_API_KEY (an hb_-prefixed key from HomeBox's user settings)"
+                "the HomeBox API key on the Settings page "
+                "(an hb_-prefixed key from HomeBox's user settings)"
                 + (" and that it has write access" if write else "")
             )
         if resp.status_code >= 500:
@@ -296,7 +297,7 @@ class HomeBoxClient:
             )
         raise HomeBoxUnavailableError(
             "HomeBox answered but /v1/entities is missing (HTTP 404) and /v1/items "
-            "is not the reason -- is HOMEBOX_URL pointing at a HomeBox instance?"
+            "is not the reason -- is the HomeBox URL pointing at a HomeBox instance?"
         )
 
     async def list_entities(

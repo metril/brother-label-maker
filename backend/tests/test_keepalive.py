@@ -105,8 +105,12 @@ def test_initial_keepalive_status_shape():
 async def test_disabled_never_polls(db, cfg, fast_intervals, monkeypatch):
     overlay = await SettingsOverlay.create(cfg, db)  # keep_printer_awake defaults False
     calls: list[None] = []
-    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
-    state = SimpleNamespace(settings=overlay, keepalive_status=initial_keepalive_status(False))
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *_: calls.append(None))
+    state = SimpleNamespace(
+        settings=overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(False),
+    )
 
     await _run_briefly(state)
 
@@ -124,8 +128,12 @@ async def test_enabled_but_mock_mode_never_polls(db, tmp_path, fast_intervals, m
     overlay = await SettingsOverlay.create(cfg, db)
     await overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 1})
     calls: list[None] = []
-    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
-    state = SimpleNamespace(settings=overlay, keepalive_status=initial_keepalive_status(True))
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *_: calls.append(None))
+    state = SimpleNamespace(
+        settings=overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(True),
+    )
 
     await _run_briefly(state)
 
@@ -140,8 +148,12 @@ async def test_enabled_usb_polls_repeatedly_at_the_configured_interval(
 ):
     await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 1})
     calls: list[None] = []
-    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
-    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *_: calls.append(None))
+    state = SimpleNamespace(
+        settings=usb_overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(True),
+    )
 
     await _run_briefly(state)
 
@@ -161,12 +173,16 @@ async def test_lock_busy_records_skipped_busy_and_keeps_looping(
     await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 1})
     calls: list[None] = []
 
-    def _raise_busy():
+    def _raise_busy(*_):
         calls.append(None)
         raise _StatusLockTimeout()
 
     monkeypatch.setattr(keepalive, "_fetch_usb_status", _raise_busy)
-    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+    state = SimpleNamespace(
+        settings=usb_overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(True),
+    )
 
     await _run_briefly(state)
 
@@ -184,12 +200,16 @@ async def test_poll_error_records_error_and_keeps_looping(usb_overlay, fast_inte
     await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 1})
     calls: list[None] = []
 
-    def _raise_not_found():
+    def _raise_not_found(*_):
         calls.append(None)
         raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
 
     monkeypatch.setattr(keepalive, "_fetch_usb_status", _raise_not_found)
-    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+    state = SimpleNamespace(
+        settings=usb_overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(True),
+    )
 
     await _run_briefly(state)
 
@@ -205,8 +225,12 @@ async def test_toggling_keep_printer_awake_mid_run_takes_effect_without_restart(
     usb_overlay, fast_intervals, monkeypatch
 ):
     calls: list[None] = []
-    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
-    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(False))
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *_: calls.append(None))
+    state = SimpleNamespace(
+        settings=usb_overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(False),
+    )
 
     task = asyncio.create_task(run_keepalive(state))
     try:
@@ -245,8 +269,12 @@ async def test_disabling_mid_sleep_skips_the_pending_poll(
     # through it, well before it would wake and poll.
     await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 10})
     calls: list[None] = []
-    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
-    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *_: calls.append(None))
+    state = SimpleNamespace(
+        settings=usb_overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(True),
+    )
 
     task = asyncio.create_task(run_keepalive(state))
     try:
@@ -270,7 +298,11 @@ async def test_disabling_mid_sleep_skips_the_pending_poll(
 
 async def test_cancellation_propagates_cleanly(db, cfg, fast_intervals):
     overlay = await SettingsOverlay.create(cfg, db)
-    state = SimpleNamespace(settings=overlay, keepalive_status=initial_keepalive_status(False))
+    state = SimpleNamespace(
+        settings=overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(False),
+    )
 
     task = asyncio.create_task(run_keepalive(state))
     await asyncio.sleep(0.03)
@@ -287,8 +319,12 @@ async def test_interval_change_applies_without_waiting_out_the_old_interval(
     monkeypatch.setattr(keepalive, "_SECONDS_PER_MINUTE", 0.5)
     await usb_overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 2})
     calls: list[None] = []
-    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda: calls.append(None))
-    state = SimpleNamespace(settings=usb_overlay, keepalive_status=initial_keepalive_status(True))
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *_: calls.append(None))
+    state = SimpleNamespace(
+        settings=usb_overlay,
+        config=SimpleNamespace(data_dir=None),
+        keepalive_status=initial_keepalive_status(True),
+    )
 
     task = asyncio.create_task(run_keepalive(state))
     await asyncio.sleep(0.1)
@@ -299,3 +335,30 @@ async def test_interval_change_applies_without_waiting_out_the_old_interval(
         await task
 
     assert len(calls) >= 1
+
+
+async def test_enabled_and_remote_mode_polls(db, tmp_path, fast_intervals, monkeypatch):
+    """Remote mode keeps the printer awake the same way USB mode does."""
+    from labelmaker.driver.bridge_identity import ensure_identity
+
+    _k, cert = ensure_identity(tmp_path / "id", "bridge")
+    cfg = AppConfig(
+        printer_mode="remote",
+        printer_bridge_address="pi.local",
+        printer_bridge_cert=cert.read_text(),
+        data_dir=tmp_path / "data",
+    )
+    overlay = await SettingsOverlay.create(cfg, db)
+    await overlay.set_many({"keep_printer_awake": True, "keep_awake_interval_min": 1})
+    calls: list[tuple] = []
+    monkeypatch.setattr(keepalive, "_fetch_usb_status", lambda *a: calls.append(a))
+    state = SimpleNamespace(
+        settings=overlay,
+        config=SimpleNamespace(data_dir=tmp_path),
+        keepalive_status=initial_keepalive_status(True),
+    )
+
+    await _run_briefly(state)
+
+    assert calls and calls[0][0].printer_mode == "remote"
+    assert state.keepalive_status["last_result"] == "ok"

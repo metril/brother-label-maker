@@ -4,7 +4,7 @@ PyUsbTransport's `.open()` classmethod (real pyusb device lookup/enumeration)
 needs real hardware to succeed end-to-end, and that success path is exercised
 at the physical checkpoint via the CLI, not here (see docs/hardware-probe-notes.md and
 the protocol notes's checkpoint procedure). What IS unit-tested here:
-CaptureTransport (the test double / PRINTER_MODE=mock backend); the
+CaptureTransport (the test double / mock-mode backend); the
 lazy-import guarantee that `labelmaker.driver.transport` never touches
 `usb.core` at module import time; `.open()`'s error-wrapping (C1: a real
 `usb.core.find` monkeypatched to raise USBError/NoBackendError, verifying it

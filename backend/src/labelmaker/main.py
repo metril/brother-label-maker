@@ -40,6 +40,7 @@ from labelmaker.homebox import build_client
 from labelmaker.jobs.events import EventBus
 from labelmaker.jobs.keepalive import initial_keepalive_status, run_keepalive
 from labelmaker.jobs.worker import run_worker
+from labelmaker.legacy_env import import_legacy_env
 from labelmaker.settings_overlay import SettingsOverlay
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # a restart already reflects them (see settings_overlay.py's own
         # docstring for the full contract).
         settings = await SettingsOverlay.create(cfg, db)
+        await import_legacy_env(settings)
 
         app.state.config = cfg
         app.state.db = db
