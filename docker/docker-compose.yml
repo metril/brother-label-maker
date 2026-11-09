@@ -3,8 +3,7 @@
 #   docker compose -f docker/docker-compose.yml up --build
 #
 # See ../docs/usb-setup.md for host-side prerequisites (udev rule) this
-# depends on, and ../the protocol notes for the physical checkpoint that
-# resolves PRINTER_INIT_STRATEGY.
+# depends on. Printer mode, HomeBox and the rest are set on the Settings page.
 
 services:
   labelmaker:
@@ -15,26 +14,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      # HOMEBOX_API_KEY deliberately absent: the key is a secret and lives in
-      # the DB settings overlay (Settings page, or
-      # `PUT /api/settings {"homebox_api_key": "..."}`) -- never in this file.
-      HOMEBOX_URL: https://homebox.azureolympos.com
-      PRINTER_MODE: usb
-      # Verified 2026-07-28 (first physical print, the protocol notes
-      # RESULTS): classic works; e310bt was never needed.
-      PRINTER_INIT_STRATEGY: classic
-      # Orientation knobs, resolved at the same checkpoint: msb_first bit
-      # order and flipped pins are correct for the PT-E720BT and are now the
-      # AppConfig defaults -- only uncomment to EXPERIMENT away from them.
-      # PRINTER_BIT_ORDER: lsb_first
-      PRINTER_FLIP_PINS: "true"
-      # M3: CORS_ORIGINS is a JSON array, not a bare string -- see config.py's
-      # AppConfig.cors_origins field comment for the exact env-var syntax.
-      # Only needed if the frontend is served from a different origin than
-      # this container (e.g. a separate static host) instead of the SPA
-      # this image mounts itself (main.py's _resolve_static_dir).
-      # CORS_ORIGINS: '["https://labels.example.com"]'
     volumes:
       # Bind-mount the *directory*, not a specific device node
       # (`/dev/bus/usb/001/005`-style paths under `devices:` renumber on

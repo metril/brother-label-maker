@@ -114,7 +114,6 @@ RUN apt-get update \
 ENV PYTHONUNBUFFERED=1 \
     STATIC_DIR=/app/static \
     DATA_DIR=/data \
-    PRINTER_MODE=mock \
     PATH=/app/backend/.venv/bin:$PATH
 
 # Non-root: uid 1000 has no meaningful relationship to host USB permissions

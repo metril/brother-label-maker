@@ -42,7 +42,7 @@ manuals, then verified against real hardware (see
 
 ## Quick start (mock mode, no printer)
 
-`PRINTER_MODE=mock` is the default baked into the image — you can design and
+Mock printer mode is the default — you can design and
 preview labels in the browser with zero hardware attached. Build the image
 from the repo (the GHCR image below exists from the first tagged release
 onward):
@@ -68,8 +68,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      PRINTER_MODE: mock   # the default — set explicitly for clarity
     volumes:
       - labeldata:/data
 
@@ -109,8 +107,7 @@ not found" issue against yourself.
 **2. Run with USB passthrough.** A GHCR-based deployment looks like this
 (shipped ready-to-run as `docker/docker-compose.ghcr.yml`) —
 the repo's own `docker/docker-compose.yml` is the build-from-source variant
-of the same shape (it uses `build:` instead of `image:` and carries the
-verified printer-protocol env knobs as comments):
+of the same shape (it uses `build:` instead of `image:`):
 
 ```yaml
 services:
@@ -119,8 +116,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      PRINTER_MODE: usb
     volumes:
       # Bind-mount the *directory*, not a specific device node -- a
       # `/dev/bus/usb/001/005`-style path renumbers on every replug/reboot.
@@ -148,6 +143,9 @@ docker compose -f docker/docker-compose.yml up --build -d
 (`--build` applies to that file's `build:` section; a compose file using the
 GHCR `image:` as above just needs `up -d`.)
 
+**3. Select the printer.** Open **Settings → Printer** and set the mode to
+**USB**. No environment variables are involved.
+
 Printer on a Raspberry Pi instead of the server? See
 [Printer on a Raspberry Pi](#printer-on-a-raspberry-pi).
 
@@ -156,19 +154,16 @@ this shape (why a directory mount + cgroup rule instead of `--privileged` or
 a pinned `devices:` entry) and what each failure mode in the table there
 actually means.
 
-**Protocol defaults are already correct — no tuning needed.** As of the
-first real print (2026-07-28), the PT-E720BT's init strategy, raster bit
-order, and pin mapping are all hardware-verified and baked in as the
-`AppConfig` defaults: `PRINTER_INIT_STRATEGY=classic`,
-`PRINTER_BIT_ORDER=msb_first`, `PRINTER_FLIP_PINS=true`. You should not need
-to set any of these three env vars for a stock PT-E720BT — they exist as
-override knobs for experimentation, not normal deployment.
+**Protocol defaults are already correct — no tuning needed.** The PT-E720BT's
+init strategy, raster bit order and pin mapping are hardware-verified (first
+real print, 2026-07-28) and are the defaults on the Settings page. Change them
+there only to experiment.
 
 ## Printer on a Raspberry Pi
 
 Run the app on a server and plug the PT-E720BT into a Raspberry Pi or other
 Linux box. A small bridge on the Pi owns the USB connection, and the app talks
-to it with `PRINTER_MODE=remote`. Printing, status, cut and keep-awake work as
+to it in Remote mode. Printing, status, cut and keep-awake work as
 they do over local USB.
 
 Traffic uses mutual TLS 1.3 with pinned self-signed certificates. Each side
@@ -195,9 +190,10 @@ BRIDGE="docker compose -f docker/docker-compose.bridge.yml"
 4. **Start the bridge:** `$BRIDGE up -d`. It refuses to start until step 3 is done.
 5. **Check:** Diagnostics or `GET /api/printer/status` shows `connected: true`.
 
-The app can instead be configured with `PRINTER_MODE=remote`,
-`PRINTER_BRIDGE_ADDRESS` and `PRINTER_BRIDGE_CERT`. The bridge reads
-`BRIDGE_PORT` (9177), `BRIDGE_DIR` (`/data`) and `BRIDGE_HOST` (`0.0.0.0`).
+The bridge has no environment config: it listens on port 9177, keeps its files
+in `/data` and binds `0.0.0.0`. Outside Docker, the optional flags `--port`,
+`--dir` and `--host` go before the subcommand, e.g.
+`python -m labelmaker.driver.bridge --dir ~/bridge serve`.
 
 **Behavior**
 
@@ -221,82 +217,63 @@ again and restart the bridge. Pinning a new app certificate revokes the old one.
 
 ## Environment variable reference
 
-`AppConfig` (`backend/src/labelmaker/config.py`) reads every setting
-directly from the process environment with no prefix — the env var name is
-just the field name, uppercased.
+Environment variables only cover what the app needs at startup. They have no
+prefix; the name is the field name, uppercased. Everything else (printer mode,
+bridge address and certificate, protocol knobs, HomeBox, the External Label
+Service) is set on the **Settings page** and stored in the database. Those
+settings are not read from the environment.
+
+**Upgrading from older versions:** the old printer, HomeBox and ELS env vars
+(`PRINTER_*`, `HOMEBOX_*`, `ELS_*`) are imported once into the Settings page
+when the app first starts, with a warning in the log naming each var. After
+that you can delete them. An old value is only imported if it is still in the
+environment when the new version first starts, so upgrade the image first and
+remove them from your compose file afterwards.
 
 ### Core
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `PRINTER_MODE` | `mock` | `mock` (no hardware, safe for design/preview), `usb` (talks to a real printer) or `remote` (a Raspberry Pi bridge owns the printer; see [Printer on a Raspberry Pi](#printer-on-a-raspberry-pi)). |
-| `PRINTER_BRIDGE_ADDRESS` | unset | `remote` mode: bridge `host[:port]` (default port 9177). |
-| `PRINTER_BRIDGE_CERT` | unset | `remote` mode: the bridge's public certificate (PEM). |
 | `DATA_DIR` | `./data` (image sets this to `/data`, matching the Dockerfile's `VOLUME /data`) | Where the SQLite db and print-job artifacts live. |
+| `STATIC_DIR` | unset (image sets `/app/static`) | Directory holding the built SPA. |
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | JSON array (not a bare string) of allowed browser origins — see the [security warning](#security-notes) below before changing this. |
 
-`STATIC_DIR` is also read (via `os.environ`, not `AppConfig`) but isn't
-something you should need to set — the shipped image already bakes it to
-`/app/static`, where the built SPA lives.
+### HomeBox and the External Label Service
 
-### Printer protocol knobs
-
-**Verified 2026-07-28 — don't touch unless experimenting.** These are the
-three raster-encoding decisions the physical checkpoint resolved; the
-defaults below are correct for a stock PT-E720BT.
-
-| Env var | Default | Meaning |
-|---|---|---|
-| `PRINTER_INIT_STRATEGY` | `classic` | Raster init sequence (`classic` = PackBits + `ESC i M`/`ESC i d`; `e310bt` = the RAW/`MAGIC`-packet alternative, never needed on this printer). |
-| `PRINTER_BIT_ORDER` | `msb_first` | Bit order within each raster pin byte. A wrong value scrambles glyphs, it doesn't mirror them. |
-| `PRINTER_FLIP_PINS` | `true` | Whether row 0 of a rendered label maps to the low- or high-pin end of the print head. A wrong value mirrors the print across the tape width. |
-
-### HomeBox integration
-
-Enabled only when **both** URL and key are set; unset either one and the
-HomeBox UI in this app stays hidden.
-
-| Env var | Default | Meaning |
-|---|---|---|
-| `HOMEBOX_URL` | unset | Your HomeBox instance's root URL, e.g. `https://homebox.example.com`. |
-| `HOMEBOX_API_KEY` | unset | An `hb_`-prefixed static API key (HomeBox v0.26+). Mint one from your HomeBox user profile's API Keys page (or `POST /v1/users/api-keys`). It stays server-side — the browser only ever talks to this app's `/api/homebox/*` proxy routes, never HomeBox directly. |
+Both are configured on the Settings page. HomeBox is enabled once a URL and
+API key are saved there; until then the HomeBox UI stays hidden.
 
 **HomeBox-side gotcha:** HomeBox v0.26+ requires its own
 `HBOX_AUTH_API_KEY_PEPPER` (32+ random characters) to be set on the *HomeBox*
 server before static API keys work at all — without it, HomeBox itself
 crash-loops on startup. This is a HomeBox env var, not one of ours, but it's
 the single most common reason "mint an API key" fails on a fresh v0.26+
-HomeBox install. Set it before creating the key this app needs.
+HomeBox install. Set it before creating the key this app needs. Mint the key
+(an `hb_`-prefixed static key) from your HomeBox user profile's API Keys page.
+It stays server-side — the browser only ever talks to this app's
+`/api/homebox/*` proxy routes.
 
-`qr_base_url` is **not** an env var — it's a database-backed app setting
-(`PUT /api/homebox/settings` / this app's own settings page), because it
-needs to be changeable without a restart and because HomeBox's own QR
-base-URL resolution is fragile behind a reverse proxy. Unset, it falls back
-to `HOMEBOX_URL`.
+The QR base URL (`PUT /api/homebox/settings`) is separate and falls back to
+the HomeBox URL when unset.
 
 **Phone capture:** on your phone open `<app-url>/capture` (or tap **Capture**
 in the nav) and use Add to Home Screen for one-tap access. It scans a label's
 QR code and attaches a photo to that HomeBox item.
 
-### HomeBox External Label Service (ELS)
-
-| Env var | Default | Meaning |
-|---|---|---|
-| `ELS_ENABLED` | `false` | Registers `GET /api/els/label` so HomeBox can delegate its own label rendering to this app. |
-| `ELS_TAPE_MM` | `24.0` | Tape width (mm) ELS labels render at — HomeBox's own width/height/DPI query params describe its *own* internal renderer's canvas and are not honored here. |
+**External Label Service:** enabling ELS on the Settings page registers
+`GET /api/els/label` so HomeBox can delegate its own label rendering to this
+app, at the tape width set there. Point HomeBox's own
+`HBOX_LABEL_MAKER_LABEL_SERVICE_URL` at it (e.g.
+`http://labelmaker:8000/api/els/label` on a shared Docker network).
 
 **Security caveat:** HomeBox's ELS caller sends this endpoint a plain,
 unauthenticated `GET` — that's HomeBox's own design (`fetchLabelFromURL`),
 not a shortcut on our side, and there's no way to make it otherwise. `/api/els/label`
 is therefore exempt from the OIDC gate below even in `AUTH_MODE=oidc`
 (gating it would just break every HomeBox print button with no security
-benefit, since HomeBox has no browser session to present). Leave
-`ELS_ENABLED=false` unless HomeBox can actually reach this app — don't
-expose it to the open internet.
-
-To wire it up, point HomeBox's own `HBOX_LABEL_MAKER_LABEL_SERVICE_URL` at
-this app's `/api/els/label` endpoint (e.g.
-`http://labelmaker:8000/api/els/label` on a shared Docker network).
+benefit, since HomeBox has no browser session to present). Leave ELS off
+unless HomeBox can actually reach this app — don't expose it to the open
+internet.
 
 ### Auth (optional — off by default)
 
@@ -335,8 +312,8 @@ a clear error naming which env var is missing.
   internet ride a signed-in user's session** if they have it open in
   another tab. Only ever list specific origins you actually trust.
 - **ELS exposure.** `/api/els/label` is unauthenticated by HomeBox's own
-  design (see the [ELS section](#homebox-external-label-service-els) above) and cannot be gated without
-  breaking the integration. Keep `ELS_ENABLED=false` unless HomeBox can
+  design (see the [ELS notes](#homebox-and-the-external-label-service) above) and cannot be gated without
+  breaking the integration. Keep ELS off unless HomeBox can
   reach this app on a network you control.
 
 ## Container image
@@ -402,6 +379,10 @@ grep -rn "# UNVERIFIED:" backend/src/labelmaker/
 ```bash
 # backend (mock printer, no hardware required)
 cd backend && uv run uvicorn labelmaker.main:app --port 8000
+
+# or serve a built frontend from the backend on :8001
+cd frontend && npm run build
+cd backend && DATA_DIR=/tmp/lm-data STATIC_DIR=../frontend/dist uv run uvicorn labelmaker.main:app --port 8001
 
 # frontend dev server (proxies /api to :8000)
 cd frontend && npm run dev          # http://localhost:5173
