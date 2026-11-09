@@ -148,6 +148,9 @@ docker compose -f docker/docker-compose.yml up --build -d
 (`--build` applies to that file's `build:` section; a compose file using the
 GHCR `image:` as above just needs `up -d`.)
 
+Printer on a Raspberry Pi instead of the server? Run the bridge there and use
+`PRINTER_MODE=remote`: see [docs/raspberry-pi-bridge.md](docs/raspberry-pi-bridge.md).
+
 See [docs/usb-setup.md](docs/usb-setup.md) for the full reasoning behind
 this shape (why a directory mount + cgroup rule instead of `--privileged` or
 a pinned `devices:` entry) and what each failure mode in the table there
@@ -171,7 +174,9 @@ just the field name, uppercased.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `PRINTER_MODE` | `mock` | `mock` (no hardware, safe for design/preview) or `usb` (talks to a real printer). |
+| `PRINTER_MODE` | `mock` | `mock` (no hardware, safe for design/preview), `usb` (talks to a real printer) or `remote` (a Raspberry Pi bridge owns the printer; see [docs/raspberry-pi-bridge.md](docs/raspberry-pi-bridge.md)). |
+| `PRINTER_BRIDGE_ADDRESS` | unset | `remote` mode: bridge `host[:port]` (default port 9177). |
+| `PRINTER_BRIDGE_CERT` | unset | `remote` mode: the bridge's public certificate (PEM). |
 | `DATA_DIR` | `./data` (image sets this to `/data`, matching the Dockerfile's `VOLUME /data`) | Where the SQLite db and print-job artifacts live. |
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | JSON array (not a bare string) of allowed browser origins — see the [security warning](#security-notes) below before changing this. |
 

@@ -1,0 +1,52 @@
+# Raspberry Pi printer bridge: runs on the machine the PT-E720BT is plugged
+# into and serves it to the app over mutual TLS (see ../docs/raspberry-pi-bridge.md).
+# Same released image as the app, different command:
+#   docker compose -f docker/docker-compose.bridge.yml up -d
+# First run, before pairing, the bridge exits ("not paired"); see the doc for
+# `show-cert` / `pair`. Update to the newest release:
+#   docker compose -f docker/docker-compose.bridge.yml pull && \
+#     docker compose -f docker/docker-compose.bridge.yml up -d
+#
+# See docker-compose.yml for the reasoning behind the USB mounts, and
+# ../docs/usb-setup.md for the host-side details.
+
+services:
+  bridge:
+    # `latest` tracks the newest stable release; pin a version (e.g. `:1.2`
+    # or `:1.2.3`) via LABELMAKER_TAG for reproducible deploys.
+    image: ghcr.io/metril/brother-label-maker:${LABELMAKER_TAG:-latest}
+    restart: unless-stopped
+    command: ["python", "-m", "labelmaker.driver.bridge", "serve"]
+    ports:
+      - "9177:9177"
+    environment:
+      BRIDGE_PORT: "9177"
+      BRIDGE_DIR: /data
+    volumes:
+      # Whole USB tree, not a single device node -- node paths renumber on
+      # every replug/reboot.
+      - /dev/bus/usb:/dev/bus/usb
+      # The bridge's key, certificate and the pinned app certificate.
+      - bridgedata:/data
+    # USB device nodes (major 189) without `--privileged`.
+    device_cgroup_rules:
+      - "c 189:* rmw"
+    # The node is typically root:lp 0664 with no Brother udev rule installed;
+    # joining `lp` gives the non-root container user write access without a
+    # host change.
+    group_add:
+      - lp
+    # Replaces the image's :8000 web healthcheck: a plain TCP connect to the
+    # bridge port (the TLS handshake just fails, which is fine).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 9177), 3).close()"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+
+volumes:
+  bridgedata: {}
