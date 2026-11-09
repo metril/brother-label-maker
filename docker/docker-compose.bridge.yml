@@ -18,9 +18,6 @@ services:
     command: ["python", "-m", "labelmaker.driver.bridge", "serve"]
     ports:
       - "9177:9177"
-    environment:
-      BRIDGE_PORT: "9177"
-      BRIDGE_DIR: /data
     volumes:
       # Whole USB tree, not a single device node -- node paths renumber on
       # every replug/reboot.

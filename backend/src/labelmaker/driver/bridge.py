@@ -1,10 +1,12 @@
 """Raspberry Pi printer bridge: owns the USB connection and serves it over
 mutual TLS to the app's `RemoteTransport`.
 
-    python -m labelmaker.driver.bridge serve | show-cert | pair <file or ->
+    python -m labelmaker.driver.bridge [--dir D] [--host H] [--port P] \
+        serve | show-cert | pair <file or ->
 
-Env: BRIDGE_PORT (default 9177), BRIDGE_DIR (default /data: bridge key,
-certificate and the pinned app certificate), BRIDGE_HOST (default 0.0.0.0).
+No env config. Defaults: --dir /data (bridge key, certificate and the pinned
+app certificate), --host 0.0.0.0, --port 9177. The flags exist for non-Docker
+use and go BEFORE the subcommand.
 
 Stdlib only at import time (no FastAPI). One TLS connection = one USB
 session, one session at a time. Nothing speaks the protocol or touches USB
@@ -15,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import signal
 import socket
 import ssl
@@ -277,14 +278,14 @@ class BridgeServer:
 # -- CLI ----------------------------------------------------------------------
 
 
-def _bridge_dir() -> Path:
-    return Path(os.environ.get("BRIDGE_DIR", "/data"))
+def _bridge_dir(args: argparse.Namespace) -> Path:
+    return Path(args.dir)
 
 
-def _cmd_show_cert(_args: argparse.Namespace) -> int:
+def _cmd_show_cert(args: argparse.Namespace) -> int:
     from labelmaker.driver.bridge_identity import cert_fingerprint, ensure_identity
 
-    _key, cert = ensure_identity(_bridge_dir(), BRIDGE_STEM)
+    _key, cert = ensure_identity(_bridge_dir(args), BRIDGE_STEM)
     pem = cert.read_text()
     sys.stdout.write(pem)
     print(f"sha256 fingerprint: {cert_fingerprint(pem)}", file=sys.stderr)
@@ -296,7 +297,7 @@ def _cmd_pair(args: argparse.Namespace) -> int:
 
     text = sys.stdin.read() if args.cert == "-" else Path(args.cert).read_text()
     try:
-        fp = write_pinned(_bridge_dir() / PINNED_APP_CERT, text)
+        fp = write_pinned(_bridge_dir(args) / PINNED_APP_CERT, text)
     except ValueError as err:
         print(f"error: {err}", file=sys.stderr)
         return 2
@@ -304,10 +305,10 @@ def _cmd_pair(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_serve(_args: argparse.Namespace) -> int:
+def _cmd_serve(args: argparse.Namespace) -> int:
     from labelmaker.driver.bridge_identity import cert_fingerprint, ensure_identity
 
-    directory = _bridge_dir()
+    directory = _bridge_dir(args)
     pin_path = directory / PINNED_APP_CERT
     if not pin_path.is_file():
         print(
@@ -326,8 +327,8 @@ def _cmd_serve(_args: argparse.Namespace) -> int:
     server = BridgeServer(
         server_context(cert, key, pinned),
         pin_fp,
-        host=os.environ.get("BRIDGE_HOST", "0.0.0.0"),
-        port=int(os.environ.get("BRIDGE_PORT", bp.DEFAULT_PORT)),
+        host=args.host,
+        port=args.port,
     )
     signal.signal(signal.SIGTERM, lambda *_: server.stop())
     logger.info("bridge listening on port %d, paired with app %s", server.port, pin_fp)
@@ -342,6 +343,11 @@ def _cmd_serve(_args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="labelmaker.driver.bridge")
+    parser.add_argument("--dir", default="/data", help="key/certificate directory (default /data)")
+    parser.add_argument("--host", default="0.0.0.0", help="listen address (default 0.0.0.0)")
+    parser.add_argument(
+        "--port", type=int, default=bp.DEFAULT_PORT, help="listen port (default 9177)"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("serve", help="run the bridge").set_defaults(func=_cmd_serve)
     sub.add_parser("show-cert", help="print this bridge's certificate").set_defaults(

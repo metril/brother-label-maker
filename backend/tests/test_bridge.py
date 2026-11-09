@@ -424,25 +424,24 @@ def test_a_failed_write_is_never_sent_twice(env):
 # -- CLI ----------------------------------------------------------------------
 
 
-def test_serve_refuses_to_start_unpaired(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("BRIDGE_DIR", str(tmp_path))
-    assert bridge_mod.main(["serve"]) == 2
+def test_serve_refuses_to_start_unpaired(tmp_path, capsys):
+    assert bridge_mod.main(["--dir", str(tmp_path), "serve"]) == 2
     assert "not paired" in capsys.readouterr().err
 
 
-def test_show_cert_and_pair(tmp_path, monkeypatch, capsys):
+def test_show_cert_and_pair(tmp_path, capsys):
     _k, app_cert = ensure_identity(tmp_path / "app", "client")
-    monkeypatch.setenv("BRIDGE_DIR", str(tmp_path / "bridge"))
-    assert bridge_mod.main(["show-cert"]) == 0
+    d = str(tmp_path / "bridge")
+    assert bridge_mod.main(["--dir", d, "show-cert"]) == 0
     out = capsys.readouterr()
     assert out.out.startswith("-----BEGIN CERTIFICATE-----")
     assert "PRIVATE KEY" not in out.out
-    assert bridge_mod.main(["pair", str(app_cert)]) == 0
+    assert bridge_mod.main(["--dir", d, "pair", str(app_cert)]) == 0
     pinned = (tmp_path / "bridge" / "app.crt").read_text()
     assert fingerprint(cert_pem_to_der(pinned)) == cert_fingerprint(app_cert.read_text())
     bad = tmp_path / "bad.pem"
     bad.write_text("nope")
-    assert bridge_mod.main(["pair", str(bad)]) == 2
+    assert bridge_mod.main(["--dir", d, "pair", str(bad)]) == 2
 
 
 def test_cli_remote_flags_reach_the_bridge(tmp_path, capsys):
