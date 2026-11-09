@@ -49,14 +49,15 @@ from labelmaker.driver.strategies import InitStrategy, get_strategy
 from labelmaker.driver.transport import (
     USB_LOCK,
     MockPrinterTransport,
-    PyUsbTransport,
     Transport,
+    open_real_transport,
 )
 from labelmaker.jobs.events import EventBus
 from labelmaker.render import preview_png, rasterize, render_definition
 from labelmaker.render.document import LabelDefinition
 from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition
+from labelmaker.settings_overlay import EffectiveSettings
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +248,8 @@ async def _process_job(state, job_id: str) -> None:
         # that function's docstring).
         result = await anyio.to_thread.run_sync(
             _open_print_close,
-            effective.printer_mode,
+            effective,
+            config.data_dir,
             images,
             strategy,
             job_options,
@@ -342,7 +344,7 @@ async def _process_feed_cut_job(state, job_id: str, effective) -> None:
     # the tape itself (status before image) rather than just handing
     # already-built images to print_images.
     result = await anyio.to_thread.run_sync(
-        _open_feed_cut_close, effective.printer_mode, strategy, progress_cb
+        _open_feed_cut_close, effective, config.data_dir, strategy, progress_cb
     )
 
     jobs_dir = config.data_dir / "jobs"
@@ -370,7 +372,8 @@ async def _process_feed_cut_job(state, job_id: str, effective) -> None:
 
 
 def _open_feed_cut_close(
-    printer_mode: str,
+    effective: EffectiveSettings,
+    data_dir: Path,
     strategy: InitStrategy,
     progress_cb: Callable[[int, int], None] | None = None,
 ) -> PrintResult:
@@ -420,10 +423,10 @@ def _open_feed_cut_close(
     """
     USB_LOCK.acquire()
     try:
-        if printer_mode == "mock":
+        if effective.printer_mode == "mock":
             transport: Transport = MockPrinterTransport()
         else:
-            transport = PyUsbTransport.open()
+            transport = open_real_transport(effective, data_dir)
         try:
             status = get_status(transport)
             if status.has_error:
@@ -505,7 +508,8 @@ def _render_all(definitions: list[LabelDefinition], data_dir: Path) -> list[Imag
 
 
 def _open_print_close(
-    printer_mode: str,
+    effective: EffectiveSettings,
+    data_dir: Path,
     images: list[Image.Image],
     strategy: InitStrategy,
     options: JobOptions,
@@ -533,10 +537,10 @@ def _open_print_close(
     """
     USB_LOCK.acquire()
     try:
-        if printer_mode == "mock":
+        if effective.printer_mode == "mock":
             transport: Transport = MockPrinterTransport()
         else:
-            transport = PyUsbTransport.open()
+            transport = open_real_transport(effective, data_dir)
         try:
             return _print(images, strategy, options, transport, design_tape_mm, progress_cb)
         finally:

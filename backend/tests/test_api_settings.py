@@ -15,6 +15,8 @@ import pytest
 # reviewed change to this test, not a silent drift.
 _EXPECTED_ROW_KEYS = {
     "printer_mode",
+    "printer_bridge_address",
+    "printer_bridge_cert",
     "printer_init_strategy",
     "printer_bit_order",
     "printer_flip_pins",

@@ -68,6 +68,8 @@ _DEFAULT_APP_CONFIG_KWARGS = {
     "printer_init_strategy": "classic",
     "printer_bit_order": "msb_first",
     "printer_flip_pins": False,
+    "printer_bridge_address": None,
+    "printer_bridge_cert": None,
     "homebox_url": None,
     "homebox_api_key": None,
     # Same hermeticity rule for the ELS knobs: an operator shell with

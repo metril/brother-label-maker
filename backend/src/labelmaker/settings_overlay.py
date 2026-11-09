@@ -73,6 +73,15 @@ def _http_url_no_trailing_slash(value: str, *, field_name: str) -> str:
     return value
 
 
+class SettingsConflictError(ValueError):
+    """The update is valid field by field but inconsistent as a whole
+    (remote mode without a bridge address/certificate). The settings router
+    maps it to a 422, like a ValidationError."""
+
+
+_REMOTE_FIELDS = frozenset({"printer_mode", "printer_bridge_address", "printer_bridge_cert"})
+
+
 class SettingsOverrides(BaseModel):
     """PUT /api/settings' request body: a partial map of `{field: value}`
     (every field optional) plus, via `model_fields_set`, the record of
@@ -92,7 +101,9 @@ class SettingsOverrides(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    printer_mode: Literal["mock", "usb"] | None = None
+    printer_mode: Literal["mock", "usb", "remote"] | None = None
+    printer_bridge_address: str | None = Field(default=None, max_length=255)
+    printer_bridge_cert: str | None = Field(default=None, max_length=8000)
     printer_init_strategy: Literal["classic", "e310bt"] | None = None
     printer_bit_order: Literal["msb_first", "lsb_first"] | None = None
     printer_flip_pins: bool | None = None
@@ -116,6 +127,27 @@ class SettingsOverrides(BaseModel):
         if value is None:
             return None
         return _http_url_no_trailing_slash(value, field_name="homebox_url")
+
+    @field_validator("printer_bridge_address")
+    @classmethod
+    def _validate_bridge_address(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from labelmaker.driver.bridge_protocol import parse_address
+
+        value = value.strip()
+        parse_address(value)  # raises ValueError with a clear message
+        return value
+
+    @field_validator("printer_bridge_cert")
+    @classmethod
+    def _validate_bridge_cert(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from labelmaker.driver.bridge_identity import cert_pem_to_der
+
+        cert_pem_to_der(value)  # exactly one X.509 cert, never a private key
+        return value.strip() + "\n"
 
     @field_validator("homebox_api_key")
     @classmethod
@@ -145,7 +177,9 @@ class EffectiveSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    printer_mode: Literal["mock", "usb"]
+    printer_mode: Literal["mock", "usb", "remote"]
+    printer_bridge_address: str | None
+    printer_bridge_cert: str | None
     printer_init_strategy: Literal["classic", "e310bt"]
     printer_bit_order: Literal["msb_first", "lsb_first"]
     printer_flip_pins: bool
@@ -241,6 +275,22 @@ class SettingsOverlay:
         env/default); any other value upserts both.
         """
         validated = SettingsOverrides.model_validate(updates)
+        if validated.model_fields_set & _REMOTE_FIELDS:
+            # Validate the merged result, not just the request, so changing
+            # one field can't leave remote mode half-configured.
+            merged = self.effective().model_dump()
+            for field in validated.model_fields_set & _REMOTE_FIELDS:
+                value = getattr(validated, field)
+                if value is None:
+                    value = getattr(self._cfg, field)  # null reverts to env/default
+                merged[field] = value
+            if merged["printer_mode"] == "remote" and not (
+                merged["printer_bridge_address"] and merged["printer_bridge_cert"]
+            ):
+                raise SettingsConflictError(
+                    "remote printer mode needs both printer_bridge_address and "
+                    "printer_bridge_cert"
+                )
         for field in validated.model_fields_set:
             value = getattr(validated, field)
             key = f"{_DB_KEY_PREFIX}{field}"

@@ -17,7 +17,10 @@ deviation from the plan's "text" test pattern, noted in the protocol notes.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 from PIL import Image, ImageDraw
 
@@ -47,9 +50,9 @@ from labelmaker.driver.status import (
 from labelmaker.driver.strategies import STRATEGIES, InitStrategy, get_strategy
 from labelmaker.driver.transport import (
     PrinterNotFoundError,
-    PyUsbTransport,
     Transport,
     TransportError,
+    open_real_transport,
 )
 
 # --- Test patterns -----------------------------------------------------------
@@ -186,13 +189,20 @@ _DEFAULT_CHAIN_MODE: dict[str, str] = {
 _TAPE_WIDTH_CHOICES = (3.5, 6, 9, 12, 18, 24)
 
 
+# Set by main() from --remote/--bridge-cert/--data-dir; None means local USB.
+_remote_settings: SimpleNamespace | None = None
+
+
 def _open_transport() -> Transport:
-    """The single seam through which the CLI reaches real USB hardware.
+    """The single seam through which the CLI reaches real printer hardware
+    (local USB, or a Pi bridge with --remote).
 
     Tests monkeypatch this to a CaptureTransport; nothing else in this module
     imports usb.core/usb.util (PyUsbTransport itself imports them lazily).
     """
-    return PyUsbTransport.open()
+    if _remote_settings is None:
+        return open_real_transport(SimpleNamespace(printer_mode="usb"), ".")
+    return open_real_transport(_remote_settings, _remote_settings.data_dir)
 
 
 def _open_and_get_status() -> tuple[Transport, PrinterStatus]:
@@ -546,6 +556,17 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m labelmaker.driver.cli",
         description="PT-E720BT physical-checkpoint CLI: probe/status/print-test/capture.",
     )
+    parser.add_argument(
+        "--remote", metavar="HOST[:PORT]", help="use a Pi printer bridge instead of local USB"
+    )
+    parser.add_argument(
+        "--bridge-cert", metavar="FILE", help="the bridge's public certificate (with --remote)"
+    )
+    parser.add_argument(
+        "--data-dir",
+        default=os.environ.get("DATA_DIR", "./data"),
+        help="holds this app's bridge identity under bridge/ (with --remote; default $DATA_DIR)",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     probe_parser = subparsers.add_parser("probe", help="open USB, request status, print summary")
@@ -594,8 +615,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _remote_settings
     parser = _build_parser()
     args = parser.parse_args(argv)
+    _remote_settings = None
+    if args.remote:
+        if not args.bridge_cert:
+            parser.error("--remote requires --bridge-cert FILE (the bridge's `show-cert` output)")
+        _remote_settings = SimpleNamespace(
+            printer_mode="remote",
+            printer_bridge_address=args.remote,
+            printer_bridge_cert=Path(args.bridge_cert).read_text(),
+            data_dir=Path(args.data_dir),
+        )
     return args.func(args)
 
 

@@ -16,11 +16,19 @@ definitions -- see that module).
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import anyio
 from fastapi import APIRouter
 
-from labelmaker.api.deps import BusDep, DbDep, KeepaliveStatusDep, QueueDep, SettingsDep
+from labelmaker.api.deps import (
+    AppConfigDep,
+    BusDep,
+    DbDep,
+    KeepaliveStatusDep,
+    QueueDep,
+    SettingsDep,
+)
 from labelmaker.driver.geometry import MARGIN_MIN_MM
 from labelmaker.driver.printer import get_status
 from labelmaker.driver.protocol import ChainMode
@@ -29,10 +37,11 @@ from labelmaker.driver.transport import (
     USB_LOCK,
     MockPrinterTransport,
     PrinterNotFoundError,
-    PyUsbTransport,
     Transport,
     TransportError,
+    open_real_transport,
 )
+from labelmaker.settings_overlay import EffectiveSettings
 
 router = APIRouter(prefix="/printer", tags=["printer"])
 
@@ -76,20 +85,28 @@ def _fetch_mock_status() -> PrinterStatus:
     return _fetch_status(MockPrinterTransport)
 
 
-def _fetch_usb_status() -> PrinterStatus:
-    return _fetch_status(PyUsbTransport.open)
+def _fetch_usb_status(effective: EffectiveSettings, data_dir: Path) -> PrinterStatus:
+    """Real-printer status (USB or remote bridge, per `effective`)."""
+    return _fetch_status(lambda: open_real_transport(effective, data_dir))
 
 
 @router.get("/status")
-async def printer_status(settings: SettingsDep, keepalive_status: KeepaliveStatusDep) -> dict:
+async def printer_status(
+    settings: SettingsDep, keepalive_status: KeepaliveStatusDep, config: AppConfigDep
+) -> dict:
     # Reads the settings overlay's EFFECTIVE printer_mode (override if one
     # is stored, else AppConfig/env), not `config.printer_mode` directly --
     # a DB override set via PUT /api/settings must be reflected here (both
     # which transport this endpoint actually probes, and the value it
     # reports) without a restart, same as everywhere else the app reads an
     # overridable setting.
-    printer_mode = settings.effective().printer_mode
-    fetch = _fetch_mock_status if printer_mode == "mock" else _fetch_usb_status
+    effective = settings.effective()
+    printer_mode = effective.printer_mode
+    if printer_mode == "mock":
+        fetch = _fetch_mock_status
+    else:
+        def fetch() -> PrinterStatus:
+            return _fetch_usb_status(effective, config.data_dir)
 
     # commit 6: the optional keep-awake poller's own status (jobs/
     # keepalive.py), additive on every branch below -- a shallow copy so
@@ -122,6 +139,22 @@ async def printer_status(settings: SettingsDep, keepalive_status: KeepaliveStatu
         "error": None,
         "keep_alive": keep_alive,
     }
+
+
+@router.get("/bridge-identity")
+async def bridge_identity(config: AppConfigDep) -> dict:
+    """This app's PUBLIC bridge certificate (PEM) and SHA-256 fingerprint,
+    for pairing on the bridge. The key is generated on first request and
+    never leaves <data_dir>/bridge/. Behind the same auth gate as every
+    other /api route."""
+    from labelmaker.driver.bridge_identity import cert_fingerprint, ensure_identity
+
+    def _load() -> dict:
+        _key, cert = ensure_identity(config.data_dir / "bridge", "client")
+        pem = cert.read_text()
+        return {"cert_pem": pem, "fingerprint": cert_fingerprint(pem)}
+
+    return await anyio.to_thread.run_sync(_load)
 
 
 def _feed_cut_definition() -> dict:

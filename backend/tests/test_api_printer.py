@@ -52,7 +52,7 @@ async def test_printer_status_usb_mode_no_device_reports_disconnected(tmp_path, 
         raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
 
     monkeypatch.setattr(
-        "labelmaker.api.router_printer.PyUsbTransport.open", staticmethod(_raise_not_found)
+        "labelmaker.driver.transport.PyUsbTransport.open", staticmethod(_raise_not_found)
     )
 
     config = AppConfig(printer_mode="usb", data_dir=tmp_path / "data")
@@ -88,7 +88,7 @@ async def test_printer_status_honors_a_db_override_over_the_config_printer_mode(
         raise PrinterNotFoundError("no USB printer found for vendor_id=0x04f9 product_id=0x224a")
 
     monkeypatch.setattr(
-        "labelmaker.api.router_printer.PyUsbTransport.open", staticmethod(_raise_not_found)
+        "labelmaker.driver.transport.PyUsbTransport.open", staticmethod(_raise_not_found)
     )
 
     resp = await client.put("/api/settings", json={"printer_mode": "usb"})

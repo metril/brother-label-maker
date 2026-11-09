@@ -432,3 +432,39 @@ def test_show_cert_and_pair(tmp_path, monkeypatch, capsys):
     bad = tmp_path / "bad.pem"
     bad.write_text("nope")
     assert bridge_mod.main(["pair", str(bad)]) == 2
+
+
+def test_cli_remote_flags_reach_the_bridge(tmp_path, capsys):
+    from labelmaker.driver import cli
+    from labelmaker.driver.transport import MockPrinterTransport
+
+    data_dir = tmp_path / "data"
+    _k, app_cert = ensure_identity(data_dir / "bridge", "client")  # the CLI's identity
+    b_key, b_cert = ensure_identity(tmp_path / "bridge", "bridge")
+    server = BridgeServer(
+        server_context(b_cert, b_key, app_cert.read_text()),
+        cert_fingerprint(app_cert.read_text()),
+        host="127.0.0.1",
+        port=0,
+        opener=MockPrinterTransport,
+    )
+    server.start()
+    try:
+        argv = [
+            "--remote", f"127.0.0.1:{server.port}",
+            "--bridge-cert", str(b_cert),
+            "--data-dir", str(data_dir),
+            "status",
+        ]  # fmt: skip
+        assert cli.main(argv) == 0
+        assert "Media width: 24mm" in capsys.readouterr().out
+    finally:
+        server.stop()
+        cli._remote_settings = None
+
+
+def test_cli_remote_requires_bridge_cert():
+    from labelmaker.driver import cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["--remote", "pi.local", "status"])

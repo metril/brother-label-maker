@@ -21,7 +21,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="")
 
-    printer_mode: Literal["mock", "usb"] = "mock"
+    printer_mode: Literal["mock", "usb", "remote"] = "mock"
+    # PRINTER_MODE=remote: a Pi running driver/bridge.py owns the USB printer.
+    # Address is host[:port] (default 9177); the cert is the bridge's PUBLIC
+    # certificate (PEM, from `bridge show-cert`). This app's own key lives
+    # only under <data_dir>/bridge/, never in env or the DB.
+    printer_bridge_address: str | None = None
+    printer_bridge_cert: str | None = None
     data_dir: Path = Path("./data")
     # Verified 2026-07-28 (first physical print, browser path, 24mm TZe):
     # classic printed successfully; e310bt remains untested.
