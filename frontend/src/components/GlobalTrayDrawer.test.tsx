@@ -103,7 +103,7 @@ describe("GlobalTrayDrawer -- hidden while the tray is empty", () => {
 describe("GlobalTrayDrawer -- header button, open/close, and focus management", () => {
   it('shows "Tray · N" (plus the tape estimate once it resolves), opens a right-side slide-over on click, and moves focus to its close button', async () => {
     seedTrayItems(2);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2, total_mm: 60 }))));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2, total_mm: 60 }))));
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalTrayDrawer />);
@@ -130,7 +130,7 @@ describe("GlobalTrayDrawer -- header button, open/close, and focus management", 
 
   it("closes and restores focus to the trigger on Escape, and on a scrim click", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalTrayDrawer />);
@@ -152,7 +152,7 @@ describe("GlobalTrayDrawer -- header button, open/close, and focus management", 
 
   it("is a toggle: clicking the header button again while open closes the panel", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalTrayDrawer />);
@@ -171,10 +171,10 @@ describe("GlobalTrayDrawer -- header button, open/close, and focus management", 
 describe("GlobalTrayDrawer -- printing (current is always null: no current-design fallback)", () => {
   it("Print POSTs the tray's own items only, exactly like JobTray's own non-empty-tray path", async () => {
     seedTrayItems(2);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))));
     let capturedBody: { labels: LabelDefinition[]; serialization?: unknown } | undefined;
     server.use(
-      http.post("/api/print", async ({ request }) => {
+      http.post("/api/v1/print", async ({ request }) => {
         capturedBody = (await request.json()) as typeof capturedBody;
         return HttpResponse.json({ job_id: "job-global-1" }, { status: 202 });
       }),
@@ -196,7 +196,7 @@ describe("GlobalTrayDrawer -- printing (current is always null: no current-desig
 describe("GlobalTrayDrawer -- tray item previews (useTrayPreviews)", () => {
   it("fetches and renders a preview (png + length) for an item queued with neither of its own (e.g. HomeBox's 'Add to tray')", async () => {
     useTrayStore.getState().addItem({ definition: def("HB"), png: null, lengthMm: null, label: "HomeBox — Shelf A" });
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
 
     const { container } = renderWithProviders(<GlobalTrayDrawer />);
@@ -220,7 +220,7 @@ describe("GlobalTrayDrawer -- tray item previews (useTrayPreviews)", () => {
 describe("GlobalTrayDrawer -- current design (Design route)", () => {
   it('shows the empty-state prompt and "Print 1 label" for the current design when the tray is empty', async () => {
     useCurrentDesignStore.setState({ current: currentDesign() });
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalTrayDrawer />);
@@ -235,8 +235,8 @@ describe("GlobalTrayDrawer -- current design (Design route)", () => {
     const user = userEvent.setup();
     let capturedBody: { labels: LabelDefinition[] } | undefined;
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
-      http.post("/api/print", async ({ request }) => {
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/v1/print", async ({ request }) => {
         capturedBody = (await request.json()) as typeof capturedBody;
         return HttpResponse.json({ job_id: "job-1" }, { status: 202 });
       }),
@@ -257,8 +257,8 @@ describe("GlobalTrayDrawer -- current design (Design route)", () => {
     const user = userEvent.setup();
     let capturedBody: { labels: LabelDefinition[] } | undefined;
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
-      http.post("/api/print", async ({ request }) => {
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
+      http.post("/api/v1/print", async ({ request }) => {
         capturedBody = (await request.json()) as typeof capturedBody;
         return HttpResponse.json({ job_id: "job-2" }, { status: 202 });
       }),
@@ -281,8 +281,8 @@ describe("GlobalTrayDrawer -- current design (Design route)", () => {
     const user = userEvent.setup();
     const printSpy = vi.fn();
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
-      http.post("/api/print", () => {
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/v1/print", () => {
         printSpy();
         return HttpResponse.json({ job_id: "job-x" }, { status: 202 });
       }),
@@ -303,7 +303,7 @@ describe("GlobalTrayDrawer -- current design (Design route)", () => {
 describe("GlobalTrayDrawer -- adding from the current design, and item controls", () => {
   it("+ Add to tray adds a DEEP-COPIED snapshot to the real store, and up/duplicate/remove work through it", async () => {
     useCurrentDesignStore.setState({ current: currentDesign() });
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
 
     renderWithProviders(<GlobalTrayDrawer />);
@@ -343,7 +343,7 @@ describe("GlobalTrayDrawer -- adding from the current design, and item controls"
 describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", () => {
   it("at xl + open swaps in a complementary landmark -- no scrim, no aria-modal, no dialog role", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
@@ -358,7 +358,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
 
   it("below xl + open keeps today's dialog semantics and scrim, unchanged", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
@@ -371,7 +371,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
 
   it("close still works at xl, without stealing focus onto the close button", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
@@ -398,7 +398,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
   // to the header trigger.
   it("returns focus to the trigger when the close button is clicked at xl", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
@@ -413,7 +413,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
 
   it("Escape does nothing at xl -- no Escape-to-close", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
@@ -428,7 +428,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
 
   it("carries the xl:static in-flow-column class contract whenever open, regardless of viewport or the preview deck's own state", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
 
@@ -484,7 +484,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
   // class string is present regardless of viewport).
   it("at xl + open: the panel carries xl:overflow-hidden and only the items list's own wrapper is the scrolling region", async () => {
     seedTrayItems(1);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())));
     setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);
@@ -519,7 +519,7 @@ describe("GlobalTrayDrawer -- at-xl in-flow panel vs. below-xl modal overlay", (
 
   it("an at-xl tray does not close itself when 'Preview' opens the chain preview panel -- only a below-xl tray does that", async () => {
     seedTrayItems(2);
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))));
     setMediaQueryMatches(DESKTOP_QUERY, true);
     const user = userEvent.setup();
     renderWithProviders(<GlobalTrayDrawer />);

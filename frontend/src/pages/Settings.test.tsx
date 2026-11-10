@@ -13,7 +13,7 @@ function section(heading: string): HTMLElement {
   return el as HTMLElement;
 }
 
-/** Every section past Appearance is gated behind ONE GET /api/settings
+/** Every section past Appearance is gated behind ONE GET /api/v1/settings
  * query at the top of the page (see pages/Settings.tsx) -- none of their
  * headings exist in the DOM until that resolves, so locating one needs an
  * async find, not the synchronous `section()` above (which Appearance
@@ -37,7 +37,7 @@ function fieldContainer(labelText: string): HTMLElement {
   return el as HTMLElement;
 }
 
-/** A GET /api/settings override with one row patched -- the rest of
+/** A GET /api/v1/settings override with one row patched -- the rest of
  * defaultSettingsBody's rows pass through unchanged. */
 function settingsWith(overrides: Record<string, Partial<(typeof defaultSettingsBody)["settings"][number]>>) {
   return {
@@ -71,9 +71,9 @@ describe("Settings page", () => {
   // -- Printer section ------------------------------------------------------
 
   describe("Printer section", () => {
-    it("shows current values and provenance badges from GET /api/settings", async () => {
+    it("shows current values and provenance badges from GET /api/v1/settings", async () => {
       server.use(
-        http.get("/api/settings", () =>
+        http.get("/api/v1/settings", () =>
           HttpResponse.json(settingsWith({ printer_bit_order: { value: "lsb_first", source: "db" } })),
         ),
       );
@@ -93,7 +93,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -127,8 +127,8 @@ describe("Settings page", () => {
     it("shows a backend validation error for the remote config", async () => {
       const user = userEvent.setup();
       server.use(
-        http.put("/api/settings", () =>
-          HttpResponse.json({ detail: "printer_bridge_cert: not a valid PEM X.509 certificate" }, { status: 422 }),
+        http.put("/api/v1/settings", () =>
+          HttpResponse.json({ error: { code: "error", message: "printer_bridge_cert: not a valid PEM X.509 certificate" } }, { status: 422 }),
         ),
       );
       renderWithProviders(<Settings />, { route: "/settings" });
@@ -147,7 +147,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -165,7 +165,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -182,7 +182,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -205,13 +205,13 @@ describe("Settings page", () => {
     it("clicking Reset to default PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(
-        http.get("/api/settings", () =>
+        http.get("/api/v1/settings", () =>
           HttpResponse.json(settingsWith({ printer_bit_order: { value: "lsb_first", source: "db" } })),
         ),
       );
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -231,7 +231,7 @@ describe("Settings page", () => {
   describe("Keep-awake fields", () => {
     it("shows the current switch state, interval, and provenance", async () => {
       server.use(
-        http.get("/api/settings", () =>
+        http.get("/api/v1/settings", () =>
           HttpResponse.json(
             settingsWith({
               keep_printer_awake: { value: true, source: "db" },
@@ -255,7 +255,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -271,13 +271,13 @@ describe("Settings page", () => {
     it("resetting the keep-awake switch to default (no env tier) PUTs null", async () => {
       const user = userEvent.setup();
       server.use(
-        http.get("/api/settings", () =>
+        http.get("/api/v1/settings", () =>
           HttpResponse.json(settingsWith({ keep_printer_awake: { value: true, source: "db" } })),
         ),
       );
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -308,7 +308,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -332,7 +332,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -363,7 +363,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -388,7 +388,7 @@ describe("Settings page", () => {
 
     it("shows Key set and a Clear button when the API key is set, still starting blank", async () => {
       server.use(
-        http.get("/api/settings", () => HttpResponse.json(settingsWith({ homebox_api_key: { set: true, source: "db" } }))),
+        http.get("/api/v1/settings", () => HttpResponse.json(settingsWith({ homebox_api_key: { set: true, source: "db" } }))),
       );
       renderWithProviders(<Settings />, { route: "/settings" });
 
@@ -402,7 +402,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(settingsWith({ homebox_api_key: { set: true, source: "db" } }));
         }),
@@ -420,9 +420,9 @@ describe("Settings page", () => {
 
     // -- QR base URL (unchanged behavior from before this task) -------------
 
-    it("shows the effective qr_base_url from GET /api/homebox/settings", async () => {
+    it("shows the effective qr_base_url from GET /api/v1/homebox/settings", async () => {
       server.use(
-        http.get("/api/homebox/settings", () =>
+        http.get("/api/v1/homebox/settings", () =>
           HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "https://homebox.example.com" }),
         ),
       );
@@ -434,11 +434,11 @@ describe("Settings page", () => {
       expect(within(qrSection).getByLabelText("QR base URL")).toHaveValue("");
     });
 
-    it("saves the entered value via PUT /api/homebox/settings", async () => {
+    it("saves the entered value via PUT /api/v1/homebox/settings", async () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/homebox/settings", async ({ request }) => {
+        http.put("/api/v1/homebox/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json({
             qr_base_url: "https://public.example.com",
@@ -461,16 +461,20 @@ describe("Settings page", () => {
     it("shows a 422 validation error readably", async () => {
       const user = userEvent.setup();
       server.use(
-        http.put("/api/homebox/settings", () =>
+        http.put("/api/v1/homebox/settings", () =>
           HttpResponse.json(
             {
-              detail: [
+              error: {
+                code: "validation_error",
+                message: "request validation failed",
+                details: [
                 {
                   loc: ["body", "qr_base_url"],
                   msg: "Value error, qr_base_url must be an http(s) URL, e.g. https://homebox.example.com",
                   type: "value_error",
                 },
-              ],
+                ],
+              },
             },
             { status: 422 },
           ),
@@ -495,7 +499,7 @@ describe("Settings page", () => {
   describe("ELS section", () => {
     it("shows the current tape width and whether ELS is enabled", async () => {
       server.use(
-        http.get("/api/settings", () =>
+        http.get("/api/v1/settings", () =>
           HttpResponse.json(settingsWith({ els_enabled: { value: true, source: "db", editable: true } })),
         ),
       );
@@ -511,7 +515,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -527,13 +531,13 @@ describe("Settings page", () => {
     it("clicking Reset to default on ELS enabled PUTs null for that field", async () => {
       const user = userEvent.setup();
       server.use(
-        http.get("/api/settings", () =>
+        http.get("/api/v1/settings", () =>
           HttpResponse.json(settingsWith({ els_enabled: { value: true, source: "db", editable: true } })),
         ),
       );
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -564,7 +568,7 @@ describe("Settings page", () => {
       const user = userEvent.setup();
       let capturedBody: unknown;
       server.use(
-        http.put("/api/settings", async ({ request }) => {
+        http.put("/api/v1/settings", async ({ request }) => {
           capturedBody = await request.json();
           return HttpResponse.json(defaultSettingsBody);
         }),
@@ -583,9 +587,9 @@ describe("Settings page", () => {
 
   // -- Runtime section (read-only) --------------------------------------------
 
-  it("renders the read-only Runtime rows from GET /api/settings", async () => {
+  it("renders the read-only Runtime rows from GET /api/v1/settings", async () => {
     server.use(
-      http.get("/api/settings", () => HttpResponse.json(settingsWith({ auth_mode: { value: "oidc" } }))),
+      http.get("/api/v1/settings", () => HttpResponse.json(settingsWith({ auth_mode: { value: "oidc" } }))),
     );
 
     renderWithProviders(<Settings />, { route: "/settings" });

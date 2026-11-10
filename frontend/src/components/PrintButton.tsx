@@ -9,7 +9,7 @@ interface PrintButtonProps {
    * agree about what's currently in flight instead of each tracking its
    * own, independently-polled job. */
   job: UsePrintJobResult;
-  /** The exact `labels` array POST /api/print's body will carry -- either
+  /** The exact `labels` array POST /api/v1/print's body will carry -- either
    * the tray's own item definitions, or a one-element array wrapping the
    * current (unsaved) design when the tray is empty (see JobTray.tsx's
    * `bodyLabels`). */
@@ -29,7 +29,7 @@ interface PrintButtonProps {
   isTray?: boolean;
   disabled?: boolean;
   /** task 2.12 carry-forward: serialization + a non-empty tray are
-   * mutually exclusive server-side (POST /api/print requires exactly one
+   * mutually exclusive server-side (POST /api/v1/print requires exactly one
    * template label when `serialization` is set) -- when set, Print is
    * blocked and this message shown instead of ever attempting the request. */
   blockedMessage?: string | null;

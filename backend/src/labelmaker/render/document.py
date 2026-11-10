@@ -8,7 +8,7 @@ the render stack and the printer driver, nothing else is.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from labelmaker.driver.geometry import MediaFamily, TapeSpec, all_tapes
 
@@ -52,6 +52,9 @@ class RenderWarning(BaseModel):
     UI shows verbatim (e.g. LabelPreview.tsx's warning chips) -- callers
     should prefer matching on `code`, never on `message` text, so wording
     can change freely without breaking anything downstream."""
+
+    # Always serialized: the API schema marks defaulted fields required.
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     code: str
     severity: Literal["info", "warning"] = "warning"

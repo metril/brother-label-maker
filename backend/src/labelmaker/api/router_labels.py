@@ -40,13 +40,15 @@ from email.utils import formatdate
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Request, UploadFile
 from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, error_message
+from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_images import _read_capped
+from labelmaker.api.schemas import CsvUploadOut, ExpandOut, PreviewOut, binary
 from labelmaker.driver.geometry import MIN_FEED_MM, all_tapes, dots_to_mm
 from labelmaker.render import (
     FontInfo,
@@ -68,12 +70,14 @@ from labelmaker.render.serialize import (
     total_labels,
 )
 from labelmaker.render.symbols import (
+    SymbolInfo,
     get_symbol_info,
     list_symbols_json,
     resolve_symbol_path,
     symbols_etag,
     validate_symbol_svg,
 )
+from labelmaker.render.types.base import LabelTypeInfo
 
 # Shared cache-control policy for both symbol routes (H5): long enough to
 # skip most repeat transfers, short of `immutable`/a year -- the symbols
@@ -89,16 +93,28 @@ router = APIRouter(tags=["labels"])
 _MAX_SAMPLES = 24
 
 
-@router.get("/label-types")
+@router.get(
+    "/label-types",
+    response_model=list[LabelTypeInfo],
+    summary="List label types",
+    responses=err(500),
+)
 async def get_label_types() -> list[dict]:
+    """Every registered label type with its params JSON schema."""
     # Every LabelTypeInfo field (type/title/category/min_tape_mm/params_schema)
     # passes through as-is -- no per-field allowlist to keep in sync when
     # base.py's LabelTypeInfo shape grows (e.g. category/min_tape_mm, task 2.2).
     return [info.model_dump() for info in list_types()]
 
 
-@router.get("/fonts")
+@router.get(
+    "/fonts",
+    response_model=list[FontInfo],
+    summary="List bundled fonts",
+    responses=err(500),
+)
 async def get_fonts() -> list[FontInfo]:
+    """The font families available to text objects."""
     return list_fonts()
 
 
@@ -107,15 +123,21 @@ class TapeInfo(BaseModel):
     view of tape geometry, kept separate from TapeSpec itself (which also
     carries driver-only fields like status_width_mm that no client needs)."""
 
-    nominal_mm: float
-    family: str
-    print_dots: int
-    print_mm: float
-    max_length_mm: float
+    nominal_mm: float = Field(description="Nominal tape width in mm")
+    family: str = Field(description="Media family: tze, hse_2_1 or hse_3_1")
+    print_dots: int = Field(description="Printable height in dots")
+    print_mm: float = Field(description="Printable height in mm")
+    max_length_mm: float = Field(description="Maximum label length in mm")
 
 
-@router.get("/tapes")
+@router.get(
+    "/tapes",
+    response_model=list[TapeInfo],
+    summary="List supported tapes",
+    responses=err(500),
+)
 async def get_tapes() -> list[TapeInfo]:
+    """Geometry of every supported tape width/family."""
     return [
         TapeInfo(
             nominal_mm=tape.nominal_mm,
@@ -145,8 +167,21 @@ def _etag_matches(if_none_match: str | None, etag: str) -> bool:
     return etag in candidates
 
 
-@router.get("/symbols")
+@router.get(
+    "/symbols",
+    response_class=Response,
+    summary="List the symbol catalog",
+    responses={
+        200: {
+            "description": "Symbol catalog; carries ETag and Cache-Control",
+            "model": list[SymbolInfo],
+        },
+        304: {"description": "Not modified (If-None-Match matched the ETag)"},
+        **err(500),
+    },
+)
 async def get_symbols(request: Request) -> Response:
+    """The full symbol catalog. Conditional-GET aware (weak ETag)."""
     # H4: list_symbols_json() is the pre-encoded-bytes cache (see its
     # docstring) -- no per-request deep copy, no per-request
     # jsonable_encoder/response-model pass. H5: ETag + Cache-Control, with
@@ -159,12 +194,22 @@ async def get_symbols(request: Request) -> Response:
     return Response(content=list_symbols_json(), media_type="application/json", headers=headers)
 
 
-@router.get("/symbols/{symbol_id}")
+@router.get(
+    "/symbols/{symbol_id}",
+    response_class=Response,
+    summary="Download a symbol SVG",
+    responses={
+        **binary("image/svg+xml", "Raw SVG; carries ETag, Last-Modified and Cache-Control"),
+        304: {"description": "Not modified (If-None-Match matched the ETag)"},
+        **err(404),
+    },
+)
 async def get_symbol_svg(symbol_id: str, request: Request) -> Response:
+    """One symbol's SVG. Conditional-GET aware (weak ETag + Last-Modified)."""
     try:
         info = get_symbol_info(symbol_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=error_message(exc)) from exc
+        raise ApiError(404, "not_found", error_message(exc)) from exc
     # L9 (2026-08 review): resolve-and-contain the manifest-supplied path
     # (mirrors render/images.py's image_path() for uploads) instead of an
     # unchecked SYMBOLS_DIR / info.path join -- a regex-valid-shaped id
@@ -174,9 +219,9 @@ async def get_symbol_svg(symbol_id: str, request: Request) -> Response:
     try:
         path = resolve_symbol_path(info)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=error_message(exc)) from exc
+        raise ApiError(404, "not_found", error_message(exc)) from exc
     if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"symbol file missing: {info.path}")
+        raise ApiError(404, "not_found", f"symbol file missing: {info.path}")
     # H5: ETag + Last-Modified from the FILE (not index.json -- a symbol's
     # svg can be regenerated by the pipeline without index.json itself
     # changing), same weak-etag format and cache-control policy as
@@ -211,9 +256,7 @@ async def get_symbol_svg(symbol_id: str, request: Request) -> Response:
         text = raw.decode("utf-8")
         validate_symbol_svg(info, text)
     except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(
-            status_code=404, detail=f"symbol {symbol_id!r} failed content validation"
-        ) from exc
+        raise ApiError(404, "not_found", f"symbol {symbol_id!r} failed content validation") from exc
     return Response(content=raw, media_type="image/svg+xml", headers=headers)
 
 
@@ -297,8 +340,17 @@ def _render_and_encode(
     }
 
 
-@router.post("/render/preview")
+@router.post(
+    "/render/preview",
+    response_model=PreviewOut,
+    summary="Render a label preview",
+    responses=err(422),
+)
 async def render_preview(body: PreviewRequest, config: AppConfigDep) -> dict:
+    """Render one label (or one instance of a serialized run) to a PNG.
+
+    Runs the same pipeline the print worker uses; nothing is persisted.
+    """
     try:
         return await anyio.to_thread.run_sync(
             _render_and_encode,
@@ -315,7 +367,7 @@ async def render_preview(body: PreviewRequest, config: AppConfigDep) -> dict:
         # the same way an unknown type/tape does. Also covers
         # expand_definition's own ValueErrors (ALPHA under/overflow,
         # unknown {csv.<col>}) and the out-of-range `index` check above.
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
 
 class ExpandRequest(BaseModel):
@@ -342,8 +394,14 @@ def _expand_preview(serialization: Sequence, sample: str | None) -> dict:
     return result
 
 
-@router.post("/render/expand")
+@router.post(
+    "/render/expand",
+    response_model=ExpandOut,
+    summary="Expand a serialization sequence",
+    responses=err(422),
+)
 async def expand_sequence(body: ExpandRequest) -> dict:
+    """The distinct values a sequence produces, plus optional sample strings."""
     try:
         return _expand_preview(body.serialization, body.sample)
     except (KeyError, ValueError) as exc:
@@ -352,13 +410,18 @@ async def expand_sequence(body: ExpandRequest) -> dict:
         # structural constraints (bad kind-specific requirements, the
         # total-labels cap, etc.) already 422 automatically via FastAPI's
         # request-body validation before this handler even runs.
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
 
 MAX_CSV_UPLOAD_BYTES = 1024 * 1024  # 1 MiB
 
 
-@router.post("/serialize/csv")
+@router.post(
+    "/serialize/csv",
+    response_model=CsvUploadOut,
+    summary="Parse a CSV for serialization",
+    responses=err(413, 422),
+)
 async def upload_serialize_csv(request: Request, file: UploadFile) -> dict:
     """Stateless CSV echo for task 2.4's CSV-kind Sequence: parses an
     uploaded CSV with stdlib `csv`, into the same {columns, rows, row_count}
@@ -376,17 +439,15 @@ def _parse_csv_upload(raw: bytes) -> dict:
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=422, detail=f"CSV file is not valid UTF-8: {exc}") from exc
+        raise ApiError(422, "invalid_csv", f"CSV file is not valid UTF-8: {exc}") from exc
 
     reader = csv.reader(io.StringIO(text))
     try:
         header = [column.strip() for column in next(reader)]
     except StopIteration:
-        raise HTTPException(status_code=422, detail="CSV file is empty") from None
+        raise ApiError(422, "invalid_csv", "CSV file is empty") from None
     if not header or any(column == "" for column in header):
-        raise HTTPException(
-            status_code=422, detail="CSV header row must have non-empty column names"
-        )
+        raise ApiError(422, "invalid_csv", "CSV header row must have non-empty column names")
 
     seen: set[str] = set()
     duplicates: set[str] = set()
@@ -395,9 +456,7 @@ def _parse_csv_upload(raw: bytes) -> dict:
             duplicates.add(column)
         seen.add(column)
     if duplicates:
-        raise HTTPException(
-            status_code=422, detail=f"duplicate CSV column(s): {sorted(duplicates)}"
-        )
+        raise ApiError(422, "invalid_csv", f"duplicate CSV column(s): {sorted(duplicates)}")
 
     rows: list[dict[str, str]] = []
     for line_no, raw_row in enumerate(reader, start=2):
@@ -411,15 +470,14 @@ def _parse_csv_upload(raw: bytes) -> dict:
             # past the file's own size while `rows` grows unbounded, only
             # to be rejected anyway once every row had already been
             # parsed and appended.
-            raise HTTPException(
-                status_code=422, detail=f"CSV file has more than {MAX_CSV_ROWS} data rows"
+            raise ApiError(
+                422, "invalid_csv", f"CSV file has more than {MAX_CSV_ROWS} data rows"
             )
         if len(raw_row) != len(header):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"
-                ),
+            raise ApiError(
+                422,
+                "invalid_csv",
+                (f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"),
             )
         # Row values stripped the same way header column names are above --
         # untrimmed whitespace around a CSV cell (common from spreadsheet
@@ -427,6 +485,6 @@ def _parse_csv_upload(raw: bytes) -> dict:
         rows.append(dict(zip(header, (value.strip() for value in raw_row), strict=True)))
 
     if not rows:
-        raise HTTPException(status_code=422, detail="CSV file has no data rows")
+        raise ApiError(422, "invalid_csv", "CSV file has no data rows")
 
     return {"columns": header, "rows": rows, "row_count": len(rows)}

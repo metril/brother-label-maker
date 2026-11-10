@@ -13,7 +13,7 @@ const DEBOUNCE_MS = 300;
 const TOKEN_RE = /\{seq\}|\{csv\./;
 
 export interface UseSequenceExpandResult {
-  /** The last successful POST /api/render/expand response for the
+  /** The last successful POST /api/v1/render/expand response for the
    * CURRENT (enabled, client-valid) sequence -- null while serialization
    * is off, the sequence has a client-side field error, or no request has
    * resolved yet. */

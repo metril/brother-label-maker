@@ -26,7 +26,7 @@ interface DesignerState {
   /** The current (possibly still-invalid-while-editing) Sequence spec --
    * see lib/sequence.ts's validateSequence for the client-side bounds
    * checks, and hooks/useSequenceExpand.ts for the debounced POST
-   * /api/render/expand call that confirms it's actually printable. */
+   * /api/v1/render/expand call that confirms it's actually printable. */
   sequence: Sequence;
 
   setTapeWidthMm: (widthMm: number) => void;

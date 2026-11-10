@@ -31,14 +31,14 @@ function preset(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe("Presets page", () => {
   it("renders the empty state when there are no presets", async () => {
-    server.use(http.get("/api/presets", () => HttpResponse.json([])));
+    server.use(http.get("/api/v1/presets", () => HttpResponse.json([])));
     renderWithProviders(<Presets />);
 
     expect(await screen.findByText("No presets yet. Design a label and choose Save as preset to reuse it.")).toBeInTheDocument();
   });
 
   it("renders a card per preset from the mocked API, with type/tape/favorite", async () => {
-    server.use(http.get("/api/presets", () => HttpResponse.json([preset(), preset({ id: "preset-2", name: "Any tape design", tape_width_mm: null, favorite: true })])));
+    server.use(http.get("/api/v1/presets", () => HttpResponse.json([preset(), preset({ id: "preset-2", name: "Any tape design", tape_width_mm: null, favorite: true })])));
     renderWithProviders(<Presets />);
 
     expect(await screen.findByText("Rack uplink")).toBeInTheDocument();
@@ -48,11 +48,11 @@ describe("Presets page", () => {
     expect(screen.getByRole("button", { name: "Unmark Any tape design as favorite" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("search and type filter drive GET /api/presets' own query params", async () => {
+  it("search and type filter drive GET /api/v1/presets' own query params", async () => {
     const user = userEvent.setup();
     const seenQueries: URLSearchParams[] = [];
     server.use(
-      http.get("/api/presets", ({ request }) => {
+      http.get("/api/v1/presets", ({ request }) => {
         seenQueries.push(new URL(request.url).searchParams);
         return HttpResponse.json([preset()]);
       }),
@@ -69,7 +69,7 @@ describe("Presets page", () => {
 
   it("Load into designer sets the type/params/tape and navigates to /", async () => {
     const user = userEvent.setup();
-    server.use(http.get("/api/presets", () => HttpResponse.json([preset({ definition: { lines: ["FROM PRESET"] } })])));
+    server.use(http.get("/api/v1/presets", () => HttpResponse.json([preset({ definition: { lines: ["FROM PRESET"] } })])));
     renderWithProviders(<Presets />, { route: "/presets" });
 
     await user.click(await screen.findByRole("button", { name: "Load" }));
@@ -90,8 +90,8 @@ describe("Presets page", () => {
   it("Load into designer is disabled and never touches the store when the preset's label type isn't in the catalog", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/label-types", () => HttpResponse.json([])),
-      http.get("/api/presets", () => HttpResponse.json([preset()])),
+      http.get("/api/v1/label-types", () => HttpResponse.json([])),
+      http.get("/api/v1/presets", () => HttpResponse.json([preset()])),
     );
     renderWithProviders(<Presets />, { route: "/presets" });
 
@@ -110,8 +110,8 @@ describe("Presets page", () => {
   it("a failed print shows the WS event's own failure reason, not a bare FAILED chip", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/presets", () => HttpResponse.json([preset()])),
-      http.post("/api/presets/preset-1/print", () => HttpResponse.json({ job_id: "job-99" }, { status: 202 })),
+      http.get("/api/v1/presets", () => HttpResponse.json([preset()])),
+      http.post("/api/v1/presets/preset-1/print", () => HttpResponse.json({ job_id: "job-99" }, { status: 202 })),
     );
     renderWithProviders(<Presets />);
 
@@ -131,12 +131,12 @@ describe("Presets page", () => {
     const user = userEvent.setup();
     let posts = 0;
     server.use(
-      http.get("/api/presets", () => HttpResponse.json([preset()])),
-      http.post("/api/presets/preset-1/print", () => {
+      http.get("/api/v1/presets", () => HttpResponse.json([preset()])),
+      http.post("/api/v1/presets/preset-1/print", () => {
         posts++;
         return HttpResponse.json({ job_id: "job-dbl" }, { status: 202 });
       }),
-      http.get("/api/print/jobs/:jobId", () =>
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({ id: "job-dbl", created_at: "2026-07-27T00:00:00.000000Z", status: "printing", error: null, definition: {}, label_count: 1, chain_mode: "cut_each" }),
       ),
     );
@@ -163,8 +163,8 @@ describe("Presets page", () => {
     const user = userEvent.setup();
     let capturedBody: unknown;
     server.use(
-      http.get("/api/presets", () => HttpResponse.json([preset({ favorite: false })])),
-      http.put("/api/presets/preset-1", async ({ request }) => {
+      http.get("/api/v1/presets", () => HttpResponse.json([preset({ favorite: false })])),
+      http.put("/api/v1/presets/preset-1", async ({ request }) => {
         capturedBody = await request.json();
         return HttpResponse.json(preset({ favorite: true }));
       }),
@@ -179,8 +179,8 @@ describe("Presets page", () => {
     const user = userEvent.setup();
     const deleteSpy = vi.fn();
     server.use(
-      http.get("/api/presets", () => HttpResponse.json([preset()])),
-      http.delete("/api/presets/preset-1", () => {
+      http.get("/api/v1/presets", () => HttpResponse.json([preset()])),
+      http.delete("/api/v1/presets/preset-1", () => {
         deleteSpy();
         return new HttpResponse(null, { status: 204 });
       }),
@@ -208,9 +208,9 @@ describe("Presets page", () => {
   it("falls back to polling when no terminal WS event arrives, so the card leaves 'printing'", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/presets", () => HttpResponse.json([preset()])),
-      http.post("/api/presets/preset-1/print", () => HttpResponse.json({ job_id: "job-77" }, { status: 202 })),
-      // default /api/print/jobs/:id handler reports "done"
+      http.get("/api/v1/presets", () => HttpResponse.json([preset()])),
+      http.post("/api/v1/presets/preset-1/print", () => HttpResponse.json({ job_id: "job-77" }, { status: 202 })),
+      // default /api/v1/print/jobs/:id handler reports "done"
     );
     renderWithProviders(<Presets />);
 

@@ -10,7 +10,7 @@ from labelmaker.main import create_app
 
 
 async def test_printer_status_mock_mode_reports_connected_reference_status(client):
-    resp = await client.get("/api/printer/status")
+    resp = await client.get("/api/v1/printer/status")
     assert resp.status_code == 200
     body = resp.json()
 
@@ -28,7 +28,7 @@ async def test_printer_status_includes_a_keep_alive_block(client):
     # (connected/printer_mode/status/error), not replacing any of them.
     # keep_printer_awake defaults False (DB-only, no override stored), so
     # right after boot the poller has never actually attempted a poll yet.
-    resp = await client.get("/api/printer/status")
+    resp = await client.get("/api/v1/printer/status")
     assert resp.status_code == 200
     body = resp.json()
 
@@ -60,7 +60,7 @@ async def test_printer_status_usb_mode_no_device_reports_disconnected(tmp_path, 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/printer/status")
+            resp = await client.get("/api/v1/printer/status")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -91,10 +91,10 @@ async def test_printer_status_honors_a_db_override_over_the_config_printer_mode(
         "labelmaker.driver.transport.PyUsbTransport.open", staticmethod(_raise_not_found)
     )
 
-    resp = await client.put("/api/settings", json={"printer_mode": "usb"})
+    resp = await client.put("/api/v1/settings", json={"printer_mode": "usb"})
     assert resp.status_code == 200
 
-    resp = await client.get("/api/printer/status")
+    resp = await client.get("/api/v1/printer/status")
     assert resp.status_code == 200
     body = resp.json()
     assert body["connected"] is False

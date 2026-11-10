@@ -30,14 +30,14 @@ async function latestSocket() {
   return mockWebSocketInstances.at(-1)!;
 }
 
-/** The default `/api/print/jobs/:id` handler (test/msw/handlers.ts) always
+/** The default `/api/v1/print/jobs/:id` handler (test/msw/handlers.ts) always
  * reports "done" -- fine for tests that WANT the poll fallback to resolve
  * quickly, but every test here that means to observe an intermediate
  * "queued"/"printing" state (or drive it via WS instead) must override it,
  * or the poll fallback's own default "done" response races ahead of --
  * and wins against -- whatever this test is actually trying to observe. */
 function stillQueuedHandler(jobId: string) {
-  return http.get("/api/print/jobs/:jobId", () =>
+  return http.get("/api/v1/print/jobs/:jobId", () =>
     HttpResponse.json({
       id: jobId,
       created_at: "2026-07-27T00:00:00.000000Z",
@@ -62,9 +62,9 @@ describe("usePrintJob", () => {
 
   it("the 30s timeout restarts on every WS frame, so it only fires after 30s of silence", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-slow" }, { status: 202 })),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-slow" }, { status: 202 })),
       // Never answers -- only WS frames count as status activity here.
-      http.get("/api/print/jobs/:jobId", async () => {
+      http.get("/api/v1/print/jobs/:jobId", async () => {
         await delay("infinite");
         return HttpResponse.json({});
       }),
@@ -91,7 +91,7 @@ describe("usePrintJob", () => {
   it("submit POSTs the body and moves to queued once the job id comes back", async () => {
     let capturedBody: unknown;
     server.use(
-      http.post("/api/print", async ({ request }) => {
+      http.post("/api/v1/print", async ({ request }) => {
         capturedBody = await request.json();
         return HttpResponse.json({ job_id: "job-1" }, { status: 202 });
       }),
@@ -110,7 +110,7 @@ describe("usePrintJob", () => {
 
   it("job.started then job.progress over the WS stream move phase to printing and update the progress bytes", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-2" }, { status: 202 })),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-2" }, { status: 202 })),
       stillQueuedHandler("job-2"),
     );
 
@@ -129,10 +129,10 @@ describe("usePrintJob", () => {
 
   it("job.done over the WS stream resolves phase to done (no polling needed)", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-3" }, { status: 202 })),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-3" }, { status: 202 })),
       // Deliberately never reports a terminal status -- if this passes, the
       // "done" state came from the WS frame, not from polling.
-      http.get("/api/print/jobs/:jobId", () =>
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({
           id: "job-3",
           created_at: "2026-07-27T00:00:00.000000Z",
@@ -160,10 +160,10 @@ describe("usePrintJob", () => {
     await waitFor(() => expect(result.current.phase).toBe("done"));
   });
 
-  it("falls back to polling GET /api/print/jobs/:id when no WS frame ever arrives", async () => {
+  it("falls back to polling GET /api/v1/print/jobs/:id when no WS frame ever arrives", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-4" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () =>
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-4" }, { status: 202 })),
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({
           id: "job-4",
           created_at: "2026-07-27T00:00:00.000000Z",
@@ -190,8 +190,8 @@ describe("usePrintJob", () => {
 
   it("cancel() succeeds (200) while queued, setting a canceled terminal state", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-5" }, { status: 202 })),
-      http.post("/api/print/jobs/:jobId/cancel", () => HttpResponse.json({ status: "canceled" })),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-5" }, { status: 202 })),
+      http.post("/api/v1/print/jobs/:jobId/cancel", () => HttpResponse.json({ status: "canceled" })),
       stillQueuedHandler("job-5"),
     );
 
@@ -216,9 +216,9 @@ describe("usePrintJob", () => {
   // already flipped away from "queued".
   it("cancel() surfaces the server's 409 message inline when the job started printing just before the request landed", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-6" }, { status: 202 })),
-      http.post("/api/print/jobs/:jobId/cancel", () =>
-        HttpResponse.json({ detail: "cannot cancel job in status 'printing'" }, { status: 409 }),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-6" }, { status: 202 })),
+      http.post("/api/v1/print/jobs/:jobId/cancel", () =>
+        HttpResponse.json({ error: { code: "error", message: "cannot cancel job in status 'printing'" } }, { status: 409 }),
       ),
       stillQueuedHandler("job-6"),
     );
@@ -245,9 +245,9 @@ describe("usePrintJob", () => {
   // reaches an actual terminal outcome.
   it("cancel()'s 409 message survives the job.started transition that immediately follows it", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-10" }, { status: 202 })),
-      http.post("/api/print/jobs/:jobId/cancel", () =>
-        HttpResponse.json({ detail: "cannot cancel job in status 'printing'" }, { status: 409 }),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-10" }, { status: 202 })),
+      http.post("/api/v1/print/jobs/:jobId/cancel", () =>
+        HttpResponse.json({ error: { code: "error", message: "cannot cancel job in status 'printing'" } }, { status: 409 }),
       ),
       stillQueuedHandler("job-10"),
     );
@@ -287,7 +287,7 @@ describe("usePrintJob", () => {
   // (submittedCount included) is deliberately cleared together, since
   // nothing renders it once `phase` has left "done" anyway.
   it("submittedCount equals the printedCount passed to submit() once the job reaches done", async () => {
-    server.use(http.post("/api/print", () => HttpResponse.json({ job_id: "job-7" }, { status: 202 })));
+    server.use(http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-7" }, { status: 202 })));
 
     const { result } = renderHook(() => usePrintJob("2-items"), { wrapper: createWrapper() });
 
@@ -316,7 +316,7 @@ describe("usePrintJob", () => {
   // this hook's own docstring, and the mid-print-edit test further below
   // for the specific regression this reworking fixes.
   it("printedBodyStale goes true once bodyKey diverges from what was submitted, WITHOUT reverting phase/submittedCount/jobId away from the real done state", async () => {
-    server.use(http.post("/api/print", () => HttpResponse.json({ job_id: "job-8" }, { status: 202 })));
+    server.use(http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-8" }, { status: 202 })));
 
     const { result, rerender } = renderHook(({ bodyKey }) => usePrintJob(bodyKey), {
       initialProps: { bodyKey: "2-items" },
@@ -351,7 +351,7 @@ describe("usePrintJob", () => {
   // completion notice once job.done finally arrives.
   it("a body edit while printing (before done) does not prevent the done state from landing once job.done arrives", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-mid" }, { status: 202 })),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-mid" }, { status: 202 })),
       stillQueuedHandler("job-mid"),
     );
 
@@ -382,8 +382,8 @@ describe("usePrintJob", () => {
 
   it("a failed (not done) job's phase is untouched by a later bodyKey change", async () => {
     server.use(
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-9" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () =>
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-9" }, { status: 202 })),
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({
           id: "job-9",
           created_at: "2026-07-27T00:00:00.000000Z",

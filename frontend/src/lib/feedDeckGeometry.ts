@@ -1,5 +1,5 @@
 /** Default on-screen px per physical mm -- applied to physical mm values
- * ONLY (length_mm, a tape's nominal_mm/print_mm from /api/tapes), NEVER to
+ * ONLY (length_mm, a tape's nominal_mm/print_mm from /api/v1/tapes), NEVER to
  * png_width_px/png_height_px (those are SCALED device-dot dimensions --
  * see api/types.ts's PreviewResponse doc, the "unit trap" this whole
  * module is built around avoiding). This is the one arithmetic constant
@@ -23,7 +23,7 @@ export interface FeedDeckGeometry {
    * not the printable band. */
   stripHeightPx: number;
   /** The printable band's height, inset within the strip -- from
-   * /api/tapes' print_mm (device print dots converted to mm), always less
+   * /api/v1/tapes' print_mm (device print dots converted to mm), always less
    * than the nominal width (a 24mm tape prints 128 dots ~= 18.1mm). */
   printableHeightPx: number;
   /** The unprintable margin's height, one on each side of the printable

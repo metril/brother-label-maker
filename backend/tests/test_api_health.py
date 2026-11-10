@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 async def test_health_reports_ok_and_printer_mode(client):
-    resp = await client.get("/api/health")
+    resp = await client.get("/api/v1/health")
     assert resp.status_code == 200
     body = resp.json()
     # task 4.2: `version` is additive (the diagnostics page's "App" section
@@ -24,16 +24,16 @@ async def test_health_reports_a_db_override_printer_mode(client):
     # WAS already honored by the actual print path -- the diagnostics page
     # would show a stale mode. It now reads `app.state.settings.effective()`
     # the same as GET /api/printer/status.
-    resp = await client.put("/api/settings", json={"printer_mode": "usb"})
+    resp = await client.put("/api/v1/settings", json={"printer_mode": "usb"})
     assert resp.status_code == 200
 
-    resp = await client.get("/api/health")
+    resp = await client.get("/api/v1/health")
     assert resp.status_code == 200
     assert resp.json()["printer_mode"] == "usb"
 
 
 async def test_label_types_contains_text_with_schema(client):
-    resp = await client.get("/api/label-types")
+    resp = await client.get("/api/v1/label-types")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
@@ -54,7 +54,7 @@ async def test_label_types_lists_eleven_types_with_categories(client):
     # own "homebox" group -- exactly these eleven (the registry-isolation
     # fixture in conftest.py, see test_render_registry.py, keeps test-only
     # "dummy" types from leaking into this count).
-    resp = await client.get("/api/label-types")
+    resp = await client.get("/api/v1/label-types")
     body = resp.json()
     by_type = {t["type"]: t for t in body}
     assert by_type.keys() == {

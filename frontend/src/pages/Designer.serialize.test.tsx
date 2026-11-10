@@ -34,7 +34,7 @@ describe("Designer + serialization -- Print button label and request body", () =
     const user = userEvent.setup();
     let capturedBody: unknown;
     server.use(
-      http.post("/api/print", async ({ request }) => {
+      http.post("/api/v1/print", async ({ request }) => {
         capturedBody = await request.json();
         return HttpResponse.json({ job_id: "job-plain" }, { status: 202 });
       }),
@@ -66,7 +66,7 @@ describe("Designer + serialization -- Print button label and request body", () =
     const user = userEvent.setup();
     let capturedBody: { serialization?: { kind: string; count: number } } | undefined;
     server.use(
-      http.post("/api/print", async ({ request }) => {
+      http.post("/api/v1/print", async ({ request }) => {
         capturedBody = (await request.json()) as typeof capturedBody;
         return HttpResponse.json({ job_id: "job-serialized" }, { status: 202 });
       }),
@@ -136,12 +136,12 @@ describe("Designer + serialization -- over-cap blocks print", () => {
 // SAME live `sequence` snapshot, so a request already known (client-side)
 // to be invalid is never sent, even transiently mid-edit.
 describe("Designer + serialization -- no stale/mismatched serialization ever reaches preview or estimate (I2 regression)", () => {
-  it("pushing Count out of bounds after a confirmed run never sends that invalid count to /api/render/preview or /api/print/estimate", async () => {
+  it("pushing Count out of bounds after a confirmed run never sends that invalid count to /api/v1/render/preview or /api/v1/print/estimate", async () => {
     const user = userEvent.setup();
     const previewSerializations: ({ count?: number } | null)[] = [];
     const estimateSerializations: ({ count?: number } | null)[] = [];
     server.use(
-      http.post("/api/render/preview", async ({ request }) => {
+      http.post("/api/v1/render/preview", async ({ request }) => {
         const body = (await request.json()) as { serialization?: { count?: number } };
         previewSerializations.push(body.serialization ?? null);
         return HttpResponse.json({
@@ -155,7 +155,7 @@ describe("Designer + serialization -- no stale/mismatched serialization ever rea
           sequence_value: body.serialization ? "01" : null,
         });
       }),
-      http.post("/api/print/estimate", async ({ request }) => {
+      http.post("/api/v1/print/estimate", async ({ request }) => {
         const body = (await request.json()) as { serialization?: { count?: number } };
         estimateSerializations.push(body.serialization ?? null);
         return HttpResponse.json({
@@ -205,7 +205,7 @@ describe("Designer + serialization -- preview index stepper", () => {
     const user = userEvent.setup();
     const seenIndices: number[] = [];
     server.use(
-      http.post("/api/render/preview", async ({ request }) => {
+      http.post("/api/v1/render/preview", async ({ request }) => {
         const body = (await request.json()) as { serialization?: unknown; index?: number };
         const index = body.serialization ? (body.index ?? 0) : 0;
         seenIndices.push(index);
@@ -231,8 +231,8 @@ describe("Designer + serialization -- preview index stepper", () => {
     await user.type(count, "3");
 
     // The stepper appears once the run has resolved (total_labels known,
-    // from /api/render/expand); the sequence_value chip lands slightly
-    // later, off the SEPARATE (also debounced) /api/render/preview call.
+    // from /api/v1/render/expand); the sequence_value chip lands slightly
+    // later, off the SEPARATE (also debounced) /api/v1/render/preview call.
     await waitFor(() => expect(screen.getByText("1 / 3")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByLabelText("Previous label")).toBeDisabled();
     await waitFor(() => expect(screen.getByText("01")).toBeInTheDocument(), { timeout: 3000 });

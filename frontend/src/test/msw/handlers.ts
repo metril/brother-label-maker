@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import type { components } from "../../api/schema";
 import type { SettingRow, SettingsResponse, SettingsSource } from "../../api/types";
 import fontsFixture from "../fixtures/fonts.json";
 import labelTypesFixture from "../fixtures/label-types.json";
@@ -10,23 +11,27 @@ import tapesFixture from "../fixtures/tapes.json";
 export const TINY_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
-export const healthHandler = http.get("/api/health", () =>
-  HttpResponse.json({ status: "ok", printer_mode: "mock", version: "0.1.0" }),
+export const healthHandler = http.get("/api/v1/health", () =>
+  HttpResponse.json({
+    status: "ok",
+    printer_mode: "mock",
+    version: "0.1.0",
+  } satisfies components["schemas"]["HealthOut"]),
 );
 
 /** Real params_schema JSON Schema for all 9 label types -- fixtured from a
  * live backend (scripts/gen-fixtures.mjs), NOT hand-written. Regenerate
  * with `npm run fixtures` (backend must be running) whenever a Params
  * model's shape changes. */
-export const labelTypesHandler = http.get("/api/label-types", () => HttpResponse.json(labelTypesFixture));
+export const labelTypesHandler = http.get("/api/v1/label-types", () => HttpResponse.json(labelTypesFixture));
 
 /** Mirrors backend/render/fonts.py's bundled four families exactly (B2:
- * GET /api/fonts) -- FontFamilyField's <select> renders from this. */
-export const fontsHandler = http.get("/api/fonts", () => HttpResponse.json(fontsFixture));
+ * GET /api/v1/fonts) -- FontFamilyField's <select> renders from this. */
+export const fontsHandler = http.get("/api/v1/fonts", () => HttpResponse.json(fontsFixture));
 
 /** Mirrors backend/driver/geometry.py's all_tapes() exactly (all 15, TZe +
- * HSe -- B2: GET /api/tapes). TapeSelector filters this down by family. */
-export const tapesHandler = http.get("/api/tapes", () => HttpResponse.json(tapesFixture));
+ * HSe -- B2: GET /api/v1/tapes). TapeSelector filters this down by family. */
+export const tapesHandler = http.get("/api/v1/tapes", () => HttpResponse.json(tapesFixture));
 
 /** How many entries to keep per (category, source) bucket when building the
  * trimmed default symbols slice below -- see `trimmedSymbolsFixture`'s own
@@ -39,7 +44,7 @@ const TRIMMED_SYMBOLS_PER_BUCKET = 8;
 /** H9 (the 2026-08 code review): the symbols fixture grew 858 -> 8362
  * entries (2.1 MB) this round, and every one of the 48 test files pulls it
  * in through this module's `defaultHandlers`. Re-serializing all 8362
- * objects on every `GET /api/symbols` (plus react-query's structural
+ * objects on every `GET /api/v1/symbols` (plus react-query's structural
  * sharing and jsdom rendering ~96 `<img>` grid cells on first paint) pushed
  * the three symbol-catalog suites (SymbolBrowser/Library/IconField) right
  * up against testing-library's 1000ms `findBy` default -- reproduced at
@@ -83,30 +88,30 @@ export const trimmedSymbolsFixture = buildTrimmedSymbolsSlice(symbolsFixture);
 /** Serves the trimmed slice above by default -- see its comment for why.
  * Tests that specifically need the full 8362-entry catalog (the H9 scale
  * test) override this with `server.use(...)`. */
-export const symbolsHandler = http.get("/api/symbols", () => HttpResponse.json(trimmedSymbolsFixture));
+export const symbolsHandler = http.get("/api/v1/symbols", () => HttpResponse.json(trimmedSymbolsFixture));
 
-export const symbolSvgHandler = http.get("/api/symbols/:id", () =>
+export const symbolSvgHandler = http.get("/api/v1/symbols/:id", () =>
   HttpResponse.xml('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>'),
 );
 
-export const uploadImageHandler = http.post("/api/images", () =>
+export const uploadImageHandler = http.post("/api/v1/images", () =>
   HttpResponse.json({ image_id: "img-1", width: 64, height: 64 }, { status: 201 }),
 );
 
-/** task D2a: GET/DELETE /api/images (the Uploads library) -- an empty
+/** task D2a: GET/DELETE /api/v1/images (the Uploads library) -- an empty
  * default so every existing suite that happens to mount UploadsGallery (or
  * anything that queries ["images", ...]) stays green without needing to
  * know about it; UploadsGallery.test.tsx overrides both with server.use(...)
  * for the scenarios it actually asserts on, same convention as everywhere
  * else in this file. */
-export const imagesListHandler = http.get("/api/images", () =>
+export const imagesListHandler = http.get("/api/v1/images", () =>
   HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 }),
 );
 
-export const deleteImageHandler = http.delete("/api/images/:id", () => new HttpResponse(null, { status: 204 }));
+export const deleteImageHandler = http.delete("/api/v1/images/:id", () => new HttpResponse(null, { status: 204 }));
 
 /** commit 6: the keep-awake poller's own status block, additive on GET
- * /api/printer/status -- "never enabled, never attempted" is the realistic
+ * /api/v1/printer/status -- "never enabled, never attempted" is the realistic
  * default for most tests (this fixture's own printer_mode is "mock", where
  * the poller is inert by design). Diagnostics.test.tsx overrides this via
  * server.use(...) for the scenarios it actually asserts on. */
@@ -117,7 +122,7 @@ export const inertKeepAliveStatus = {
   last_error: null,
 };
 
-export const printerStatusConnectedHandler = http.get("/api/printer/status", () =>
+export const printerStatusConnectedHandler = http.get("/api/v1/printer/status", () =>
   HttpResponse.json({
     connected: true,
     printer_mode: "mock",
@@ -144,20 +149,22 @@ export const printerStatusConnectedHandler = http.get("/api/printer/status", () 
       is_e720bt: true,
     },
     error: null,
+    error_code: null,
   }),
 );
 
-export const printerStatusDisconnectedHandler = http.get("/api/printer/status", () =>
+export const printerStatusDisconnectedHandler = http.get("/api/v1/printer/status", () =>
   HttpResponse.json({
     connected: false,
     printer_mode: "usb",
     status: null,
     error: "printer not found",
+    error_code: "printer_disconnected",
     keep_alive: inertKeepAliveStatus,
   }),
 );
 
-export const previewHandler = http.post("/api/render/preview", () =>
+export const previewHandler = http.post("/api/v1/render/preview", () =>
   HttpResponse.json({
     png_b64: TINY_PNG_B64,
     png_width_px: 200,
@@ -170,7 +177,7 @@ export const previewHandler = http.post("/api/render/preview", () =>
   }),
 );
 
-export const printEstimateHandler = http.post("/api/print/estimate", () =>
+export const printEstimateHandler = http.post("/api/v1/print/estimate", () =>
   HttpResponse.json({
     label_count: 1,
     label_lengths_mm: [25.4],
@@ -182,7 +189,7 @@ export const printEstimateHandler = http.post("/api/print/estimate", () =>
   }),
 );
 
-/** Track C2: POST /api/print/preview -- a small, deterministic 2-segment
+/** Track C2: POST /api/v1/print/preview -- a small, deterministic 2-segment
  * composite (a 1x1 TINY_PNG_B64 stand-in for the real composited strip),
  * enough for ChainedPreviewDialog's own tests to assert PNG + segment
  * count + stats without depending on a real per-label render. Echoes the
@@ -191,7 +198,7 @@ export const printEstimateHandler = http.post("/api/print/estimate", () =>
  * tabs is observable in the response; individual tests override with
  * server.use(...) for other segment-count/warnings scenarios, same
  * convention as printEstimateHandler above. */
-export const printPreviewHandler = http.post("/api/print/preview", async ({ request }) => {
+export const printPreviewHandler = http.post("/api/v1/print/preview", async ({ request }) => {
   const body = (await request.json()) as { options?: { chain_mode?: string } };
   const chainMode = body.options?.chain_mode ?? "cut_each";
   return HttpResponse.json({
@@ -210,11 +217,11 @@ export const printPreviewHandler = http.post("/api/print/preview", async ({ requ
   });
 });
 
-export const printHandler = http.post("/api/print", () =>
+export const printHandler = http.post("/api/v1/print", () =>
   HttpResponse.json({ job_id: "job-1" }, { status: 202 }),
 );
 
-export const printJobDoneHandler = http.get("/api/print/jobs/:jobId", ({ params }) =>
+export const printJobDoneHandler = http.get("/api/v1/print/jobs/:jobId", ({ params }) =>
   HttpResponse.json({
     id: params.jobId,
     created_at: "2026-07-27T00:00:00.000000Z",
@@ -231,7 +238,7 @@ export const printJobDoneHandler = http.get("/api/print/jobs/:jobId", ({ params 
   }),
 );
 
-// -- task 2.11: POST /api/render/expand + POST /api/serialize/csv --
+// -- task 2.11: POST /api/v1/render/expand + POST /api/v1/serialize/csv --
 // Reimplements just enough of backend/render/serialize.py's expansion
 // model (sequence_values/effective_count/total_labels/expand_tokens) in
 // JS to give SequenceEditor/Designer's serialization tests a REALISTIC
@@ -311,20 +318,24 @@ function mockExpandTokens(text: string, value: string, row: Record<string, strin
   });
 }
 
-export const expandHandler = http.post("/api/render/expand", async ({ request }) => {
+export const expandHandler = http.post("/api/v1/render/expand", async ({ request }) => {
   const body = (await request.json()) as { serialization: MockSequence; sample?: string | null };
   const seq = body.serialization;
   const total = mockTotalLabels(seq);
   if (total > 1000) {
     return HttpResponse.json(
       {
-        detail: [
+        error: {
+          code: "validation_error",
+          message: "request validation failed",
+          details: [
           {
             loc: ["body", "serialization"],
             msg: `Value error, total labels ${total} (${mockEffectiveCount(seq)} values x ${seq.copies_per_value ?? 1} copies) exceeds the 1000 maximum`,
             type: "value_error",
           },
-        ],
+          ],
+        },
       },
       { status: 422 },
     );
@@ -344,7 +355,7 @@ export const expandHandler = http.post("/api/render/expand", async ({ request })
 // specific uploaded CONTENT override with server.use(...) for that one
 // case and assert on the request having been made / on the UI's reaction
 // to a canned response, not on round-tripping the real file bytes.
-export const serializeCsvHandler = http.post("/api/serialize/csv", () =>
+export const serializeCsvHandler = http.post("/api/v1/serialize/csv", () =>
   HttpResponse.json({
     columns: ["port", "label"],
     rows: [
@@ -355,24 +366,24 @@ export const serializeCsvHandler = http.post("/api/serialize/csv", () =>
   }),
 );
 
-/** task 2.12: POST /api/print/jobs/:jobId/cancel -- default handler assumes
+/** task 2.12: POST /api/v1/print/jobs/:jobId/cancel -- default handler assumes
  * the job is still queued (200/{status:"canceled"}); individual tests
  * override with server.use() for the 409 ("already printing")/404 (unknown
  * id) cases per router_print.py's cancel_print_job. */
-export const cancelPrintJobHandler = http.post("/api/print/jobs/:jobId/cancel", () =>
+export const cancelPrintJobHandler = http.post("/api/v1/print/jobs/:jobId/cancel", () =>
   HttpResponse.json({ status: "canceled" }),
 );
 
-/** Feed & cut design doc (2026-08-04): POST /api/printer/cut -- default
+/** Feed & cut design doc (2026-08-04): POST /api/v1/printer/cut -- default
  * handler assumes success (same 202 `{job_id}` shape as printHandler
  * above); hooks/useFeedCut.test.tsx / TrayPanel.test.tsx / Diagnostics.test.tsx
  * override with server.use(...) for the failure/pending scenarios they
  * actually assert on, same convention as everywhere else in this file. */
-export const printerCutHandler = http.post("/api/printer/cut", () =>
+export const printerCutHandler = http.post("/api/v1/printer/cut", () =>
   HttpResponse.json({ job_id: "feed-cut-job-1" }, { status: 202 }),
 );
 
-export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ params }) =>
+export const printJobFailedHandler = http.get("/api/v1/print/jobs/:jobId", ({ params }) =>
   HttpResponse.json({
     id: params.jobId,
     created_at: "2026-07-27T00:00:00.000000Z",
@@ -398,9 +409,9 @@ export const printJobFailedHandler = http.get("/api/print/jobs/:jobId", ({ param
 
 let mockPresetSeq = 0;
 
-export const presetsListHandler = http.get("/api/presets", () => HttpResponse.json([]));
+export const presetsListHandler = http.get("/api/v1/presets", () => HttpResponse.json([]));
 
-export const createPresetHandler = http.post("/api/presets", async ({ request }) => {
+export const createPresetHandler = http.post("/api/v1/presets", async ({ request }) => {
   const body = (await request.json()) as Record<string, unknown>;
   mockPresetSeq += 1;
   return HttpResponse.json(
@@ -419,7 +430,7 @@ export const createPresetHandler = http.post("/api/presets", async ({ request })
   );
 });
 
-export const updatePresetHandler = http.put("/api/presets/:id", async ({ params, request }) => {
+export const updatePresetHandler = http.put("/api/v1/presets/:id", async ({ params, request }) => {
   const body = (await request.json()) as Record<string, unknown>;
   return HttpResponse.json({
     id: params.id,
@@ -434,17 +445,17 @@ export const updatePresetHandler = http.put("/api/presets/:id", async ({ params,
   });
 });
 
-export const deletePresetHandler = http.delete("/api/presets/:id", () => new HttpResponse(null, { status: 204 }));
+export const deletePresetHandler = http.delete("/api/v1/presets/:id", () => new HttpResponse(null, { status: 204 }));
 
-export const printPresetHandler = http.post("/api/presets/:id/print", () =>
+export const printPresetHandler = http.post("/api/v1/presets/:id/print", () =>
   HttpResponse.json({ job_id: "preset-print-job-1" }, { status: 202 }),
 );
 
-export const historyListHandler = http.get("/api/history", () =>
+export const historyListHandler = http.get("/api/v1/history", () =>
   HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 }),
 );
 
-export const historyDetailHandler = http.get("/api/history/:id", ({ params }) =>
+export const historyDetailHandler = http.get("/api/v1/history/:id", ({ params }) =>
   HttpResponse.json({
     id: params.id,
     created_at: "2026-07-27T00:00:00.000000Z",
@@ -464,11 +475,11 @@ export const historyDetailHandler = http.get("/api/history/:id", ({ params }) =>
   }),
 );
 
-export const reprintHistoryHandler = http.post("/api/history/:id/reprint", () =>
+export const reprintHistoryHandler = http.post("/api/v1/history/:id/reprint", () =>
   HttpResponse.json({ job_id: "reprint-job-1" }, { status: 202 }),
 );
 
-export const deleteHistoryHandler = http.delete("/api/history/:id", () => new HttpResponse(null, { status: 204 }));
+export const deleteHistoryHandler = http.delete("/api/v1/history/:id", () => new HttpResponse(null, { status: 204 }));
 
 // -- task 3.4: HomeBox proxy routes --
 // A "configured, reachable, healthy" default (AppShell mounts
@@ -480,34 +491,34 @@ export const deleteHistoryHandler = http.delete("/api/history/:id", () => new Ht
 // with server.use(...) for the scenarios it actually exercises, same
 // convention as everywhere else in this file.
 
-export const homeboxStatusConfiguredHandler = http.get("/api/homebox/status", () =>
+export const homeboxStatusConfiguredHandler = http.get("/api/v1/homebox/status", () =>
   HttpResponse.json({ configured: true, reachable: true, healthy: true, version: "0.26.2", error: null }),
 );
 
-export const homeboxTreeHandler = http.get("/api/homebox/entities/tree", () => HttpResponse.json([]));
+export const homeboxTreeHandler = http.get("/api/v1/homebox/entities/tree", () => HttpResponse.json([]));
 
-export const homeboxEntityTypesHandler = http.get("/api/homebox/entity-types", () => HttpResponse.json([]));
+export const homeboxEntityTypesHandler = http.get("/api/v1/homebox/entity-types", () => HttpResponse.json([]));
 
-export const homeboxEntitiesHandler = http.get("/api/homebox/entities", () =>
+export const homeboxEntitiesHandler = http.get("/api/v1/homebox/entities", () =>
   HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 }),
 );
 
-export const homeboxEntityPathHandler = http.get("/api/homebox/entities/:id/path", ({ params }) =>
+export const homeboxEntityPathHandler = http.get("/api/v1/homebox/entities/:id/path", ({ params }) =>
   HttpResponse.json([{ id: params.id, name: "Entity", type: "item" }]),
 );
 
-export const homeboxAssetMatchesHandler = http.get("/api/homebox/assets/:assetId", () => HttpResponse.json([]));
+export const homeboxAssetMatchesHandler = http.get("/api/v1/homebox/assets/:assetId", () => HttpResponse.json([]));
 
-export const homeboxSettingsHandler = http.get("/api/homebox/settings", () =>
+export const homeboxSettingsHandler = http.get("/api/v1/homebox/settings", () =>
   HttpResponse.json({ qr_base_url: null, effective_qr_base_url: null }),
 );
 
-/** PUT /api/homebox/settings (task 4.2's Settings page) -- a default that
+/** PUT /api/v1/homebox/settings (task 4.2's Settings page) -- a default that
  * just echoes the posted value back as both fields (mirroring
  * router_homebox.py's own no-config-fallback shape when config.homebox_url
  * is unset); pages/Settings.test.tsx overrides with server.use(...) for
  * the "captured request body" and "422" scenarios it actually asserts on. */
-export const putHomeboxSettingsHandler = http.put("/api/homebox/settings", async ({ request }) => {
+export const putHomeboxSettingsHandler = http.put("/api/v1/homebox/settings", async ({ request }) => {
   const body = (await request.json()) as { qr_base_url: string | null };
   return HttpResponse.json({ qr_base_url: body.qr_base_url, effective_qr_base_url: body.qr_base_url });
 });
@@ -519,16 +530,16 @@ export const putHomeboxSettingsHandler = http.put("/api/homebox/settings", async
 // AppShell.test.tsx overrides with server.use(...) for the oidc-mode
 // scenarios it actually exercises.
 
-export const authMeNoneHandler = http.get("/api/auth/me", () =>
+export const authMeNoneHandler = http.get("/api/v1/auth/me", () =>
   HttpResponse.json({ auth_mode: "none", authenticated: true, user: null }),
 );
 
 export const authLogoutHandler = http.post(
-  "/api/auth/logout",
+  "/api/v1/auth/logout",
   () => new HttpResponse(null, { status: 204 }),
 );
 
-// -- task 4.5: GET/PUT /api/settings (the DB-backed settings overlay) --
+// -- task 4.5: GET/PUT /api/v1/settings (the DB-backed settings overlay) --
 // A realistic "everything at its class default, nothing overridden yet"
 // shape mirroring backend/settings_overlay.py's own row contract (note
 // printer_flip_pins defaults TRUE here since the 2026-07-28 hardware
@@ -565,14 +576,14 @@ export const defaultSettingsBody: SettingsResponse = {
   ],
 };
 
-export const bridgeIdentityHandler = http.get("/api/printer/bridge-identity", () =>
+export const bridgeIdentityHandler = http.get("/api/v1/printer/bridge-identity", () =>
   HttpResponse.json({
     cert_pem: "-----BEGIN CERTIFICATE-----\nAPPCERT\n-----END CERTIFICATE-----\n",
     fingerprint: "ab12cd34",
   }),
 );
 
-export const getSettingsHandler = http.get("/api/settings", () => HttpResponse.json(defaultSettingsBody));
+export const getSettingsHandler = http.get("/api/v1/settings", () => HttpResponse.json(defaultSettingsBody));
 
 /** A default that just echoes each posted field back into the canned GET
  * body's own rows, marking it `source: "db"` (or reverting to `"default"`
@@ -581,7 +592,7 @@ export const getSettingsHandler = http.get("/api/settings", () => HttpResponse.j
  * pages/Settings.test.tsx overrides with server.use(...) for the scenarios
  * it actually asserts on (captured request body, a 422, a specific
  * provenance readout). */
-export const putSettingsHandler = http.put("/api/settings", async ({ request }) => {
+export const putSettingsHandler = http.put("/api/v1/settings", async ({ request }) => {
   const body = (await request.json()) as Record<string, string | number | boolean | null>;
   const rows: SettingRow[] = defaultSettingsBody.settings.map((row) => {
     if (!(row.key in body)) return row;
@@ -599,6 +610,25 @@ export const putSettingsHandler = http.put("/api/settings", async ({ request }) 
  * fonts/tapes/symbols/printer-status) plus preview/estimate/print/presets/
  * history/homebox -- individual tests override with server.use(...) for the
  * scenario they care about. */
+// -- API keys (Settings page) --
+export const listApiKeysHandler = http.get("/api/v1/api-keys", () => HttpResponse.json([]));
+export const createApiKeyHandler = http.post("/api/v1/api-keys", async ({ request }) => {
+  const body = (await request.json()) as { name: string; scope: "read" | "write" };
+  return HttpResponse.json(
+    {
+      id: "k1",
+      name: body.name,
+      prefix: "abcd1234",
+      scope: body.scope,
+      created_at: "2026-11-10T00:00:00Z",
+      last_used_at: null,
+      key: "lm_abcd1234-secret-plaintext",
+    },
+    { status: 201 },
+  );
+});
+export const revokeApiKeyHandler = http.delete("/api/v1/api-keys/:id", () => new HttpResponse(null, { status: 204 }));
+
 export const defaultHandlers = [
   healthHandler,
   labelTypesHandler,
@@ -641,4 +671,7 @@ export const defaultHandlers = [
   authLogoutHandler,
   getSettingsHandler,
   putSettingsHandler,
+  listApiKeysHandler,
+  createApiKeyHandler,
+  revokeApiKeyHandler,
 ];

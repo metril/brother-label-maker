@@ -53,7 +53,12 @@ Two consequences that would break if this order were "simplified":
     label" button in an oidc-mode deployment for no security benefit
     (HomeBox has no way to present a browser session cookie).
 
-Every other `/api/*` route requires a valid session: a request without one
+API keys (task: `Authorization: Bearer lm_...`, see api/api_keys.py) are an
+alternative to the session cookie, and a single-use `?ticket=` (POST
+/ws-ticket) authenticates the websocket. `read`-scoped keys get 403 on any
+non-GET/HEAD/OPTIONS request. Handlers see `scope["auth_kind"] == "api_key"`.
+
+Every other `/api/*` route requires a valid session or API key: a request without one
 gets a 401 JSON body (never a redirect -- this is an API surface the SPA's
 own `fetch()` calls consume, and a redirect there is invisible to
 application code, see frontend/src/api/client.ts's `request()`). A
@@ -68,20 +73,68 @@ an unauthenticated client is never registered with the EventBus at all.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
+from urllib.parse import parse_qs
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from labelmaker.api import api_keys
+
 _EXEMPT_EXACT = {"/api/health"}
 _EXEMPT_PREFIXES = ("/api/auth/", "/api/els/")
+# FastAPI's interactive docs and schema: gated in oidc mode like the API itself.
+_DOC_PATHS = frozenset({"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"})
 
-_UNAUTHENTICATED_BODY = json.dumps({"detail": "authentication required"}).encode()
+logger = logging.getLogger(__name__)
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _envelope_body(code: str, message: str) -> bytes:
+    return json.dumps({"error": {"code": code, "message": message, "details": None}}).encode()
+
+
+_UNAUTHENTICATED_BODY = _envelope_body("auth_required", "authentication required")
+_READ_ONLY_BODY = _envelope_body("forbidden", "this API key is read-only")
+
+
+def _bearer_token(scope: Scope) -> str | None:
+    for name, value in scope.get("headers", []):
+        if name == b"authorization":
+            scheme, _, token = value.decode("latin-1").partition(" ")
+            if scheme.lower() == "bearer" and token.strip().startswith(api_keys.KEY_PREFIX):
+                return token.strip()
+            return None
+    return None
+
+
+async def _send_json(send: Send, status: int, body: bytes) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+def _normalize(path: str) -> str:
+    """Map `/api/v1/...` onto `/api/...` so the exempt list applies
+    identically under both the canonical and the legacy prefix."""
+    if path == "/api/v1" or path.startswith("/api/v1/"):
+        return "/api" + path[len("/api/v1") :]
+    return path
 
 
 def requires_auth(path: str) -> bool:
     """True for every `/api/*` path except the exemptions documented in this
     module's own docstring; always False for anything outside `/api/*`."""
+    if path in _DOC_PATHS:
+        return True
+    path = _normalize(path)
     if not path.startswith("/api/"):
         return False
     if path in _EXEMPT_EXACT or path.startswith(_EXEMPT_PREFIXES):
@@ -134,22 +187,45 @@ class AuthGateMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if scope["type"] == "websocket":
+        app_state = scope["app"].state
+        is_ws = scope["type"] == "websocket"
+
+        # Machine clients: `Authorization: Bearer lm_...` (never a query param).
+        token = _bearer_token(scope)
+        if token is not None:
+            row = await api_keys.verify_key(app_state.db, token)
+            if row is None:
+                # Never log the key itself; the prefix is the lookup handle only.
+                logger.info("rejected API key: prefix=%s", api_keys.lookup_prefix(token))
+            elif (
+                not is_ws
+                and row["scope"] == "read"
+                and scope["method"] not in _SAFE_METHODS
+                and _normalize(scope["path"]) != "/api/ws-ticket"  # read keys may watch events
+            ):
+                await _send_json(send, 403, _READ_ONLY_BODY)
+                return
+            else:
+                await api_keys.touch(app_state.db, row["id"])
+                scope["auth_kind"] = "api_key"
+                await self.app(scope, receive, send)
+                return
+
+        # WebSocket ticket from POST /ws-ticket: single use, 60 s.
+        if is_ws and _normalize(scope["path"]) == "/api/ws":
+            query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
+            ticket = (query.get("ticket") or [""])[0]
+            if ticket and app_state.ws_tickets.consume(ticket):
+                scope["auth_kind"] = "api_key"
+                await self.app(scope, receive, send)
+                return
+
+        if is_ws:
             # Sent WITHOUT ever calling `receive()`/accepting first -- the
             # same "reject before accept" pattern Starlette's own
-            # AuthenticationMiddleware uses (see starlette.middleware.
-            # authentication and starlette.websockets.WebSocketClose). 4401
-            # is a private-use close code (the 4000-4999 range is reserved
-            # for application use by RFC 6455) chosen to read unambiguously
-            # as "401, but for a websocket" in client-side logs.
+            # AuthenticationMiddleware uses. 4401 is a private-use close code
+            # (4000-4999 is reserved for applications) reading as "401 for ws".
             await send({"type": "websocket.close", "code": 4401})
             return
 
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 401,
-                "headers": [(b"content-type", b"application/json")],
-            }
-        )
-        await send({"type": "http.response.body", "body": _UNAUTHENTICATED_BODY})
+        await _send_json(send, 401, _UNAUTHENTICATED_BODY)

@@ -82,7 +82,7 @@ async def test_preview_total_mm_matches_estimate_exactly(client, lengths_mm, cha
     labels = [_text_label(f"L{i}", length_mm=length) for i, length in enumerate(lengths_mm)]
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": labels, "options": {"chain_mode": chain_mode, "margin_mm": margin_mm}},
     )
     assert resp.status_code == 200
@@ -120,7 +120,7 @@ async def test_preview_composite_pixel_width_per_mode(client, chain_mode):
     expected_width = sum(widths_px) + gap_dots * (len(labels) - 1)
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": labels, "options": {"chain_mode": chain_mode}, "scale": 1},
     )
     assert resp.status_code == 200
@@ -137,7 +137,7 @@ async def test_preview_scale_multiplies_composite_pixel_dimensions(client):
     expected_width_scale1 = sum(widths_px)  # chain_ff: butted, zero gap
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": labels, "options": {"chain_mode": "chain_ff"}, "scale": 3},
     )
     assert resp.status_code == 200
@@ -154,7 +154,7 @@ async def test_preview_strip_marks_dash_cadence_pixel_pattern(client):
     width0_px = _rendered_width_px(labels[0])
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": labels, "options": {"chain_mode": "strip_marks"}, "scale": 1},
     )
     assert resp.status_code == 200
@@ -187,13 +187,16 @@ async def test_preview_rejects_mixed_tapes_with_422_matching_print_message(clien
         _text_label("ONE"),
         {**_text_label("TWO"), "tape": {"width_mm": 12, "family": "tze"}},
     ]
-    print_resp = await client.post("/api/print", json={"labels": labels})
+    print_resp = await client.post("/api/v1/print", json={"labels": labels})
     assert print_resp.status_code == 422
 
-    preview_resp = await client.post("/api/print/preview", json={"labels": labels})
+    preview_resp = await client.post("/api/v1/print/preview", json={"labels": labels})
     assert preview_resp.status_code == 422
-    assert preview_resp.json()["detail"] == print_resp.json()["detail"]
-    assert preview_resp.json()["detail"] == "all labels in a print job must share the same tape"
+    assert preview_resp.json()["error"]["message"] == print_resp.json()["error"]["message"]
+    assert (
+        preview_resp.json()["error"]["message"]
+        == "all labels in a print job must share the same tape"
+    )
 
 
 # --- (e) single label -> 1 segment, no gaps ---------------------------------
@@ -204,7 +207,7 @@ async def test_preview_single_label_one_segment_no_gaps(client):
     width_px = _rendered_width_px(label)
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": [label], "options": {"chain_mode": "strip_marks"}, "scale": 1},
     )
     assert resp.status_code == 200
@@ -238,12 +241,12 @@ async def test_preview_serialization_with_multi_label_422_parity_with_print(clie
         "serialization": {"kind": "list", "values": ["A", "B"]},
     }
 
-    print_resp = await client.post("/api/print", json=body)
+    print_resp = await client.post("/api/v1/print", json=body)
     assert print_resp.status_code == 422
 
-    preview_resp = await client.post("/api/print/preview", json=body)
+    preview_resp = await client.post("/api/v1/print/preview", json=body)
     assert preview_resp.status_code == 422
-    assert preview_resp.json()["detail"] == print_resp.json()["detail"]
+    assert preview_resp.json()["error"]["message"] == print_resp.json()["error"]["message"]
 
 
 async def test_preview_serialization_expands_and_matches_estimate(client):
@@ -254,7 +257,7 @@ async def test_preview_serialization_expands_and_matches_estimate(client):
         "options": {"chain_mode": "chain_ff", "margin_mm": 2.0},
     }
 
-    resp = await client.post("/api/print/preview", json=body)
+    resp = await client.post("/api/v1/print/preview", json=body)
     assert resp.status_code == 200
     payload = resp.json()
     assert len(payload["segments"]) == 3
@@ -291,7 +294,7 @@ async def test_preview_segments_monotonic_and_last_end_matches_composite_length(
     expected_total_width_px = sum(widths_px) + gap_dots * (len(labels) - 1)
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": labels, "options": {"chain_mode": chain_mode}},
     )
     assert resp.status_code == 200
@@ -332,9 +335,9 @@ async def test_preview_rejects_legal_but_huge_serialized_request_with_422_budget
         "scale": 8,
     }
 
-    resp = await client.post("/api/print/preview", json=body)
+    resp = await client.post("/api/v1/print/preview", json=body)
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
+    detail = resp.json()["error"]["message"]
     assert "exceeding" in detail
     assert "40,000,000" in detail  # MAX_PREVIEW_PIXELS, formatted
     assert "scale=8" in detail
@@ -347,16 +350,16 @@ async def test_preview_pixel_budget_uses_post_scale_dimensions(client):
     label = _text_label("BUDGET", length_mm=900.0)  # ~6380 dots x 128 -> ~0.82 MP pre-scale
 
     small_scale_resp = await client.post(
-        "/api/print/preview", json={"labels": [label], "scale": 1}
+        "/api/v1/print/preview", json={"labels": [label], "scale": 1}
     )
     assert small_scale_resp.status_code == 200  # ~0.82 MP: nowhere near the cap
 
     large_scale_resp = await client.post(
-        "/api/print/preview", json={"labels": [label], "scale": 8}
+        "/api/v1/print/preview", json={"labels": [label], "scale": 8}
     )
     # ~0.82 MP x 64 (scale=8 squared) =~ 52.3 MP: over the 40 MP cap.
     assert large_scale_resp.status_code == 422
-    assert "40,000,000" in large_scale_resp.json()["detail"]
+    assert "40,000,000" in large_scale_resp.json()["error"]["message"]
 
 
 # --- (i) H1: MemoryError from the render/composite/encode calls maps to ----
@@ -376,9 +379,9 @@ async def test_preview_memory_error_during_composite_maps_to_507_not_500(client,
     )
 
     label = _text_label("SOLO", length_mm=20.0)
-    resp = await client.post("/api/print/preview", json={"labels": [label], "scale": 1})
+    resp = await client.post("/api/v1/print/preview", json={"labels": [label], "scale": 1})
     assert resp.status_code == 507
-    assert "memory" in resp.json()["detail"].lower()
+    assert "memory" in resp.json()["error"]["message"].lower()
 
 
 # --- (j) M13: ChainedPreviewResponse.warnings -- presence + index prefix ---
@@ -409,7 +412,7 @@ async def test_preview_warnings_are_index_prefixed_and_aligned_with_the_warning_
     }
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": [roomy, cramped], "options": {"chain_mode": "chain_ff"}},
     )
     assert resp.status_code == 200
@@ -427,9 +430,7 @@ async def test_preview_warnings_are_index_prefixed_and_aligned_with_the_warning_
 @pytest.mark.parametrize("scale", [0, 9])
 async def test_preview_scale_out_of_range_is_422(client, scale):
     label = _text_label("SOLO", length_mm=20.0)
-    resp = await client.post(
-        "/api/print/preview", json={"labels": [label], "scale": scale}
-    )
+    resp = await client.post("/api/v1/print/preview", json={"labels": [label], "scale": scale})
     assert resp.status_code == 422
 
 
@@ -443,7 +444,7 @@ async def test_preview_omitted_scale_defaults_to_2(client):
     expected_width_scale1 = sum(widths_px)  # chain_ff: butted, zero gap
 
     resp = await client.post(
-        "/api/print/preview",
+        "/api/v1/print/preview",
         json={"labels": labels, "options": {"chain_mode": "chain_ff"}},  # scale omitted
     )
     assert resp.status_code == 200

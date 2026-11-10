@@ -88,7 +88,7 @@ def _fake_huge_png_header(width: int, height: int) -> bytes:
 
 async def test_upload_png_happy_path(client):
     resp = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes(30, 15)), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes(30, 15)), "image/png")}
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -99,7 +99,7 @@ async def test_upload_png_happy_path(client):
 
 async def test_upload_jpeg_happy_path(client):
     resp = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("photo.jpg", io.BytesIO(_jpeg_bytes(24, 12)), "image/jpeg")},
     )
     assert resp.status_code == 201
@@ -110,7 +110,7 @@ async def test_upload_jpeg_happy_path(client):
 
 async def test_upload_webp_happy_path(client):
     resp = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("pic.webp", io.BytesIO(_webp_bytes(16, 8)), "image/webp")},
     )
     assert resp.status_code == 201
@@ -124,10 +124,10 @@ async def test_upload_webp_happy_path(client):
 
 async def test_get_uploaded_image_returns_png_bytes(client):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
-    resp = await client.get(f"/api/images/{image_id}")
+    resp = await client.get(f"/api/v1/images/{image_id}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
     decoded = Image.open(io.BytesIO(resp.content))
@@ -136,12 +136,12 @@ async def test_get_uploaded_image_returns_png_bytes(client):
 
 
 async def test_get_unknown_image_id_returns_404(client):
-    resp = await client.get("/api/images/deadbeefdeadbeefdeadbeefdeadbeef")
+    resp = await client.get("/api/v1/images/deadbeefdeadbeefdeadbeefdeadbeef")
     assert resp.status_code == 404
 
 
 async def test_get_malformed_image_id_returns_404(client):
-    resp = await client.get("/api/images/not-a-valid-id")
+    resp = await client.get("/api/v1/images/not-a-valid-id")
     assert resp.status_code == 404
 
 
@@ -150,17 +150,17 @@ async def test_get_malformed_image_id_returns_404(client):
 
 async def test_delete_uploaded_image_then_get_404s(client):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
-    delete_resp = await client.delete(f"/api/images/{image_id}")
+    delete_resp = await client.delete(f"/api/v1/images/{image_id}")
     assert delete_resp.status_code == 204
-    get_resp = await client.get(f"/api/images/{image_id}")
+    get_resp = await client.get(f"/api/v1/images/{image_id}")
     assert get_resp.status_code == 404
 
 
 async def test_delete_unknown_image_id_returns_404(client):
-    resp = await client.delete("/api/images/deadbeefdeadbeefdeadbeefdeadbeef")
+    resp = await client.delete("/api/v1/images/deadbeefdeadbeefdeadbeefdeadbeef")
     assert resp.status_code == 404
 
 
@@ -185,7 +185,7 @@ async def test_get_symlinked_but_well_formed_image_id_returns_404_not_500(app_an
     image_id = uuid.uuid4().hex  # well-formed -- passes IMAGE_ID_RE
     (uploads / f"{image_id}.png").symlink_to(secret)
 
-    resp = await client.get(f"/api/images/{image_id}")
+    resp = await client.get(f"/api/v1/images/{image_id}")
     assert resp.status_code == 404
 
 
@@ -203,7 +203,7 @@ async def test_delete_symlinked_but_well_formed_image_id_returns_404_not_500(app
     symlink = uploads / f"{image_id}.png"
     symlink.symlink_to(secret)
 
-    resp = await client.delete(f"/api/images/{image_id}")
+    resp = await client.delete(f"/api/v1/images/{image_id}")
     assert resp.status_code == 404
     # The symlink itself (and definitely the real secret file it points
     # at) must survive an ostensibly-rejected delete.
@@ -234,12 +234,12 @@ def _vanish_after_resolve(monkeypatch):
 
 async def test_get_image_404s_not_500s_when_file_vanishes_after_resolve(client, monkeypatch):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
     _vanish_after_resolve(monkeypatch)
-    resp = await client.get(f"/api/images/{image_id}")
+    resp = await client.get(f"/api/v1/images/{image_id}")
     assert resp.status_code == 404
 
 
@@ -247,25 +247,25 @@ async def test_get_image_thumb_404s_not_500s_when_source_vanishes_after_resolve(
     client, monkeypatch
 ):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_large_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_large_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
     _vanish_after_resolve(monkeypatch)
     # No thumb cached yet -- this must go through _generate_thumbnail,
     # which is what actually races the now-deleted source.
-    resp = await client.get(f"/api/images/{image_id}/thumb")
+    resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp.status_code == 404
 
 
 async def test_delete_image_404s_not_500s_when_file_vanishes_after_resolve(client, monkeypatch):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
     _vanish_after_resolve(monkeypatch)
-    resp = await client.delete(f"/api/images/{image_id}")
+    resp = await client.delete(f"/api/v1/images/{image_id}")
     assert resp.status_code == 404
 
 
@@ -274,12 +274,12 @@ async def test_delete_image_404s_not_500s_when_file_vanishes_after_resolve(clien
 
 async def test_rgba_upload_is_flattened_onto_white(client):
     upload = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("transparent.png", io.BytesIO(_rgba_png_bytes()), "image/png")},
     )
     assert upload.status_code == 201
     image_id = upload.json()["image_id"]
-    resp = await client.get(f"/api/images/{image_id}")
+    resp = await client.get(f"/api/v1/images/{image_id}")
     decoded = Image.open(io.BytesIO(resp.content))
     assert decoded.mode == "RGB"  # no alpha channel survives
     assert decoded.getpixel((0, 0)) == (255, 255, 255)  # fully-transparent -> white
@@ -291,10 +291,10 @@ async def test_rgba_upload_is_flattened_onto_white(client):
 async def test_upload_over_byte_cap_rejected(client):
     oversized = b"\x00" * (MAX_UPLOAD_BYTES + 1)
     resp = await client.post(
-        "/api/images", files={"file": ("big.png", io.BytesIO(oversized), "image/png")}
+        "/api/v1/images", files={"file": ("big.png", io.BytesIO(oversized), "image/png")}
     )
     assert resp.status_code == 422
-    assert str(MAX_UPLOAD_BYTES) in resp.json()["detail"]
+    assert str(MAX_UPLOAD_BYTES) in resp.json()["error"]["message"]
 
 
 async def test_upload_content_length_precheck_rejects_before_reading_body():
@@ -331,10 +331,10 @@ async def test_upload_over_megapixel_cap_rejected_via_fake_header(client):
     # buffer is ever allocated (this is the whole point of the guard).
     data = _fake_huge_png_header(4000, 3000)
     resp = await client.post(
-        "/api/images", files={"file": ("huge.png", io.BytesIO(data), "image/png")}
+        "/api/v1/images", files={"file": ("huge.png", io.BytesIO(data), "image/png")}
     )
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
+    detail = resp.json()["error"]["message"]
     assert "12000000" in detail
     assert str(MAX_DECODED_PIXELS) in detail
 
@@ -345,7 +345,7 @@ async def test_upload_extreme_dimensions_hitting_pillows_own_bomb_guard_still_42
     # 422, not a 500, by router_images.py's dedicated except clause.
     data = _fake_huge_png_header(20000, 20000)
     resp = await client.post(
-        "/api/images", files={"file": ("bomb.png", io.BytesIO(data), "image/png")}
+        "/api/v1/images", files={"file": ("bomb.png", io.BytesIO(data), "image/png")}
     )
     assert resp.status_code == 422
 
@@ -356,7 +356,7 @@ async def test_upload_at_exactly_the_megapixel_cap_is_accepted(client):
     buf = io.BytesIO()
     Image.new("RGB", (width, height), (1, 2, 3)).save(buf, format="PNG")
     resp = await client.post(
-        "/api/images", files={"file": ("edge.png", io.BytesIO(buf.getvalue()), "image/png")}
+        "/api/v1/images", files={"file": ("edge.png", io.BytesIO(buf.getvalue()), "image/png")}
     )
     assert resp.status_code == 201
     assert resp.json()["width"] * resp.json()["height"] == MAX_DECODED_PIXELS
@@ -367,14 +367,14 @@ async def test_upload_at_exactly_the_megapixel_cap_is_accepted(client):
 
 async def test_upload_empty_file_rejected(client):
     resp = await client.post(
-        "/api/images", files={"file": ("empty.png", io.BytesIO(b""), "image/png")}
+        "/api/v1/images", files={"file": ("empty.png", io.BytesIO(b""), "image/png")}
     )
     assert resp.status_code == 422
 
 
 async def test_upload_undecodable_garbage_rejected(client):
     resp = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("junk.png", io.BytesIO(b"not an image at all, just text"), "image/png")},
     )
     assert resp.status_code == 422
@@ -388,7 +388,7 @@ async def test_upload_truncated_png_with_valid_header_rejected_not_500(client):
     full = _png_bytes(50, 50)
     truncated = full[:60]  # cuts partway into IDAT; IHDR (with real size) survives intact
     resp = await client.post(
-        "/api/images", files={"file": ("truncated.png", io.BytesIO(truncated), "image/png")}
+        "/api/v1/images", files={"file": ("truncated.png", io.BytesIO(truncated), "image/png")}
     )
     assert resp.status_code == 422
 
@@ -397,10 +397,10 @@ async def test_upload_unsupported_format_bmp_rejected(client):
     buf = io.BytesIO()
     Image.new("RGB", (10, 10), "green").save(buf, format="BMP")
     resp = await client.post(
-        "/api/images", files={"file": ("pic.bmp", io.BytesIO(buf.getvalue()), "image/bmp")}
+        "/api/v1/images", files={"file": ("pic.bmp", io.BytesIO(buf.getvalue()), "image/bmp")}
     )
     assert resp.status_code == 422
-    assert "BMP" in resp.json()["detail"]
+    assert "BMP" in resp.json()["error"]["message"]
 
 
 # --- 8. GET /api/images (list, task D2a) -------------------------------------
@@ -411,18 +411,18 @@ _ISO_MTIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 async def test_list_images_empty_when_uploads_dir_missing(client):
     # A fresh data_dir has never had an upload -- uploads/ doesn't exist yet
     # at all. Must be an empty result, never a 500/404.
-    resp = await client.get("/api/images")
+    resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "page": 1, "page_size": 20, "total": 0}
 
 
 async def test_list_images_returns_uploaded_metadata(client):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes(30, 15)), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes(30, 15)), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
-    resp = await client.get("/api/images")
+    resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
@@ -444,10 +444,10 @@ async def test_list_images_sorted_newest_first(app_and_client):
     uploads = data_dir / "uploads"
 
     first = await client.post(
-        "/api/images", files={"file": ("a.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("a.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     second = await client.post(
-        "/api/images", files={"file": ("b.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("b.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     first_id = first.json()["image_id"]
     second_id = second.json()["image_id"]
@@ -458,7 +458,7 @@ async def test_list_images_sorted_newest_first(app_and_client):
     os.utime(uploads / f"{first_id}.png", (1_700_000_000, 1_700_000_000))
     os.utime(uploads / f"{second_id}.png", (1_700_000_100, 1_700_000_100))
 
-    resp = await client.get("/api/images")
+    resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     ids = [item["image_id"] for item in resp.json()["items"]]
     assert ids == [second_id, first_id]  # newest (later mtime) first
@@ -472,7 +472,7 @@ async def test_list_images_pagination_math(app_and_client):
     ids = []
     for i in range(3):
         resp = await client.post(
-            "/api/images", files={"file": (f"{i}.png", io.BytesIO(_png_bytes()), "image/png")}
+            "/api/v1/images", files={"file": (f"{i}.png", io.BytesIO(_png_bytes()), "image/png")}
         )
         ids.append(resp.json()["image_id"])
     for i, image_id in enumerate(ids):
@@ -480,7 +480,7 @@ async def test_list_images_pagination_math(app_and_client):
     # ids[2] has the latest mtime, ids[0] the earliest -- newest-first order
     # is [ids[2], ids[1], ids[0]].
 
-    page1 = await client.get("/api/images", params={"page": 1, "page_size": 2})
+    page1 = await client.get("/api/v1/images", params={"page": 1, "page_size": 2})
     assert page1.status_code == 200
     body1 = page1.json()
     assert body1["total"] == 3
@@ -488,14 +488,14 @@ async def test_list_images_pagination_math(app_and_client):
     assert body1["page_size"] == 2
     assert [item["image_id"] for item in body1["items"]] == [ids[2], ids[1]]
 
-    page2 = await client.get("/api/images", params={"page": 2, "page_size": 2})
+    page2 = await client.get("/api/v1/images", params={"page": 2, "page_size": 2})
     assert page2.status_code == 200
     body2 = page2.json()
     assert body2["total"] == 3
     assert body2["page"] == 2
     assert [item["image_id"] for item in body2["items"]] == [ids[0]]
 
-    page3 = await client.get("/api/images", params={"page": 3, "page_size": 2})
+    page3 = await client.get("/api/v1/images", params={"page": 3, "page_size": 2})
     assert page3.status_code == 200
     assert page3.json()["items"] == []
     assert page3.json()["total"] == 3
@@ -515,7 +515,7 @@ async def test_list_images_paged_items_carry_correct_per_item_metadata(app_and_c
     ids = []
     for i, (w, h) in enumerate(dims):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files={"file": (f"{i}.png", io.BytesIO(_png_bytes(w, h)), "image/png")},
         )
         ids.append(resp.json()["image_id"])
@@ -523,8 +523,8 @@ async def test_list_images_paged_items_carry_correct_per_item_metadata(app_and_c
         os.utime(uploads / f"{image_id}.png", (1_700_000_000 + i, 1_700_000_000 + i))
     expected_dims = {ids[0]: dims[0], ids[1]: dims[1], ids[2]: dims[2]}
 
-    page1 = await client.get("/api/images", params={"page": 1, "page_size": 2})
-    page2 = await client.get("/api/images", params={"page": 2, "page_size": 2})
+    page1 = await client.get("/api/v1/images", params={"page": 1, "page_size": 2})
+    page2 = await client.get("/api/v1/images", params={"page": 2, "page_size": 2})
     assert page1.status_code == 200
     assert page2.status_code == 200
 
@@ -553,7 +553,7 @@ async def test_list_images_skips_corrupt_png_without_500_or_breaking_other_pages
     good_ids = []
     for i in range(2):
         resp = await client.post(
-            "/api/images", files={"file": (f"{i}.png", io.BytesIO(_png_bytes()), "image/png")}
+            "/api/v1/images", files={"file": (f"{i}.png", io.BytesIO(_png_bytes()), "image/png")}
         )
         good_ids.append(resp.json()["image_id"])
 
@@ -566,7 +566,7 @@ async def test_list_images_skips_corrupt_png_without_500_or_breaking_other_pages
     os.utime(uploads / f"{good_ids[1]}.png", (base + 2, base + 2))
     # Newest-first candidate order: good_ids[1], corrupt_id, good_ids[0].
 
-    page1 = await client.get("/api/images", params={"page": 1, "page_size": 2})
+    page1 = await client.get("/api/v1/images", params={"page": 1, "page_size": 2})
     assert page1.status_code == 200
     body1 = page1.json()
     ids1 = [item["image_id"] for item in body1["items"]]
@@ -574,22 +574,22 @@ async def test_list_images_skips_corrupt_png_without_500_or_breaking_other_pages
     assert ids1 == [good_ids[1]]  # the corrupt candidate's slot was dropped, not backfilled
     assert body1["total"] == 3  # candidate-pass total counts it; PIL pass doesn't back-patch it
 
-    page2 = await client.get("/api/images", params={"page": 2, "page_size": 2})
+    page2 = await client.get("/api/v1/images", params={"page": 2, "page_size": 2})
     assert page2.status_code == 200
     ids2 = [item["image_id"] for item in page2.json()["items"]]
     assert ids2 == [good_ids[0]]  # unaffected by page 1's corrupt candidate
 
 
 async def test_list_images_invalid_page_returns_422(client):
-    resp = await client.get("/api/images", params={"page": 0})
+    resp = await client.get("/api/v1/images", params={"page": 0})
     assert resp.status_code == 422
 
 
 async def test_list_images_invalid_page_size_returns_422(client):
-    resp = await client.get("/api/images", params={"page_size": 101})
+    resp = await client.get("/api/v1/images", params={"page_size": 101})
     assert resp.status_code == 422
 
-    resp = await client.get("/api/images", params={"page_size": 0})
+    resp = await client.get("/api/v1/images", params={"page_size": 0})
     assert resp.status_code == 422
 
 
@@ -600,7 +600,7 @@ async def test_list_images_skips_hostile_filename_silently(app_and_client):
     uploads.mkdir(parents=True, exist_ok=True)
     (uploads / "not-a-valid-id.png").write_bytes(_png_bytes())  # fails IMAGE_ID_RE
 
-    resp = await client.get("/api/images")
+    resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     body = resp.json()
     assert body["items"] == []
@@ -614,7 +614,7 @@ async def test_list_images_ignores_non_png_files(app_and_client):
     uploads.mkdir(parents=True, exist_ok=True)
     (uploads / f"{uuid.uuid4().hex}.txt").write_text("not a png")
 
-    resp = await client.get("/api/images")
+    resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     assert resp.json()["items"] == []
 
@@ -636,7 +636,7 @@ async def test_list_images_skips_symlinked_but_well_formed_id_not_500(app_and_cl
     image_id = uuid.uuid4().hex
     (uploads / f"{image_id}.png").symlink_to(secret)
 
-    resp = await client.get("/api/images")
+    resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     body = resp.json()
     assert body["items"] == []
@@ -648,12 +648,12 @@ async def test_list_images_skips_symlinked_but_well_formed_id_not_500(app_and_cl
 
 async def test_get_image_thumb_returns_smaller_png_with_correct_headers(client):
     upload = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("photo.png", io.BytesIO(_large_png_bytes(800, 400)), "image/png")},
     )
     image_id = upload.json()["image_id"]
 
-    resp = await client.get(f"/api/images/{image_id}/thumb")
+    resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
     assert resp.headers["cache-control"] == "public, max-age=86400"
@@ -674,11 +674,11 @@ async def test_get_image_thumb_does_not_upscale_a_small_source(client):
     # -- PIL's Image.thumbnail() only ever shrinks, so the thumb route must
     # return the SAME dimensions, not an upscaled 256-edge image.
     upload = await client.post(
-        "/api/images", files={"file": ("small.png", io.BytesIO(_png_bytes(20, 10)), "image/png")}
+        "/api/v1/images", files={"file": ("small.png", io.BytesIO(_png_bytes(20, 10)), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
-    resp = await client.get(f"/api/images/{image_id}/thumb")
+    resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp.status_code == 200
     decoded = Image.open(io.BytesIO(resp.content))
     assert decoded.size == (20, 10)
@@ -689,7 +689,7 @@ async def test_get_image_thumb_is_cached_to_disk_beside_original(app_and_client)
     data_dir = app.state.config.data_dir
 
     upload = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("photo.png", io.BytesIO(_large_png_bytes(800, 400)), "image/png")},
     )
     image_id = upload.json()["image_id"]
@@ -697,23 +697,23 @@ async def test_get_image_thumb_is_cached_to_disk_beside_original(app_and_client)
     thumb_file = data_dir / "uploads" / "thumbs" / f"{image_id}.png"
     assert not thumb_file.is_file()  # not generated until first request
 
-    resp = await client.get(f"/api/images/{image_id}/thumb")
+    resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp.status_code == 200
     assert thumb_file.is_file()
 
     # Second request serves the cached file straight from disk -- same
     # bytes, no re-render.
-    resp2 = await client.get(f"/api/images/{image_id}/thumb")
+    resp2 = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp2.content == resp.content
 
 
 async def test_get_image_thumb_unknown_id_returns_404(client):
-    resp = await client.get("/api/images/deadbeefdeadbeefdeadbeefdeadbeef/thumb")
+    resp = await client.get("/api/v1/images/deadbeefdeadbeefdeadbeefdeadbeef/thumb")
     assert resp.status_code == 404
 
 
 async def test_get_image_thumb_malformed_id_returns_404(client):
-    resp = await client.get("/api/images/not-a-valid-id/thumb")
+    resp = await client.get("/api/v1/images/not-a-valid-id/thumb")
     assert resp.status_code == 404
 
 
@@ -733,7 +733,7 @@ async def test_get_image_thumb_symlinked_but_well_formed_id_returns_404_not_500(
     image_id = uuid.uuid4().hex
     (uploads / f"{image_id}.png").symlink_to(secret)
 
-    resp = await client.get(f"/api/images/{image_id}/thumb")
+    resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp.status_code == 404
 
 
@@ -742,23 +742,23 @@ async def test_delete_image_removes_cached_thumb(app_and_client):
     data_dir = app.state.config.data_dir
 
     upload = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("photo.png", io.BytesIO(_large_png_bytes()), "image/png")},
     )
     image_id = upload.json()["image_id"]
     thumb_file = data_dir / "uploads" / "thumbs" / f"{image_id}.png"
 
-    thumb_resp = await client.get(f"/api/images/{image_id}/thumb")
+    thumb_resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert thumb_resp.status_code == 200
     assert thumb_file.is_file()
 
-    delete_resp = await client.delete(f"/api/images/{image_id}")
+    delete_resp = await client.delete(f"/api/v1/images/{image_id}")
     assert delete_resp.status_code == 204
     assert not thumb_file.is_file()
 
     # And the route 404s afterward rather than re-generating from a
     # (deleted) original.
-    resp = await client.get(f"/api/images/{image_id}/thumb")
+    resp = await client.get(f"/api/v1/images/{image_id}/thumb")
     assert resp.status_code == 404
 
 
@@ -767,11 +767,11 @@ async def test_delete_image_without_a_thumb_ever_requested_still_succeeds(client
     # for this image -- thumb_path().unlink(missing_ok=True) is the whole
     # point.
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
-    resp = await client.delete(f"/api/images/{image_id}")
+    resp = await client.delete(f"/api/v1/images/{image_id}")
     assert resp.status_code == 204
 
 
@@ -787,27 +787,27 @@ async def test_thumb_regenerated_after_delete_and_reupload(app_and_client):
     payload = _large_png_bytes(800, 400)
 
     first = await client.post(
-        "/api/images", files={"file": ("photo.png", io.BytesIO(payload), "image/png")}
+        "/api/v1/images", files={"file": ("photo.png", io.BytesIO(payload), "image/png")}
     )
     first_id = first.json()["image_id"]
-    first_thumb_resp = await client.get(f"/api/images/{first_id}/thumb")
+    first_thumb_resp = await client.get(f"/api/v1/images/{first_id}/thumb")
     assert first_thumb_resp.status_code == 200
     first_thumb_file = data_dir / "uploads" / "thumbs" / f"{first_id}.png"
     assert first_thumb_file.is_file()
 
-    delete_resp = await client.delete(f"/api/images/{first_id}")
+    delete_resp = await client.delete(f"/api/v1/images/{first_id}")
     assert delete_resp.status_code == 204
     assert not first_thumb_file.is_file()
 
     second = await client.post(
-        "/api/images", files={"file": ("photo.png", io.BytesIO(payload), "image/png")}
+        "/api/v1/images", files={"file": ("photo.png", io.BytesIO(payload), "image/png")}
     )
     second_id = second.json()["image_id"]
     assert second_id != first_id
     second_thumb_file = data_dir / "uploads" / "thumbs" / f"{second_id}.png"
     assert not second_thumb_file.is_file()  # not generated until requested
 
-    second_thumb_resp = await client.get(f"/api/images/{second_id}/thumb")
+    second_thumb_resp = await client.get(f"/api/v1/images/{second_id}/thumb")
     assert second_thumb_resp.status_code == 200
     assert second_thumb_file.is_file()
     decoded = Image.open(io.BytesIO(second_thumb_resp.content))
@@ -819,11 +819,11 @@ async def test_thumb_regenerated_after_delete_and_reupload(app_and_client):
 
 async def test_get_image_full_route_carries_cache_and_conditional_headers(client):
     upload = await client.post(
-        "/api/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
+        "/api/v1/images", files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")}
     )
     image_id = upload.json()["image_id"]
 
-    resp = await client.get(f"/api/images/{image_id}")
+    resp = await client.get(f"/api/v1/images/{image_id}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
     assert resp.headers["cache-control"] == "public, max-age=86400"
@@ -851,3 +851,12 @@ def test_generate_thumbnail_writes_via_temp_file_and_leaves_no_tmp(tmp_path, mon
     assert len(replaced) == 1 and replaced[0][1] == dest
     assert dest.is_file()
     assert [p.name for p in dest.parent.iterdir()] == ["t.png"]
+
+
+async def test_list_images_limit_offset(client):
+    resp = await client.get("/api/v1/images", params={"limit": 5, "offset": 10})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page_size"] == 5 and body["page"] == 3 and body["total"] == 0
+
+    assert (await client.get("/api/v1/images", params={"offset": -1})).status_code == 422

@@ -21,9 +21,25 @@ WebSocket.receive()), which the `break` below prevents.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, Request, WebSocket
+
+from labelmaker.api.api_keys import TICKET_TTL_S
+from labelmaker.api.errors import err
+from labelmaker.api.schemas import WsTicketOut
 
 router = APIRouter(tags=["ws"])
+
+
+@router.post(
+    "/ws-ticket",
+    summary="Get a WebSocket ticket",
+    response_model=WsTicketOut,
+    responses=err(401),
+)
+async def issue_ws_ticket(request: Request) -> WsTicketOut:
+    """Single-use ticket valid for 60 s. Connect to `/ws?ticket=<ticket>` so the
+    API key never appears in a URL. (Bearer-header WebSocket auth also works.)"""
+    return WsTicketOut(ticket=request.app.state.ws_tickets.issue(), expires_in=TICKET_TTL_S)
 
 
 @router.websocket("/ws")

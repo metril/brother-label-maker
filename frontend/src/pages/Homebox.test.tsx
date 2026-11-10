@@ -37,7 +37,7 @@ function entitySummary(overrides: Partial<HomeboxEntitySummary> = {}): HomeboxEn
 describe("Homebox page", () => {
   it("renders entities from the mocked entities endpoint", async () => {
     server.use(
-      http.get("/api/homebox/entities", () =>
+      http.get("/api/v1/homebox/entities", () =>
         HttpResponse.json({ items: [entitySummary()], page: 1, page_size: 50, total: 1 }),
       ),
     );
@@ -51,10 +51,10 @@ describe("Homebox page", () => {
     const user = userEvent.setup();
     const seenParentIds: (string | null)[] = [];
     server.use(
-      http.get("/api/homebox/entities/tree", () =>
+      http.get("/api/v1/homebox/entities/tree", () =>
         HttpResponse.json([{ id: "loc-1", name: "Garage", type: "location", children: [] }]),
       ),
-      http.get("/api/homebox/entities", ({ request }) => {
+      http.get("/api/v1/homebox/entities", ({ request }) => {
         seenParentIds.push(new URL(request.url).searchParams.get("parent_id"));
         return HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 });
       }),
@@ -70,7 +70,7 @@ describe("Homebox page", () => {
   it("an asset-id-shaped search shows the Asset ID matches section with all disambiguation matches", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/homebox/assets/:assetId", () =>
+      http.get("/api/v1/homebox/assets/:assetId", () =>
         HttpResponse.json([
           entitySummary({ id: "e-1", name: "Impact Driver A" }),
           entitySummary({ id: "e-2", name: "Impact Driver B" }),
@@ -90,7 +90,7 @@ describe("Homebox page", () => {
     const user = userEvent.setup();
     useDesignerStore.setState({ tape: { width_mm: 24, family: "tze" } });
     server.use(
-      http.get("/api/homebox/entities", () =>
+      http.get("/api/v1/homebox/entities", () =>
         HttpResponse.json({
           items: [
             entitySummary({ id: "e-1", name: "Impact Driver", asset_id: "000-001" }),
@@ -106,7 +106,7 @@ describe("Homebox page", () => {
           total: 2,
         }),
       ),
-      http.get("/api/homebox/entities/:id/path", ({ params }) => {
+      http.get("/api/v1/homebox/entities/:id/path", ({ params }) => {
         if (params.id === "e-1") {
           return HttpResponse.json([
             { id: "loc-1", name: "Garage", type: "location" },
@@ -118,7 +118,7 @@ describe("Homebox page", () => {
           { id: "e-2", name: "Shelf B", type: "location" },
         ]);
       }),
-      http.get("/api/homebox/settings", () =>
+      http.get("/api/v1/homebox/settings", () =>
         HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "https://homebox.example.com" }),
       ),
     );
@@ -157,7 +157,7 @@ describe("Homebox page", () => {
 
   it("renders a setup hint (the env vars needed) when HomeBox isn't configured", async () => {
     server.use(
-      http.get("/api/homebox/status", () =>
+      http.get("/api/v1/homebox/status", () =>
         HttpResponse.json({ configured: false, reachable: null, healthy: null, version: null, error: null }),
       ),
     );
@@ -168,7 +168,7 @@ describe("Homebox page", () => {
 
   it("shows the status error prominently when HomeBox is configured but unreachable", async () => {
     server.use(
-      http.get("/api/homebox/status", () =>
+      http.get("/api/v1/homebox/status", () =>
         HttpResponse.json({
           configured: true,
           reachable: false,
@@ -183,10 +183,10 @@ describe("Homebox page", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("HomeBox rejected the API key (HTTP 401)");
   });
 
-  it("shows a readable error (the detail text) when GET /api/homebox/entities 502s", async () => {
+  it("shows a readable error (the detail text) when GET /api/v1/homebox/entities 502s", async () => {
     server.use(
-      http.get("/api/homebox/entities", () =>
-        HttpResponse.json({ detail: "HomeBox server error (HTTP 503)" }, { status: 502 }),
+      http.get("/api/v1/homebox/entities", () =>
+        HttpResponse.json({ error: { code: "error", message: "HomeBox server error (HTTP 503)" } }, { status: 502 }),
       ),
     );
     renderWithProviders(<Homebox />, { route: "/homebox" });
@@ -196,7 +196,7 @@ describe("Homebox page", () => {
 
   it("shows the bulk-create panel only when homebox_writes_enabled is on", async () => {
     server.use(
-      http.get("/api/homebox/entities", () => HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 })),
+      http.get("/api/v1/homebox/entities", () => HttpResponse.json({ items: [], page: 1, page_size: 50, total: 0 })),
     );
     const { unmount } = renderWithProviders(<Homebox />, { route: "/homebox" });
     await screen.findByText("No entities to show.");
@@ -204,8 +204,8 @@ describe("Homebox page", () => {
     unmount();
 
     server.use(
-      http.get("/api/homebox/tags", () => HttpResponse.json([])),
-      http.get("/api/settings", () =>
+      http.get("/api/v1/homebox/tags", () => HttpResponse.json([])),
+      http.get("/api/v1/settings", () =>
         HttpResponse.json({
           settings: [{ key: "homebox_writes_enabled", value: true, source: "db", editable: true }],
         }),
@@ -218,10 +218,10 @@ describe("Homebox page", () => {
   it("a row's cable label type builds a cable_wrap definition when added to the tray", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/homebox/entities", () =>
+      http.get("/api/v1/homebox/entities", () =>
         HttpResponse.json({ items: [entitySummary()], page: 1, page_size: 50, total: 1 }),
       ),
-      http.get("/api/homebox/settings", () =>
+      http.get("/api/v1/homebox/settings", () =>
         HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "https://homebox.example.com" }),
       ),
     );

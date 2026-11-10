@@ -49,7 +49,7 @@ def _expected_job_options(config, chain_mode: ChainMode) -> JobOptions:
 
 async def _wait_for_terminal_job(client, job_id: str, max_polls: int = 250, interval: float = 0.02):
     for _ in range(max_polls):
-        resp = await client.get(f"/api/print/jobs/{job_id}")
+        resp = await client.get(f"/api/v1/print/jobs/{job_id}")
         assert resp.status_code == 200
         body = resp.json()
         if body["status"] in ("done", "failed", "canceled"):
@@ -78,7 +78,7 @@ async def test_estimate_matches_in_test_estimate_call_and_creates_no_job(app_and
 
     labels = [_text_label("ONE"), _text_label("TWO")]
     resp = await client.post(
-        "/api/print/estimate",
+        "/api/v1/print/estimate",
         json={"labels": labels, "options": {"chain_mode": "chain_ff", "margin_mm": 2.0}},
     )
     assert resp.status_code == 200
@@ -112,7 +112,7 @@ async def test_estimate_with_serialization_expands_label_count_and_matches(app_a
     serialization = {"kind": "numeric", "start": 1, "step": 1, "count": 5, "pad_width": 2}
 
     resp = await client.post(
-        "/api/print/estimate",
+        "/api/v1/print/estimate",
         json={
             "labels": [template],
             "serialization": serialization,
@@ -143,13 +143,13 @@ async def test_estimate_rejects_mixed_tapes_with_422(client):
         _text_label("ONE"),
         {**_text_label("TWO"), "tape": {"width_mm": 12, "family": "tze"}},
     ]
-    resp = await client.post("/api/print/estimate", json={"labels": labels})
+    resp = await client.post("/api/v1/print/estimate", json={"labels": labels})
     assert resp.status_code == 422
 
 
 async def test_estimate_rejects_invalid_label_with_422(client):
     bad_label = {**_text_label("HELLO"), "type": "does-not-exist"}
-    resp = await client.post("/api/print/estimate", json={"labels": [bad_label]})
+    resp = await client.post("/api/v1/print/estimate", json={"labels": [bad_label]})
     assert resp.status_code == 422
 
 
@@ -181,7 +181,7 @@ def test_router_print_margin_bounds_match_geometry_clamp():
 async def test_estimate_rejects_out_of_range_margin_mm_with_422(client, margin_mm):
     labels = [_text_label("HELLO")]
     resp = await client.post(
-        "/api/print/estimate",
+        "/api/v1/print/estimate",
         json={"labels": labels, "options": {"margin_mm": margin_mm}},
     )
     assert resp.status_code == 422
@@ -193,7 +193,7 @@ async def test_estimate_accepts_margin_mm_at_the_clamp_bounds(client):
     labels = [_text_label("HELLO")]
     for margin_mm in (MARGIN_MIN_MM, MARGIN_MAX_MM):
         resp = await client.post(
-            "/api/print/estimate",
+            "/api/v1/print/estimate",
             json={"labels": labels, "options": {"margin_mm": margin_mm}},
         )
         assert resp.status_code == 200, resp.text
@@ -209,14 +209,14 @@ async def test_tape_used_mm_set_at_creation_and_refined_on_completion(app_and_cl
     labels = [_text_label("HELLO"), _text_label("WORLD")]
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": labels, "options": {"chain_mode": "chain_ff", "margin_mm": 2.0}},
     )
     job_id = resp.json()["job_id"]
 
     # Poll almost immediately: even before the job reaches a terminal
     # state, tape_used_mm should already be populated from POST-time.
-    initial = await client.get(f"/api/print/jobs/{job_id}")
+    initial = await client.get(f"/api/v1/print/jobs/{job_id}")
     assert initial.json()["tape_used_mm"] is not None
 
     job = await _wait_for_terminal_job(client, job_id)
@@ -238,7 +238,7 @@ async def test_tape_used_mm_present_even_for_a_failed_job(app_and_client, monkey
 
     monkeypatch.setattr("labelmaker.jobs.worker._print", _raise)
 
-    resp = await client.post("/api/print", json={"labels": [_text_label("HELLO")]})
+    resp = await client.post("/api/v1/print", json={"labels": [_text_label("HELLO")]})
     job_id = resp.json()["job_id"]
 
     job = await _wait_for_terminal_job(client, job_id)
@@ -260,7 +260,7 @@ async def test_chain_mode_e2e_stream_byte_parity(app_and_client, chain_mode):
     labels = [_text_label("ONE"), _text_label("TWO"), _text_label("THREE")]
 
     resp = await client.post(
-        "/api/print", json={"labels": labels, "options": {"chain_mode": chain_mode}}
+        "/api/v1/print", json={"labels": labels, "options": {"chain_mode": chain_mode}}
     )
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
@@ -268,7 +268,7 @@ async def test_chain_mode_e2e_stream_byte_parity(app_and_client, chain_mode):
     job = await _wait_for_terminal_job(client, job_id)
     assert job["status"] == "done", job["error"]
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
 
     config = app.state.config
@@ -301,7 +301,7 @@ async def test_cancel_queued_job_returns_200_and_broadcasts_job_canceled(app_and
     recorder = _RecordingSocket()
     app.state.bus.register(recorder)
 
-    resp = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    resp = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert resp.status_code == 200
     assert resp.json() == {"status": "canceled"}
 
@@ -314,7 +314,7 @@ async def test_cancel_queued_job_returns_200_and_broadcasts_job_canceled(app_and
 
 
 async def test_cancel_unknown_job_returns_404(client):
-    resp = await client.post("/api/print/jobs/does-not-exist/cancel")
+    resp = await client.post("/api/v1/print/jobs/does-not-exist/cancel")
     assert resp.status_code == 404
 
 
@@ -328,12 +328,12 @@ async def test_cancel_already_canceled_job_returns_409(app_and_client):
     )
     job_id = job["id"]
 
-    first = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    first = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert first.status_code == 200
 
-    second = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    second = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert second.status_code == 409
-    assert "canceled" in second.json()["detail"]
+    assert "canceled" in second.json()["error"]["message"]
 
 
 async def test_cancel_race_job_already_printing_returns_409_naming_status(app_and_client):
@@ -351,9 +351,9 @@ async def test_cancel_race_job_already_printing_returns_409_naming_status(app_an
     job_id = job["id"]
     await db.update_job(job_id, status="printing")
 
-    resp = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    resp = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert resp.status_code == 409
-    assert "printing" in resp.json()["detail"]
+    assert "printing" in resp.json()["error"]["message"]
 
     got = await db.get_job(job_id)
     assert got["status"] == "printing"  # untouched
@@ -380,7 +380,7 @@ async def test_print_broadcasts_job_progress_events_monotonic_and_final_matches_
     app.state.bus.register(recorder)
 
     label = _text_label("X", length_mm=200.0)
-    resp = await client.post("/api/print", json={"labels": [label]})
+    resp = await client.post("/api/v1/print", json={"labels": [label]})
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
 

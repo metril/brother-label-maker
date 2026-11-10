@@ -15,7 +15,7 @@
               "type": "string"
             },
             "image_id": {
-              "description": "an image_id returned by POST /api/images",
+              "description": "an image_id returned by POST /api/v1/images",
               "title": "Image Id",
               "type": "string"
             },
@@ -53,7 +53,7 @@
               "type": "string"
             },
             "id": {
-              "description": "a symbol id from GET /api/symbols",
+              "description": "a symbol id from GET /api/v1/symbols",
               "title": "Id",
               "type": "string"
             }
@@ -229,7 +229,7 @@
         },
         "font_family": {
           "default": "Inter",
-          "description": "caption font family name (see GET /api/fonts)",
+          "description": "caption font family name (see GET /api/v1/fonts)",
           "title": "Font Family",
           "type": "string"
         },
@@ -619,7 +619,7 @@
         },
         "font_family": {
           "default": "Inter",
-          "description": "font family name (see GET /api/fonts)",
+          "description": "font family name (see GET /api/v1/fonts)",
           "title": "Font Family",
           "type": "string"
         },
@@ -702,7 +702,7 @@
         },
         "font_family": {
           "default": "Inter",
-          "description": "font family name (see GET /api/fonts)",
+          "description": "font family name (see GET /api/v1/fonts)",
           "title": "Font Family",
           "type": "string"
         },
@@ -826,7 +826,7 @@
         },
         "font_family": {
           "default": "Inter",
-          "description": "font family name (see GET /api/fonts)",
+          "description": "font family name (see GET /api/v1/fonts)",
           "title": "Font Family",
           "type": "string"
         },
@@ -956,7 +956,7 @@
         },
         "font_family": {
           "default": "Inter",
-          "description": "font family name (see GET /api/fonts)",
+          "description": "font family name (see GET /api/v1/fonts)",
           "title": "Font Family",
           "type": "string"
         },

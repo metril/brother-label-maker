@@ -52,12 +52,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, error_message
+from labelmaker.api.errors import ApiError, code_for_status, err
+from labelmaker.api.schemas import ImagePageOut, binary
 from labelmaker.render.images import IMAGE_ID_RE, image_path, thumb_path, uploads_dir
 
 _LOG = logging.getLogger(__name__)
@@ -87,9 +89,9 @@ _CACHE_CONTROL = "public, max-age=86400"
 
 
 class ImageUploadResponse(BaseModel):
-    image_id: str
-    width: int
-    height: int
+    image_id: str = Field(description="Id to reference the image from a label (uuid4 hex)")
+    width: int = Field(description="Stored width in pixels")
+    height: int = Field(description="Stored height in pixels")
 
 
 async def _read_capped(
@@ -109,9 +111,10 @@ async def _read_capped(
         except ValueError:
             declared = None
         if declared is not None and declared > max_bytes:
-            raise HTTPException(
-                status_code=status_code,
-                detail=(f"upload declares {declared} bytes, exceeding the {max_bytes}-byte cap"),
+            raise ApiError(
+                status_code,
+                code_for_status(status_code),
+                (f"upload declares {declared} bytes, exceeding the {max_bytes}-byte cap"),
             )
 
     chunks = bytearray()
@@ -121,9 +124,10 @@ async def _read_capped(
             break
         chunks.extend(chunk)
         if len(chunks) > max_bytes:
-            raise HTTPException(
-                status_code=status_code,
-                detail=f"upload exceeds the {max_bytes}-byte cap",
+            raise ApiError(
+                status_code,
+                code_for_status(status_code),
+                f"upload exceeds the {max_bytes}-byte cap",
             )
     return bytes(chunks)
 
@@ -138,7 +142,7 @@ def _validate_image_id(image_id: str) -> None:
     image_path()'s own -- the actual filesystem-access guard, see that
     module's docstring -- can never drift apart."""
     if not IMAGE_ID_RE.match(image_id):
-        raise HTTPException(status_code=404, detail="image not found")
+        raise ApiError(404, "not_found", "image not found")
 
 
 def _resolve_existing_image_path(image_id: str, data_dir: Path) -> Path:
@@ -161,9 +165,9 @@ def _resolve_existing_image_path(image_id: str, data_dir: Path) -> Path:
     try:
         path = image_path(image_id, data_dir)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail="image not found") from exc
+        raise ApiError(404, "not_found", "image not found") from exc
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="image not found")
+        raise ApiError(404, "not_found", "image not found")
     return path
 
 
@@ -185,7 +189,7 @@ def _stat_or_404(path: Path) -> os.stat_result:
     try:
         return path.stat()
     except OSError as exc:
-        raise HTTPException(status_code=404, detail="image not found") from exc
+        raise ApiError(404, "not_found", "image not found") from exc
 
 
 def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
@@ -211,25 +215,27 @@ def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
         probe_format = probe.format
         width, height = probe.size
     except Image.DecompressionBombError as exc:
-        raise HTTPException(status_code=422, detail=f"image is too large to decode: {exc}") from exc
+        raise ApiError(422, "invalid_image", f"image is too large to decode: {exc}") from exc
     except Exception as exc:
         # PIL raises different exceptions per codec for "this isn't a
         # decodable image" (UnidentifiedImageError being the common one,
         # but a truncated/corrupt file of a recognized format can raise
         # other PIL/codec errors too) -- all of them mean the same thing to
         # this endpoint's caller: reject with a 422, not a 500.
-        raise HTTPException(status_code=422, detail=f"not a decodable image: {exc}") from exc
+        raise ApiError(422, "invalid_image", f"not a decodable image: {exc}") from exc
 
     if probe_format not in _ALLOWED_FORMATS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"unsupported image format {probe_format!r}; allowed: png, jpeg, webp",
+        raise ApiError(
+            422,
+            "invalid_image",
+            f"unsupported image format {probe_format!r}; allowed: png, jpeg, webp",
         )
 
     if width * height > MAX_DECODED_PIXELS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
+        raise ApiError(
+            422,
+            "invalid_image",
+            (
                 f"image is {width}x{height} ({width * height} px), exceeding the "
                 f"{MAX_DECODED_PIXELS}px cap"
             ),
@@ -243,7 +249,7 @@ def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
         img = Image.open(io.BytesIO(data))
         img.load()
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"not a decodable image: {exc}") from exc
+        raise ApiError(422, "invalid_image", f"not a decodable image: {exc}") from exc
     if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
         img = img.convert("RGBA")
         background = Image.new("RGBA", img.size, (255, 255, 255, 255))
@@ -259,13 +265,23 @@ def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
     return image_id, img.width, img.height
 
 
-@router.post("", status_code=201)
+@router.post(
+    "",
+    status_code=201,
+    response_model=ImageUploadResponse,
+    summary="Upload an image",
+    responses=err(413, 422),
+)
 async def upload_image(
     request: Request, config: AppConfigDep, file: UploadFile
 ) -> ImageUploadResponse:
+    """Upload a PNG/JPEG/WebP (multipart field `file`, max 10 MB, 8 MP).
+
+    The image is normalized to RGB PNG and stored under a fresh id.
+    """
     data = await _read_capped(request, file)
     if not data:
-        raise HTTPException(status_code=422, detail="uploaded file is empty")
+        raise ApiError(422, "invalid_image", "uploaded file is empty")
 
     image_id, width, height = await anyio.to_thread.run_sync(_process_upload, data, config.data_dir)
     return ImageUploadResponse(image_id=image_id, width=width, height=height)
@@ -280,7 +296,9 @@ def _iso_mtime(epoch_seconds: float) -> str:
     return datetime.fromtimestamp(epoch_seconds, UTC).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
-def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
+def _list_uploaded_images(
+    data_dir: Path, page: int, page_size: int, offset: int | None = None
+) -> dict:
     """Backing implementation for `GET /api/images` (task D2a): scans
     `uploads_dir` directly rather than any DB table -- uploads have never
     had a DB row (see this module's own docstring).
@@ -330,6 +348,11 @@ def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
     if not (1 <= page_size <= 100):
         raise ValueError(f"page_size must be between 1 and 100, got {page_size}")
 
+    if offset is not None:
+        if offset < 0:
+            raise ValueError(f"offset must be >= 0, got {offset}")
+        page = offset // page_size + 1
+
     target_dir = uploads_dir(data_dir)
     # (mtime, image_id, path, size_bytes) -- everything the PIL pass and
     # the final item shape need, without re-`stat()`ing.
@@ -366,8 +389,8 @@ def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
 
     candidates.sort(key=lambda candidate: candidate[0], reverse=True)
     total = len(candidates)
-    offset = (page - 1) * page_size
-    page_candidates = candidates[offset : offset + page_size]
+    start = offset if offset is not None else (page - 1) * page_size
+    page_candidates = candidates[start : start + page_size]
 
     page_items = []
     for mtime, image_id, path, size_bytes in page_candidates:
@@ -390,17 +413,31 @@ def _list_uploaded_images(data_dir: Path, page: int, page_size: int) -> dict:
     return {"items": page_items, "page": page, "page_size": page_size, "total": total}
 
 
-@router.get("")
-async def list_images(config: AppConfigDep, page: int = 1, page_size: int = 20) -> dict:
+@router.get(
+    "",
+    response_model=ImagePageOut,
+    summary="List uploaded images",
+    responses=err(422),
+)
+async def list_images(
+    config: AppConfigDep,
+    page: int = Query(1, description="1-based page number (ignored when `offset` is given)"),
+    page_size: int = Query(20, description="Rows per page, 1-100"),
+    limit: int | None = Query(None, description="Alias of `page_size` (1-100)"),
+    offset: int | None = Query(None, description="Row offset; overrides `page`"),
+) -> dict:
+    """Uploaded images, newest first, paginated; `total` is the full count."""
+    if limit is not None:
+        page_size = limit
     try:
         # M7 (2026-08 review): the only filesystem/PIL route in this API
         # that didn't hop off the event loop -- see _list_uploaded_images'
         # own docstring for the O(page_size) rework alongside this.
         return await anyio.to_thread.run_sync(
-            _list_uploaded_images, config.data_dir, page, page_size
+            _list_uploaded_images, config.data_dir, page, page_size, offset
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "invalid_query", error_message(exc)) from exc
 
 
 def _generate_thumbnail(source_path: Path, dest_path: Path) -> None:
@@ -434,7 +471,12 @@ def _generate_thumbnail(source_path: Path, dest_path: Path) -> None:
             tmp_path.unlink(missing_ok=True)
 
 
-@router.get("/{image_id}")
+@router.get(
+    "/{image_id}",
+    response_class=FileResponse,
+    summary="Download an image",
+    responses={**binary("image/png", "The stored PNG"), **err(404)},
+)
 async def get_image(image_id: str, config: AppConfigDep) -> FileResponse:
     path = _resolve_existing_image_path(image_id, config.data_dir)
     # Review L3: explicit stat (see _stat_or_404's own docstring) closes
@@ -453,7 +495,12 @@ async def get_image(image_id: str, config: AppConfigDep) -> FileResponse:
     )
 
 
-@router.get("/{image_id}/thumb")
+@router.get(
+    "/{image_id}/thumb",
+    response_class=FileResponse,
+    summary="Download an image thumbnail",
+    responses={**binary("image/png", "Cached PNG thumbnail (<=256 px)"), **err(404)},
+)
 async def get_image_thumb(image_id: str, config: AppConfigDep) -> FileResponse:
     """H6 fix: a bounded (`THUMBNAIL_MAX_EDGE`-px-longest-edge) counterpart
     to `GET /api/images/{id}` for grid-tile-sized UI (UploadsGallery.tsx).
@@ -481,7 +528,7 @@ async def get_image_thumb(image_id: str, config: AppConfigDep) -> FileResponse:
         try:
             await anyio.to_thread.run_sync(_generate_thumbnail, path, thumb)
         except OSError as exc:
-            raise HTTPException(status_code=404, detail="image not found") from exc
+            raise ApiError(404, "not_found", "image not found") from exc
     stat_result = _stat_or_404(thumb)
     return FileResponse(
         thumb,
@@ -491,8 +538,15 @@ async def get_image_thumb(image_id: str, config: AppConfigDep) -> FileResponse:
     )
 
 
-@router.delete("/{image_id}", status_code=204)
+@router.delete(
+    "/{image_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Delete an image",
+    responses=err(404),
+)
 async def delete_image(image_id: str, config: AppConfigDep) -> Response:
+    """Remove an upload and its cached thumbnail."""
     path = _resolve_existing_image_path(image_id, config.data_dir)
     try:
         path.unlink()
@@ -501,7 +555,7 @@ async def delete_image(image_id: str, config: AppConfigDep) -> Response:
         # _resolve_existing_image_path and this unlink() (a second app
         # instance sharing data_dir, or an operator/cron pruning uploads/)
         # -- map that to the same 404 an unknown id gets, not a raw 500.
-        raise HTTPException(status_code=404, detail="image not found") from exc
+        raise ApiError(404, "not_found", "image not found") from exc
     # Best-effort: the thumb may not exist yet (never requested) -- that's
     # not an error, just nothing to clean up. thumb_path() itself can't
     # raise here (image_id already passed IMAGE_ID_RE + containment via

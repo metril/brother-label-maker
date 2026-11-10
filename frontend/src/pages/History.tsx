@@ -25,7 +25,7 @@ const STATUS_OPTIONS: { value: JobStatus | ""; label: string }[] = [
 ];
 
 /** The History page (task 2.13): every print job, newest first, server-
- * paginated (GET /api/history's own page/page_size -- kept within the
+ * paginated (GET /api/v1/history's own page/page_size -- kept within the
  * backend's 1..100 page_size bound and page>=1 by construction: the
  * page-size control only offers values in that range, and Prev/Next stay
  * disabled at the bounds rather than ever stepping outside them). */

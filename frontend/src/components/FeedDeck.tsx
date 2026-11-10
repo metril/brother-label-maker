@@ -9,7 +9,7 @@ export interface SequenceStepperProps {
   index: number;
   total: number;
   /** The sequence value that produced the CURRENTLY rendered preview at
-   * `index` -- from POST /api/render/preview's own `sequence_value` (see
+   * `index` -- from POST /api/v1/render/preview's own `sequence_value` (see
    * api/types.ts's PreviewResponse doc), not re-derived client-side. */
   sequenceValue: string | null;
   onIndexChange: (index: number) => void;
@@ -17,8 +17,8 @@ export interface SequenceStepperProps {
 
 interface FeedDeckProps {
   tape: Tape;
-  /** The matching /api/tapes row for `tape` (nominal_mm+family exact
-   * match) -- null while /api/tapes is still loading (brief, staleTime:
+  /** The matching /api/v1/tapes row for `tape` (nominal_mm+family exact
+   * match) -- null while /api/v1/tapes is still loading (brief, staleTime:
    * Infinity) or, in principle, for a tape combination the catalog
    * doesn't have. */
   tapeInfo: TapeInfo | null;
@@ -68,7 +68,7 @@ interface FeedDeckProps {
 /** The feed deck: the design system's signature element (see the design
  * doc's "Signature element" section). Renders the tape's true physical
  * geometry -- strip proportion from length_mm and the tape's nominal
- * width, the printable band inset from /api/tapes' print_mm, a cut line at
+ * width, the printable band inset from /api/v1/tapes' print_mm, a cut line at
  * the label's end, and a hatched minimum-feed-waste region when the label
  * is shorter than the mechanical feed floor -- never from the preview
  * PNG's own pixel dimensions (see feedDeckGeometry.ts's PX_PER_MM doc).

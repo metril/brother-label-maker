@@ -26,7 +26,7 @@ describe("App routing (task 2.13)", () => {
     const nav = screen.getByRole("navigation", { name: "Sections" });
     expect(await within(nav).findByRole("link", { name: "Design" })).toHaveAttribute("aria-current", "page");
 
-    // Task 3.4: HomeBox is a real NavLink once GET /api/homebox/status
+    // Task 3.4: HomeBox is a real NavLink once GET /api/v1/homebox/status
     // reports `configured` -- the default msw handler does. The
     // unconfigured placeholder branch is covered by this suite's own
     // "disabled placeholder" test below.
@@ -87,7 +87,7 @@ describe("App routing (task 2.13)", () => {
 
   it("renders HomeBox as a disabled placeholder, not a link, when status reports unconfigured", async () => {
     server.use(
-      http.get("/api/homebox/status", () =>
+      http.get("/api/v1/homebox/status", () =>
         HttpResponse.json({
           configured: false, reachable: null, healthy: null, version: null, error: null,
         }),

@@ -38,7 +38,7 @@ export interface UseFeedCutResult {
  * chained job's printed tape past the blade produces exactly this same
  * advance (the user's own printed content clearing the cutter, not waste);
  * triggering it with nothing pending instead produces a blank ~25mm
- * snippet. This hook wraps POST /api/printer/cut, which queues that as a
+ * snippet. This hook wraps POST /api/v1/printer/cut, which queues that as a
  * REAL job (`kind: "feed_cut"`) rather than firing a synchronous printer
  * command -- it serializes against any in-flight print via the same single
  * worker + USB lock a print job does, and shows up in History same as one.

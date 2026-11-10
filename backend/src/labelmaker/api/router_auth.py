@@ -65,11 +65,13 @@ import time
 from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 
 from labelmaker.api.auth_gate import get_session_user
 from labelmaker.api.deps import AppConfigDep
+from labelmaker.api.errors import ApiError, err
+from labelmaker.api.schemas import AuthMeOut, AuthUserOut
 from labelmaker.config import AppConfig
 
 router = APIRouter(tags=["auth"])
@@ -108,7 +110,7 @@ def _require_oidc_mode(config: AppConfig) -> None:
     convention (a plain 404 beats a 503 when there's nothing to configure
     towards in the first place)."""
     if config.auth_mode != "oidc":
-        raise HTTPException(status_code=404, detail="not found")
+        raise ApiError(404, "not_found", "not found")
 
 
 SESSION_NEXT_KEY = "login_next"
@@ -131,34 +133,59 @@ def safe_next_path(value: str | None) -> str:
     return value
 
 
-@router.get("/auth/login")
+@router.get(
+    "/auth/login",
+    status_code=302,
+    response_class=RedirectResponse,
+    summary="Start OIDC sign-in",
+    responses={
+        302: {"description": "Redirect to the identity provider"},
+        **err(404, 422, 502),
+    },
+)
 async def login(
     request: Request, config: AppConfigDep, next: str | None = None
 ) -> RedirectResponse:
+    """Redirect the browser to the IdP. `next` is a same-origin path to return to."""
     _require_oidc_mode(config)
     request.session[SESSION_NEXT_KEY] = safe_next_path(next)
     oauth: OAuth = request.app.state.oauth
-    redirect_uri = str(request.url_for("auth_callback"))
+    # Pinned to the legacy unversioned path: operators registered
+    # `/api/auth/callback` with their IdP before /api/v1 existed (both
+    # mounts serve it), and url_for would otherwise resolve to the v1 one.
+    redirect_uri = str(request.url_for("auth_callback")).replace("/api/v1/auth/", "/api/auth/")
     try:
         # First hit triggers authlib's lazy discovery fetch -- a typo'd or
         # unreachable OIDC_ISSUER surfaces HERE, as this route's own
         # readable error, not an unhandled 500 (review).
         return await oauth.oidc.authorize_redirect(request, redirect_uri)
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"identity provider unreachable or misconfigured (OIDC_ISSUER): {exc}",
+        raise ApiError(
+            502,
+            "idp_unavailable",
+            f"identity provider unreachable or misconfigured (OIDC_ISSUER): {exc}",
         ) from exc
 
 
-@router.get("/auth/callback", name="auth_callback")
+@router.get(
+    "/auth/callback",
+    name="auth_callback",
+    status_code=302,
+    response_class=RedirectResponse,
+    summary="Complete OIDC sign-in",
+    responses={
+        302: {"description": "Redirect to the originally requested page"},
+        **err(401, 404),
+    },
+)
 async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
+    """IdP redirect target: exchanges the code, stores the session, redirects on."""
     _require_oidc_mode(config)
     oauth: OAuth = request.app.state.oauth
     try:
         token = await oauth.oidc.authorize_access_token(request)
     except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"sign-in failed: {exc}") from exc
+        raise ApiError(401, "auth_required", f"sign-in failed: {exc}") from exc
 
     userinfo: dict[str, Any] = dict(token.get("userinfo") or {})
     if not userinfo.get("sub"):
@@ -167,9 +194,10 @@ async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
         # and 302ing would read as success while sign-in is actually broken
         # (review; reachable e.g. via a scope set missing "openid", which
         # main._require_oidc_config now rejects at startup as well).
-        raise HTTPException(
-            status_code=401,
-            detail="sign-in failed: the provider returned no verified id_token subject",
+        raise ApiError(
+            401,
+            "auth_required",
+            "sign-in failed: the provider returned no verified id_token subject",
         )
     # Re-validated on the way out too (the session is signed, but a bad
     # value here would be an open redirect, so never trust it blindly).
@@ -193,16 +221,33 @@ async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
     return RedirectResponse(url=next_path, status_code=302)
 
 
-@router.post("/auth/logout", status_code=204)
+@router.post(
+    "/auth/logout",
+    status_code=204,
+    response_class=Response,
+    summary="Sign out",
+    responses=err(404),
+)
 async def logout(request: Request, config: AppConfigDep) -> Response:
+    """Clear the session cookie. OIDC mode only."""
     _require_oidc_mode(config)
     request.session.clear()
     return Response(status_code=204)
 
 
-@router.get("/auth/me")
-async def me(request: Request, config: AppConfigDep) -> dict:
+@router.get(
+    "/auth/me",
+    response_model=AuthMeOut,
+    summary="Get the current session",
+    responses=err(500),
+)
+async def me(request: Request, config: AppConfigDep) -> AuthMeOut:
+    """Auth mode and the signed-in user. Always 200, even when signed out."""
     if config.auth_mode == "none":
-        return {"auth_mode": "none", "authenticated": True, "user": None}
+        return AuthMeOut(auth_mode="none", authenticated=True, user=None)
     user = get_session_user(request.session)
-    return {"auth_mode": "oidc", "authenticated": user is not None, "user": user}
+    return AuthMeOut(
+        auth_mode="oidc",
+        authenticated=user is not None,
+        user=AuthUserOut.model_validate(user) if user is not None else None,
+    )

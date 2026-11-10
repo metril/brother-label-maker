@@ -101,25 +101,72 @@ class SettingsOverrides(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    printer_mode: Literal["mock", "usb", "remote"] | None = None
-    printer_bridge_address: str | None = Field(default=None, max_length=255)
-    printer_bridge_cert: str | None = Field(default=None, max_length=8000)
-    printer_init_strategy: Literal["classic", "e310bt"] | None = None
-    printer_bit_order: Literal["msb_first", "lsb_first"] | None = None
-    printer_flip_pins: bool | None = None
+    printer_mode: Literal["mock", "usb", "remote"] | None = Field(
+        default=None,
+        description="Transport: mock, usb, or remote (Raspberry Pi bridge)",
+    )
+    printer_bridge_address: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Bridge host or host:port (remote mode)",
+    )
+    printer_bridge_cert: str | None = Field(
+        default=None,
+        max_length=8000,
+        description="Pinned bridge public certificate, PEM (remote mode)",
+    )
+    printer_init_strategy: Literal["classic", "e310bt"] | None = Field(
+        default=None,
+        description="Printer init sequence: classic or e310bt",
+    )
+    printer_bit_order: Literal["msb_first", "lsb_first"] | None = Field(
+        default=None,
+        description="Raster bit order: msb_first or lsb_first",
+    )
+    printer_flip_pins: bool | None = Field(
+        default=None,
+        description="Mirror the print-head pin order",
+    )
     # task 4.5 Track A: was a startup-only AppConfig field (main.py used to
     # decide whether to even register router_els's routes from it once, at
     # process start) -- now DB-editable like everything else here, checked
     # per-request instead (router_els.py's get_els_label), so flipping it
     # from the Settings page takes effect without a restart.
-    els_enabled: bool | None = None
-    els_tape_mm: float | None = Field(default=None, ge=3.5, le=36)
+    els_enabled: bool | None = Field(
+        default=None,
+        description="Serve the unauthenticated ELS label endpoint",
+    )
+    els_tape_mm: float | None = Field(
+        default=None,
+        ge=3.5,
+        le=36,
+        description="Tape width (mm) ELS labels are rendered for",
+    )
     # max_length mirrors router_homebox.py's own HomeBoxSettingsUpdate.qr_base_url bound.
-    homebox_url: str | None = Field(default=None, max_length=255)
-    homebox_api_key: str | None = Field(default=None, max_length=500)
-    homebox_writes_enabled: bool | None = None
-    keep_printer_awake: bool | None = None
-    keep_awake_interval_min: int | None = Field(default=None, ge=1, le=60)
+    homebox_url: str | None = Field(
+        default=None,
+        max_length=255,
+        description="HomeBox base URL (http/https)",
+    )
+    homebox_api_key: str | None = Field(
+        default=None,
+        max_length=500,
+        description="HomeBox API key (write-only; never returned)",
+    )
+    homebox_writes_enabled: bool | None = Field(
+        default=None,
+        description="Allow creating HomeBox entities/attachments",
+    )
+    keep_printer_awake: bool | None = Field(
+        default=None,
+        description="Periodically poll the printer to keep it awake",
+    )
+    keep_awake_interval_min: int | None = Field(
+        default=None,
+        ge=1,
+        le=60,
+        description="Keep-awake poll interval in minutes",
+    )
 
     @field_validator("homebox_url")
     @classmethod

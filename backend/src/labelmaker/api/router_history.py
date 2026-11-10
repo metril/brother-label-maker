@@ -20,13 +20,15 @@ actually wants the definition.
 from __future__ import annotations
 
 import anyio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Query
 from fastapi.responses import Response
 from pydantic import ValidationError
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
+from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_print import PrintRequest, _job_to_response, _validate_and_measure
 from labelmaker.api.router_printer import create_feed_cut_job
+from labelmaker.api.schemas import HistoryItemOut, HistoryPageOut, JobCreatedOut, JobOut, binary
 from labelmaker.render.estimate import estimate
 
 router = APIRouter(prefix="/history", tags=["history"])
@@ -61,53 +63,85 @@ def _to_light_item(job: dict) -> dict:
     relying on that never drifting.
     """
     item = {key: job[key] for key in _LIGHT_ITEM_FIELDS}
-    item["thumbnail_url"] = (
-        f"/api/history/{job['id']}/thumbnail" if job["has_thumbnail"] else None
-    )
+    thumb = f"/api/v1/history/{job['id']}/thumbnail"
+    item["thumbnail_url"] = thumb if job["has_thumbnail"] else None
     return item
 
 
-@router.get("")
+@router.get(
+    "",
+    response_model=HistoryPageOut,
+    summary="List print history",
+    responses=err(422),
+)
 async def list_history(
     db: DbDep,
-    page: int = 1,
-    page_size: int = 20,
-    status: str | None = None,
-    q: str | None = None,
-) -> dict:
+    page: int = Query(1, description="1-based page number (ignored when `offset` is given)"),
+    page_size: int = Query(20, description="Rows per page, 1-100"),
+    status: str | None = Query(None, description="Filter by job status"),
+    q: str | None = Query(None, description="Case-insensitive substring of the stored definition"),
+    limit: int | None = Query(None, description="Alias of `page_size` (1-100)"),
+    offset: int | None = Query(None, description="Row offset; overrides `page`"),
+) -> HistoryPageOut:
+    """Newest-first, filterable, paginated job history.
+
+    Page with `page`/`page_size` or, equivalently, `limit`/`offset`;
+    `total` is the full count matching the filters.
+    """
+    if limit is not None:
+        page_size = limit
     try:
-        result = await db.list_jobs(page=page, page_size=page_size, status=status, q=q)
+        result = await db.list_jobs(
+            page=page, page_size=page_size, status=status, q=q, offset=offset
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "invalid_query", error_message(exc)) from exc
 
-    return {
-        "items": [_to_light_item(job) for job in result["items"]],
-        "page": result["page"],
-        "page_size": result["page_size"],
-        "total": result["total"],
-    }
+    return HistoryPageOut(
+        items=[HistoryItemOut(**_to_light_item(job)) for job in result["items"]],
+        page=result["page"],
+        page_size=result["page_size"],
+        total=result["total"],
+    )
 
 
-@router.get("/{job_id}")
+@router.get(
+    "/{job_id}",
+    response_model=JobOut,
+    summary="Get a history job",
+    responses=err(404),
+)
 async def get_history_job(job_id: str, db: DbDep) -> dict:
+    """Full job resource (same shape as GET /print/jobs/{id})."""
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise ApiError(404, "not_found", "job not found")
     return _job_to_response(job)  # same full shape as GET /api/print/jobs/{id}
 
 
-@router.get("/{job_id}/thumbnail")
+@router.get(
+    "/{job_id}/thumbnail",
+    response_class=Response,
+    summary="Get a job thumbnail",
+    responses={**binary("image/png", "PNG thumbnail of the first label"), **err(404)},
+)
 async def get_history_thumbnail(job_id: str, db: DbDep) -> Response:
     job = await db.get_job(job_id)
     if job is None or not job.get("preview_png"):
-        raise HTTPException(status_code=404, detail="thumbnail not found")
+        raise ApiError(404, "not_found", "thumbnail not found")
     return Response(content=job["preview_png"], media_type="image/png")
 
 
-@router.post("/{job_id}/reprint", status_code=202)
+@router.post(
+    "/{job_id}/reprint",
+    status_code=202,
+    response_model=JobCreatedOut,
+    summary="Reprint a job",
+    responses=err(404, 409),
+)
 async def reprint_job(
     job_id: str, db: DbDep, queue: QueueDep, bus: BusDep, config: AppConfigDep
-) -> dict:
+) -> JobCreatedOut:
     """Re-renders from the stored `definition` snapshot (template +
     serialization block, if present -- see router_print.py's
     create_print_job docstring on why that snapshot is stored UNEXPANDED)
@@ -138,21 +172,21 @@ async def reprint_job(
     """
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise ApiError(404, "not_found", "job not found")
 
     if job["kind"] == "feed_cut":
         new_job = await create_feed_cut_job(db, queue, bus)
-        return {"job_id": new_job["id"]}
+        return JobCreatedOut(job_id=new_job["id"])
 
     try:
         print_request = PrintRequest.model_validate(job["definition"])
     except ValidationError as exc:
-        raise HTTPException(status_code=409, detail=error_message(exc)) from exc
+        raise ApiError(409, "conflict", error_message(exc)) from exc
 
     try:
         label_count, lengths_mm = await _validate_and_measure(print_request, config.data_dir)
-    except HTTPException as exc:
-        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    except ApiError as exc:
+        raise ApiError(409, "conflict", exc.detail) from exc
 
     # task 2.9: same POST-time tape_used_mm estimate POST /api/print stores
     # (router_print.py's create_print_job) -- reprint is otherwise
@@ -177,10 +211,16 @@ async def reprint_job(
     await bus.broadcast({"event": "job.queued", "job_id": new_job_id})
     await queue.put(new_job_id)
 
-    return {"job_id": new_job_id}
+    return JobCreatedOut(job_id=new_job_id)
 
 
-@router.delete("/{job_id}", status_code=204)
+@router.delete(
+    "/{job_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Delete a history job",
+    responses=err(404, 409),
+)
 async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Response:
     """204 removes the print_jobs row (which also disposes of the
     `preview_png` thumbnail -- it's a BLOB column on that same row, not a
@@ -214,7 +254,7 @@ async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Re
     if not deleted:
         job = await db.get_job(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            raise ApiError(404, "not_found", "job not found")
         if job["status"] == "queued":
             detail = "job is 'queued'; cancel it first"
         else:
@@ -222,7 +262,7 @@ async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Re
                 "job is 'printing'; wait for it to finish "
                 "(interrupted jobs are marked failed at restart)"
             )
-        raise HTTPException(status_code=409, detail=detail)
+        raise ApiError(409, "conflict", detail)
 
     stream_path = config.data_dir / "jobs" / f"{job_id}.bin"
     if await anyio.to_thread.run_sync(stream_path.is_file):

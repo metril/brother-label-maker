@@ -4,7 +4,7 @@ import type { HomeboxBulkCreateRequest } from "../api/types";
 
 const STALE_TIME_MS = 60_000;
 
-/** POST /api/homebox/entities/bulk. New entities change what the browse
+/** POST /api/v1/homebox/entities/bulk. New entities change what the browse
  * page's list and location tree show, so both are invalidated on success. */
 export function useBulkCreateEntities() {
   const queryClient = useQueryClient();

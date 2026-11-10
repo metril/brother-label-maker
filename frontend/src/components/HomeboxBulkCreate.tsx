@@ -61,7 +61,7 @@ function summaryFor(row: HomeboxBulkRowResult): HomeboxEntitySummary {
 /** Bulk "create N items under a location, then print their labels" panel
  * (shown by pages/Homebox.tsx only when writes are enabled). The name
  * pattern's `{seq}` token is filled client-side from the distinct values
- * POST /api/render/expand returns for a LOCAL Sequence (the same expansion
+ * POST /api/v1/render/expand returns for a LOCAL Sequence (the same expansion
  * the Designer's serializer uses -- SequenceEditor's field components are
  * reused, but its designer-store state is not shared). `parent` is the
  * page's selected location-tree node. */

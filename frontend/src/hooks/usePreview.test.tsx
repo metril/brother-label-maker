@@ -31,7 +31,7 @@ describe("usePreview", () => {
   it("debounces rapid definition changes into a single request, not one per keystroke", async () => {
     const requestSpy = vi.fn();
     server.use(
-      http.post("/api/render/preview", () => {
+      http.post("/api/v1/render/preview", () => {
         requestSpy();
         return HttpResponse.json({
           png_b64: TINY_PNG_B64,
@@ -68,7 +68,7 @@ describe("usePreview", () => {
 
   it("returns a decoded png data URL, min_feed_mm, and warnings from the response", async () => {
     server.use(
-      http.post("/api/render/preview", () =>
+      http.post("/api/v1/render/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           png_width_px: 200,
@@ -117,13 +117,13 @@ describe("usePreview", () => {
   it("fires no request against a stale empty debounced value on the first keystroke (I2)", async () => {
     const requestSpy = vi.fn<(lines: string[]) => void>();
     server.use(
-      http.post("/api/render/preview", async ({ request }) => {
+      http.post("/api/v1/render/preview", async ({ request }) => {
         const body = (await request.json()) as { definition: LabelDefinition };
         const lines = (body.definition.params as { lines: string[] }).lines;
         requestSpy(lines);
         const renderable = lines.some((line) => line.trim() !== "");
         if (!renderable) {
-          return HttpResponse.json({ detail: "labels: at least one non-blank line" }, { status: 422 });
+          return HttpResponse.json({ error: { code: "error", message: "labels: at least one non-blank line" } }, { status: 422 });
         }
         return HttpResponse.json({
           png_b64: TINY_PNG_B64,
@@ -179,7 +179,7 @@ describe("usePreview", () => {
     async () => {
       let releaseBarcode: (() => void) | undefined;
       server.use(
-        http.post("/api/render/preview", async ({ request }) => {
+        http.post("/api/v1/render/preview", async ({ request }) => {
           const body = (await request.json()) as { definition: LabelDefinition };
           if (body.definition.type === "barcode") {
             await new Promise<void>((resolve) => {
@@ -245,7 +245,7 @@ describe("usePreview", () => {
   // time pass.
   it("clears the previous type's png/lengthMm the instant the label TYPE changes, before the new debounce window elapses", async () => {
     server.use(
-      http.post("/api/render/preview", async ({ request }) => {
+      http.post("/api/v1/render/preview", async ({ request }) => {
         const body = (await request.json()) as { definition: LabelDefinition };
         if (body.definition.type === "barcode") {
           return HttpResponse.json({

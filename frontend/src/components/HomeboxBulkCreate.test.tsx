@@ -22,7 +22,7 @@ afterEach(() => {
 const PARENT = { id: "loc-1", name: "Garage" };
 
 function useTagsHandler() {
-  server.use(http.get("/api/homebox/tags", () => HttpResponse.json([{ id: "t1", name: "cables" }])));
+  server.use(http.get("/api/v1/homebox/tags", () => HttpResponse.json([{ id: "t1", name: "cables" }])));
 }
 
 describe("HomeboxBulkCreate", () => {
@@ -31,7 +31,7 @@ describe("HomeboxBulkCreate", () => {
     useTagsHandler();
     let captured: unknown;
     server.use(
-      http.post("/api/homebox/entities/bulk", async ({ request }) => {
+      http.post("/api/v1/homebox/entities/bulk", async ({ request }) => {
         captured = await request.json();
         return HttpResponse.json({
           results: [
@@ -41,7 +41,7 @@ describe("HomeboxBulkCreate", () => {
           ],
         });
       }),
-      http.get("/api/homebox/settings", () =>
+      http.get("/api/v1/homebox/settings", () =>
         HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "https://hb.example.com" }),
       ),
     );
@@ -71,8 +71,8 @@ describe("HomeboxBulkCreate", () => {
     useTagsHandler();
     const bodies: unknown[] = [];
     server.use(
-      http.get("/api/homebox/entity-types", () => HttpResponse.json([{ id: "et1", name: "Cable" }])),
-      http.post("/api/homebox/entities/bulk", async ({ request }) => {
+      http.get("/api/v1/homebox/entity-types", () => HttpResponse.json([{ id: "et1", name: "Cable" }])),
+      http.post("/api/v1/homebox/entities/bulk", async ({ request }) => {
         bodies.push(await request.json());
         return HttpResponse.json({ results: [] });
       }),
@@ -108,15 +108,15 @@ describe("HomeboxBulkCreate", () => {
     const user = userEvent.setup();
     useTagsHandler();
     server.use(
-      http.post("/api/homebox/entities/bulk", () =>
+      http.post("/api/v1/homebox/entities/bulk", () =>
         HttpResponse.json({
           results: [{ index: 0, ok: true, entity: { id: "e1", name: "Cable 1", asset_id: "000-001" }, error: null }],
         }),
       ),
-      http.get("/api/homebox/settings", () =>
+      http.get("/api/v1/homebox/settings", () =>
         HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "https://hb.example.com" }),
       ),
-      http.get("/api/homebox/entities/:id/path", () => HttpResponse.json([{ id: "loc-1", name: "Garage", type: "location" }])),
+      http.get("/api/v1/homebox/entities/:id/path", () => HttpResponse.json([{ id: "loc-1", name: "Garage", type: "location" }])),
     );
     renderWithProviders(<HomeboxBulkCreate parent={PARENT} />);
 
@@ -154,7 +154,7 @@ describe("HomeboxBulkCreate", () => {
   it("shows the server error when the whole bulk request is rejected", async () => {
     const user = userEvent.setup();
     useTagsHandler();
-    server.use(http.post("/api/homebox/entities/bulk", () => HttpResponse.json({ detail: "homebox writes disabled" }, { status: 403 })));
+    server.use(http.post("/api/v1/homebox/entities/bulk", () => HttpResponse.json({ error: { code: "error", message: "homebox writes disabled" } }, { status: 403 })));
     renderWithProviders(<HomeboxBulkCreate parent={PARENT} />);
 
     const button = await screen.findByRole("button", { name: "Create 5 & print" });

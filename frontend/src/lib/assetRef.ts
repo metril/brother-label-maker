@@ -40,7 +40,7 @@ function fromPath(path: string): ScanRef | null {
   return { kind: m[1] === "item" ? "entity" : "location", value: id };
 }
 
-/** `qrBaseUrl` (GET /api/homebox/settings' `effective_qr_base_url`) is only
+/** `qrBaseUrl` (GET /api/v1/homebox/settings' `effective_qr_base_url`) is only
  * a hint for stripping a sub-path prefix; a URL on ANY host whose path ends
  * in /a/<id>, /item/<uuid> or /location/<uuid> is accepted (labels outlive
  * a changed base URL). Returns null for anything else. */

@@ -112,7 +112,7 @@ export function Designer() {
   // `count`, or pushing it out of bounds) kept `activeSerialization` == the
   // now-invalid live sequence for one cycle, because the STALE confirmed
   // data hadn't cleared yet. Confirmed live (chrome-devtools): real 422s on
-  // /api/print/estimate AND /api/render/preview, with the deck flashing a
+  // /api/v1/print/estimate AND /api/v1/render/preview, with the deck flashing a
   // raw validation-error dump before self-correcting.
   //
   // Fixed the same way canSubmit already gates the params form: a
@@ -176,7 +176,7 @@ export function Designer() {
   const typeInfo = labelTypes?.find((t) => t.type === selectedType) ?? null;
   const params = (selectedType && paramsByType[selectedType]) || {};
   // A fallback empty schema keeps every hook below callable on the very
-  // first render too, before GET /api/label-types resolves -- the "still
+  // first render too, before GET /api/v1/label-types resolves -- the "still
   // loading" return happens AFTER every hook call in this component, never
   // before (Rules of Hooks: same hooks, same order, every render).
   const schema = typeInfo?.params_schema ?? { type: "object", properties: {} };

@@ -37,7 +37,7 @@ _NUMERIC_1_TO_3 = {"kind": "numeric", "start": 1, "step": 1, "count": 3}
 
 async def test_preview_returns_expected_scaled_png_byte_equal_to_direct_pipeline(client):
     resp = await client.post(
-        "/api/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 3}
+        "/api/v1/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 3}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -57,7 +57,7 @@ async def test_preview_returns_expected_scaled_png_byte_equal_to_direct_pipeline
 
 
 async def test_preview_default_scale_is_2(client):
-    resp = await client.post("/api/render/preview", json={"definition": _HELLO_DEFINITION})
+    resp = await client.post("/api/v1/render/preview", json={"definition": _HELLO_DEFINITION})
     assert resp.status_code == 200
     body = resp.json()
     png_bytes = base64.b64decode(body["png_b64"])
@@ -75,7 +75,7 @@ async def test_preview_default_scale_is_2(client):
 async def test_preview_min_feed_mm_matches_geometry_constant(client):
     from labelmaker.driver.geometry import MIN_FEED_MM
 
-    resp = await client.post("/api/render/preview", json={"definition": _HELLO_DEFINITION})
+    resp = await client.post("/api/v1/render/preview", json={"definition": _HELLO_DEFINITION})
     assert resp.status_code == 200
     assert resp.json()["min_feed_mm"] == MIN_FEED_MM
 
@@ -89,7 +89,7 @@ async def test_preview_short_label_warning_present_when_under_min_feed(client):
         "params": {"lines": ["A"]},
     }
     resp = await client.post(
-        "/api/render/preview", json={"definition": short_definition, "scale": 1}
+        "/api/v1/render/preview", json={"definition": short_definition, "scale": 1}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -97,9 +97,10 @@ async def test_preview_short_label_warning_present_when_under_min_feed(client):
     short_label_warnings = [w for w in body["warnings"] if w["code"] == "short_label"]
     assert len(short_label_warnings) == 1
     assert short_label_warnings[0]["severity"] == "info"
-    assert str(MIN_FEED_MM) in short_label_warnings[0]["message"] or "24.5" in short_label_warnings[
-        0
-    ]["message"]
+    assert (
+        str(MIN_FEED_MM) in short_label_warnings[0]["message"]
+        or "24.5" in short_label_warnings[0]["message"]
+    )
 
 
 async def test_preview_no_short_label_warning_when_at_or_above_min_feed(client):
@@ -111,7 +112,7 @@ async def test_preview_no_short_label_warning_when_at_or_above_min_feed(client):
         "params": {"lines": ["HELLO"], "length_mm": 40.0},
     }
     resp = await client.post(
-        "/api/render/preview", json={"definition": long_definition, "scale": 1}
+        "/api/v1/render/preview", json={"definition": long_definition, "scale": 1}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -126,14 +127,12 @@ async def test_preview_warnings_pass_through_on_cramped_text(client):
         "params": {"lines": ["A", "B", "C", "D"]},
     }
     resp = await client.post(
-        "/api/render/preview", json={"definition": cramped_definition, "scale": 1}
+        "/api/v1/render/preview", json={"definition": cramped_definition, "scale": 1}
     )
     assert resp.status_code == 200
     body = resp.json()
     assert any(w["code"] == "text_cramped" for w in body["warnings"])
-    assert all(
-        w["severity"] == "warning" for w in body["warnings"] if w["code"] == "text_cramped"
-    )
+    assert all(w["severity"] == "warning" for w in body["warnings"] if w["code"] == "text_cramped")
     # task 2.9: this label's content is well under MIN_FEED_MM (24.5mm) on a
     # 3.5mm tape -- the preview response's own short_label warning (info
     # severity, NOT "warning" -- see
@@ -146,21 +145,25 @@ async def test_preview_warnings_pass_through_on_cramped_text(client):
 
 async def test_preview_unknown_type_returns_422_listing_valid_types(client):
     bad_definition = {**_HELLO_DEFINITION, "type": "does-not-exist"}
-    resp = await client.post("/api/render/preview", json={"definition": bad_definition, "scale": 1})
+    resp = await client.post(
+        "/api/v1/render/preview", json={"definition": bad_definition, "scale": 1}
+    )
     assert resp.status_code == 422
-    assert "text" in resp.json()["detail"]
+    assert "text" in resp.json()["error"]["message"]
 
 
 async def test_preview_bad_tape_width_returns_422(client):
     bad_definition = {**_HELLO_DEFINITION, "tape": {"width_mm": 999, "family": "tze"}}
-    resp = await client.post("/api/render/preview", json={"definition": bad_definition, "scale": 1})
+    resp = await client.post(
+        "/api/v1/render/preview", json={"definition": bad_definition, "scale": 1}
+    )
     assert resp.status_code == 422
-    assert "999" in resp.json()["detail"]
+    assert "999" in resp.json()["error"]["message"]
 
 
 async def test_preview_scale_out_of_range_returns_422(client):
     resp = await client.post(
-        "/api/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 9}
+        "/api/v1/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 9}
     )
     assert resp.status_code == 422
 
@@ -184,10 +187,10 @@ async def test_preview_divided_blocks_engine_value_error_returns_422_with_messag
         },
     }
     resp = await client.post(
-        "/api/render/preview", json={"definition": bad_definition, "scale": 1}
+        "/api/v1/render/preview", json={"definition": bad_definition, "scale": 1}
     )
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
+    detail = resp.json()["error"]["message"]
     assert "1200.0mm" in detail
     assert "1000.0" in detail
 
@@ -197,7 +200,7 @@ async def test_preview_divided_blocks_engine_value_error_returns_422_with_messag
 
 async def test_preview_without_serialization_has_null_total_labels_and_sequence_value(client):
     resp = await client.post(
-        "/api/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 1}
+        "/api/v1/render/preview", json={"definition": _HELLO_DEFINITION, "scale": 1}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -207,7 +210,7 @@ async def test_preview_without_serialization_has_null_total_labels_and_sequence_
 
 async def test_preview_serialization_index_0_byte_parity(client):
     resp = await client.post(
-        "/api/render/preview",
+        "/api/v1/render/preview",
         json={"definition": _SERIAL_TEMPLATE, "scale": 1, "serialization": _NUMERIC_1_TO_3},
     )
     assert resp.status_code == 200
@@ -224,7 +227,7 @@ async def test_preview_serialization_index_0_byte_parity(client):
 
 async def test_preview_serialization_index_mid_matches_that_labels_value(client):
     resp = await client.post(
-        "/api/render/preview",
+        "/api/v1/render/preview",
         json={
             "definition": _SERIAL_TEMPLATE,
             "scale": 1,
@@ -245,7 +248,7 @@ async def test_preview_serialization_index_mid_matches_that_labels_value(client)
 
 async def test_preview_serialization_index_out_of_range_returns_422(client):
     resp = await client.post(
-        "/api/render/preview",
+        "/api/v1/render/preview",
         json={
             "definition": _SERIAL_TEMPLATE,
             "scale": 1,
@@ -254,12 +257,12 @@ async def test_preview_serialization_index_out_of_range_returns_422(client):
         },
     )
     assert resp.status_code == 422
-    assert "3" in resp.json()["detail"]
+    assert "3" in resp.json()["error"]["message"]
 
 
 async def test_preview_serialization_default_index_is_0(client):
     resp = await client.post(
-        "/api/render/preview",
+        "/api/v1/render/preview",
         json={"definition": _SERIAL_TEMPLATE, "scale": 1, "serialization": _NUMERIC_1_TO_3},
     )
     assert resp.status_code == 200
@@ -277,7 +280,7 @@ async def test_preview_serialization_with_csv_binds_row_columns(client):
         "rows": [{"name": "Alice"}, {"name": "Bob"}],
     }
     resp = await client.post(
-        "/api/render/preview",
+        "/api/v1/render/preview",
         json={"definition": template, "scale": 1, "serialization": serialization, "index": 1},
     )
     assert resp.status_code == 200
@@ -307,14 +310,14 @@ async def test_preview_text_with_symbol_icon(client):
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["SERVER"], "icon": {"kind": "symbol", "id": "bolt"}},
     }
-    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    resp = await client.post("/api/v1/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 200
     assert resp.json()["warnings"] == []
 
 
 async def test_preview_text_with_image_icon_resolves_via_app_data_dir(client):
     upload = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("logo.png", io.BytesIO(_png_bytes()), "image/png")},
     )
     assert upload.status_code == 201
@@ -325,7 +328,7 @@ async def test_preview_text_with_image_icon_resolves_via_app_data_dir(client):
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": image_id}},
     }
-    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    resp = await client.post("/api/v1/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 200
 
 
@@ -336,9 +339,9 @@ async def test_preview_text_with_unknown_image_icon_returns_422(client):
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": unknown_id}},
     }
-    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    resp = await client.post("/api/v1/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 422
-    assert "unknown image_id" in resp.json()["detail"]
+    assert "unknown image_id" in resp.json()["error"]["message"]
 
 
 async def test_preview_text_with_unknown_symbol_icon_returns_422(client):
@@ -347,9 +350,9 @@ async def test_preview_text_with_unknown_symbol_icon_returns_422(client):
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["X"], "icon": {"kind": "symbol", "id": "not-a-real-icon"}},
     }
-    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    resp = await client.post("/api/v1/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 422
-    assert "unknown symbol id" in resp.json()["detail"]
+    assert "unknown symbol id" in resp.json()["error"]["message"]
 
 
 # --- SECURITY (coordinator-review-caught CRITICAL bug): a malformed/path- --
@@ -378,9 +381,9 @@ async def test_preview_text_with_malicious_image_icon_id_returns_422_not_200(
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["X"], "icon": {"kind": "image", "image_id": malicious_image_id}},
     }
-    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    resp = await client.post("/api/v1/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 422
-    assert "invalid image_id" in resp.json()["detail"]
+    assert "invalid image_id" in resp.json()["error"]["message"]
 
 
 async def test_preview_text_with_absolute_path_image_id_does_not_leak_file_contents(
@@ -397,7 +400,7 @@ async def test_preview_text_with_absolute_path_image_id_does_not_leak_file_conte
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["X"], "icon": {"kind": "image", "image_id": malicious_id}},
     }
-    resp = await client.post("/api/render/preview", json={"definition": definition, "scale": 1})
+    resp = await client.post("/api/v1/render/preview", json={"definition": definition, "scale": 1})
     assert resp.status_code == 422
     assert str(secret) not in resp.text
 

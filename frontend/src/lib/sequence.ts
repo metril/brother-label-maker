@@ -43,7 +43,7 @@ export function effectiveCount(seq: Sequence): number {
 /** effectiveCount(seq) * copies_per_value -- mirrors serialize.py's
  * total_labels(). Purely arithmetic (no server round-trip needed), but the
  * AUTHORITATIVE "is this actually printable" answer -- including the 1000-
- * label cap and ALPHA overflow -- still comes from POST /api/render/expand
+ * label cap and ALPHA overflow -- still comes from POST /api/v1/render/expand
  * (see hooks/useSequenceExpand.ts): this is just the number, not a
  * validity claim. */
 export function sequenceTotalLabels(seq: Sequence): number {
@@ -147,7 +147,7 @@ export function parseListTextarea(text: string): string[] {
 }
 
 /** Column names of an uploaded CSV's rows, in their original order -- POST
- * /api/serialize/csv's own `columns` field already carries this, but once
+ * /api/v1/serialize/csv's own `columns` field already carries this, but once
  * rows live on Sequence.rows alone this recovers the same order from the
  * rows themselves (JS preserves string-key insertion order, and every row
  * shares identical columns -- enforced server-side at upload time). */
@@ -161,7 +161,7 @@ export function csvColumns(rows: Record<string, string>[]): string[] {
  * fields (patch_panel's `blocks`, breaker_box's `breakers`, ...) recurse
  * into each item in turn using this SAME function against the item's own
  * schema+params (so e.g. a block's `lines` is found exactly the way a
- * top-level `lines` field would be). Feeds POST /api/render/expand's
+ * top-level `lines` field would be). Feeds POST /api/v1/render/expand's
  * `sample` (see useSequenceExpand.ts) so the live value chips can show real
  * token substitution ("PORT-{seq}" -> "PORT-01") for whichever field the
  * user is actually likely to serialize, and lib/tray.ts's
@@ -214,7 +214,7 @@ export interface CollationPatternResult {
  * py's _ordered_pairs ordering exactly, applied to a small slice of the
  * current distinct values (never the full run: this is a "what does the
  * ordering look like" explainer, not the live-chips section, which shows
- * the real, separately-capped-at-24 expansion via /api/render/expand). */
+ * the real, separately-capped-at-24 expansion via /api/v1/render/expand). */
 export function collationPattern(values: string[], copiesPerValue: number, collation: Collation): CollationPatternResult {
   const distinct = values.slice(0, 6);
   const copies = Math.max(1, Math.min(Math.trunc(copiesPerValue) || 1, 100));

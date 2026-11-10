@@ -9,7 +9,7 @@ import { usePresets } from "../hooks/usePresets";
 const SEARCH_DEBOUNCE_MS = 300;
 
 /** The Presets page (task 2.13): search + type filter driving GET
- * /api/presets straight through as query params, a card grid, and the
+ * /api/v1/presets straight through as query params, a card grid, and the
  * empty state per the brief's own copy voice ("No presets yet. Design a
  * label and choose Save as preset to reuse it."). Saving a NEW preset
  * happens from the Designer (components/SavePresetDialog.tsx, "near the

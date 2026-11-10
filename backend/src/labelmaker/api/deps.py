@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 
+from labelmaker.api.errors import ApiError
 from labelmaker.config import AppConfig
 from labelmaker.db.database import Database
 from labelmaker.homebox import HomeBoxClient
@@ -54,9 +55,10 @@ def get_homebox(request: Request) -> HomeBoxClient:
     this dependency and check the config themselves."""
     client = request.app.state.homebox
     if client is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
+        raise ApiError(
+            503,
+            "homebox_unavailable",
+            (
                 "HomeBox integration is not configured -- set the HomeBox URL and "
                 "API key (an hb_-prefixed key) on the Settings page"
             ),

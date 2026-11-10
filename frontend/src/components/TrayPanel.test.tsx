@@ -65,7 +65,7 @@ function seedTrayItems(n: number) {
  * already covered end-to-end via GlobalTrayDrawer.test.tsx. */
 describe("TrayPanel -- current === null (away from the Designer page)", () => {
   it("an empty tray with no current design has nothing to print: Print is disabled, no crash, no serialization branch", async () => {
-    server.use(http.post("/api/print/estimate", () => {
+    server.use(http.post("/api/v1/print/estimate", () => {
       throw new Error("must not be called: nothing renderable to estimate");
     }));
 
@@ -101,11 +101,11 @@ describe("TrayPanel -- Feed & cut button", () => {
     expect(screen.getByRole("button", { name: "Feed & cut" })).toBeEnabled();
   });
 
-  it("clicking it POSTs /api/printer/cut", async () => {
+  it("clicking it POSTs /api/v1/printer/cut", async () => {
     const user = userEvent.setup();
     let posted = false;
     server.use(
-      http.post("/api/printer/cut", () => {
+      http.post("/api/v1/printer/cut", () => {
         posted = true;
         return HttpResponse.json({ job_id: "cut-job-1" }, { status: 202 });
       }),
@@ -121,7 +121,7 @@ describe("TrayPanel -- Feed & cut button", () => {
     const user = userEvent.setup();
     let resolveResponse!: () => void;
     server.use(
-      http.post("/api/printer/cut", async () => {
+      http.post("/api/v1/printer/cut", async () => {
         await new Promise<void>((resolve) => {
           resolveResponse = resolve;
         });
@@ -151,7 +151,7 @@ describe("TrayPanel -- Feed & cut button", () => {
   it("re-enables once the post-success cooldown elapses (Item 3)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.post("/api/printer/cut", () => HttpResponse.json({ job_id: "cut-job-cooldown" }, { status: 202 })),
+      http.post("/api/v1/printer/cut", () => HttpResponse.json({ job_id: "cut-job-cooldown" }, { status: 202 })),
     );
 
     renderWithProviders(<TrayPanel current={null} />);
@@ -169,7 +169,7 @@ describe("TrayPanel -- Feed & cut button", () => {
   it("renders the server's error message inline below the row, role=alert", async () => {
     const user = userEvent.setup();
     server.use(
-      http.post("/api/printer/cut", () => HttpResponse.json({ detail: "cannot queue: printer busy" }, { status: 409 })),
+      http.post("/api/v1/printer/cut", () => HttpResponse.json({ error: { code: "error", message: "cannot queue: printer busy" } }, { status: 409 })),
     );
 
     renderWithProviders(<TrayPanel current={null} />);
@@ -237,7 +237,7 @@ describe("TrayPanel -- chain mode picker changes the estimate and shows the delt
   it('switching to Chain shows "saves X mm" using a SEPARATE cut_each baseline request', async () => {
     const user = userEvent.setup();
     server.use(
-      http.post("/api/print/estimate", async ({ request }) => {
+      http.post("/api/v1/print/estimate", async ({ request }) => {
         const body = (await request.json()) as { options?: { chain_mode?: string } };
         const total = body.options?.chain_mode === "chain_ff" ? 37.5 : 100;
         return HttpResponse.json(estimateBody({ total_mm: total, per_label_mm: total }));
@@ -267,7 +267,7 @@ describe("TrayPanel -- estimate panel", () => {
   // column (PrintPreviewDeck.test.tsx covers it there).
   it("renders total_mm and a usage bar proportional to content/overhead, with no Details disclosure", async () => {
     server.use(
-      http.post("/api/print/estimate", () =>
+      http.post("/api/v1/print/estimate", () =>
         HttpResponse.json(estimateBody({ total_mm: 40, content_mm: 30, feed_overhead_mm: 10 })),
       ),
     );
@@ -284,7 +284,7 @@ describe("TrayPanel -- estimate panel", () => {
   // serialization already shows its own error in the Serialize panel --
   // the tray must defer to it, not print the identical raw message again.
   it("defers to the Serialize panel's own error instead of duplicating the raw 422 text", async () => {
-    server.use(http.post("/api/print/estimate", () => HttpResponse.json({ detail: "total labels 1500 exceeds the 1000 maximum" }, { status: 422 })));
+    server.use(http.post("/api/v1/print/estimate", () => HttpResponse.json({ error: { code: "error", message: "total labels 1500 exceeds the 1000 maximum" } }, { status: 422 })));
 
     renderWithProviders(
       <TrayPanel
@@ -306,12 +306,12 @@ describe("TrayPanel -- progress reaches done via the WS stream", () => {
   it("shows queued -> printing -> done, driven by job.started/job.progress/job.done", async () => {
     const user = userEvent.setup();
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-progress" }, { status: 202 })),
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-progress" }, { status: 202 })),
       // The default poll handler (test/msw/handlers.ts) always reports
       // "done" -- override so the poll fallback doesn't race ahead of (and
       // win against) the WS-driven progression this test means to observe.
-      http.get("/api/print/jobs/:jobId", () =>
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({
           id: "job-progress",
           created_at: "2026-07-27T00:00:00.000000Z",
@@ -367,8 +367,8 @@ describe("TrayPanel -- done-state freeze and reset (review fix-up)", () => {
     const user = userEvent.setup();
     seedTrayItems(2);
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-freeze" }, { status: 202 })),
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-freeze" }, { status: 202 })),
     );
 
     renderWithProviders(<TrayPanel current={currentDesign()} onAddToTray={vi.fn()} />);
@@ -404,12 +404,12 @@ describe("TrayPanel -- done-state freeze and reset (review fix-up)", () => {
     const user = userEvent.setup();
     seedTrayItems(2);
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-mid-edit" }, { status: 202 })),
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody({ label_count: 2 }))),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-mid-edit" }, { status: 202 })),
       // Keep the poll fallback reporting "printing" (not "done") so the WS
       // frame below is what actually resolves this -- and so there's a
       // real window, while genuinely "printing", to edit the tray in.
-      http.get("/api/print/jobs/:jobId", () =>
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({
           id: "job-mid-edit",
           created_at: "2026-07-27T00:00:00.000000Z",
@@ -454,9 +454,9 @@ describe("TrayPanel -- done-state freeze and reset (review fix-up)", () => {
     const user = userEvent.setup();
     seedTrayItems(1);
     server.use(
-      http.post("/api/print/estimate", () => HttpResponse.json(estimateBody())),
-      http.post("/api/print", () => HttpResponse.json({ job_id: "job-fail" }, { status: 202 })),
-      http.get("/api/print/jobs/:jobId", () =>
+      http.post("/api/v1/print/estimate", () => HttpResponse.json(estimateBody())),
+      http.post("/api/v1/print", () => HttpResponse.json({ job_id: "job-fail" }, { status: 202 })),
+      http.get("/api/v1/print/jobs/:jobId", () =>
         HttpResponse.json({
           id: "job-fail",
           created_at: "2026-07-27T00:00:00.000000Z",

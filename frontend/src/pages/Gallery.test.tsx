@@ -35,7 +35,7 @@ function galleryItem(overrides: Partial<Record<string, unknown>> = {}) {
 describe("Gallery page", () => {
   it("renders a card per item with title, blurb, meta line, strip, and warning chips", async () => {
     server.use(
-      http.get("/api/gallery", () =>
+      http.get("/api/v1/gallery", () =>
         HttpResponse.json([
           galleryItem(),
           galleryItem({
@@ -58,7 +58,7 @@ describe("Gallery page", () => {
     expect(await screen.findByText("Simple text")).toBeInTheDocument();
     expect(screen.getByText("A single line of text — the baseline label.")).toBeInTheDocument();
     expect(screen.getByText("45.2 mm")).toBeInTheDocument();
-    // Both cards render a DeckStrip once /api/tapes resolves.
+    // Both cards render a DeckStrip once /api/v1/tapes resolves.
     await waitFor(() => expect(screen.getAllByTestId("printable-band")).toHaveLength(2));
     // Warning + info chips from the second card, and its serialized-run note.
     expect(screen.getByText("caption omitted: too wide")).toBeInTheDocument();
@@ -69,7 +69,7 @@ describe("Gallery page", () => {
   it("Open in designer sets the type/params/tape in the store", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/gallery", () => HttpResponse.json([galleryItem({ params: { lines: ["FROM GALLERY"] } })])),
+      http.get("/api/v1/gallery", () => HttpResponse.json([galleryItem({ params: { lines: ["FROM GALLERY"] } })])),
     );
     renderWithProviders(<Gallery />, { route: "/gallery" });
 
@@ -82,10 +82,10 @@ describe("Gallery page", () => {
     });
   });
 
-  it("shows the error state when GET /api/gallery fails", async () => {
+  it("shows the error state when GET /api/v1/gallery fails", async () => {
     // Silence the expected fetch-failure noise react-query logs on retry-less errors.
     vi.spyOn(console, "error").mockImplementation(() => {});
-    server.use(http.get("/api/gallery", () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+    server.use(http.get("/api/v1/gallery", () => HttpResponse.json({ error: { code: "error", message: "boom" } }, { status: 500 })));
     renderWithProviders(<Gallery />, { route: "/gallery" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the gallery.");

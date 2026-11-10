@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, putHomeboxSettings } from "../api/client";
 import type { SettingRow, SettingsSource } from "../api/types";
+import { ApiKeysSection } from "../components/ApiKeysSection";
 import { Pending } from "../components/ui/Pending";
 import { NumberInput, Select, Textarea, TextInput } from "../components/ui/inputs";
 import { Switch } from "../components/ui/Switch";
@@ -77,7 +78,7 @@ function SettingErrorText({ mutation }: { mutation: ReturnType<typeof useUpdateS
 }
 
 // --- Printer section: three Selects + one Switch, each independently ------
-// editable (a change fires PUT /api/settings immediately -- no separate
+// editable (a change fires PUT /api/v1/settings immediately -- no separate
 // Save button, matching Switch's own "takes effect immediately" ethos and
 // keeping a fixed, small choice set out of the buffered-text-input pattern
 // the URL/number fields below need instead).
@@ -836,6 +837,7 @@ export function Settings() {
           <PrinterSection rows={rows} />
           <HomeboxSection rows={rows} />
           <ElsSection rows={rows} />
+          <ApiKeysSection />
           <RuntimeSection rows={rows} />
         </>
       )}

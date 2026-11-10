@@ -382,7 +382,7 @@ describe("SymbolBrowser: full-catalog scale (H9)", () => {
     // this is deliberately exercising the full 2.1 MB payload's
     // parse/serialize/structural-sharing/render cost that H9 was about in
     // the first place.
-    server.use(http.get("/api/symbols", () => HttpResponse.json(symbolsFixture)));
+    server.use(http.get("/api/v1/symbols", () => HttpResponse.json(symbolsFixture)));
     const user = userEvent.setup();
     renderWithQueryClient(<SymbolBrowser mode="browse" />);
 

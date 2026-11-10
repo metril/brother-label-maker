@@ -92,7 +92,7 @@ describe("PrintPreviewDeck", () => {
     const user = userEvent.setup();
     const capturedModes: string[] = [];
     server.use(
-      http.post("/api/print/preview", async ({ request }) => {
+      http.post("/api/v1/print/preview", async ({ request }) => {
         const body = (await request.json()) as { options?: { chain_mode?: string } };
         const mode = body.options?.chain_mode ?? "cut_each";
         capturedModes.push(mode);
@@ -179,7 +179,7 @@ describe("PrintPreviewDeck", () => {
   it("shows 'Nothing queued to print.' when the tray is empty, and fires no preview request at all (the current-design fallback was removed)", async () => {
     let requestCount = 0;
     server.use(
-      http.post("/api/print/preview", () => {
+      http.post("/api/v1/print/preview", () => {
         requestCount++;
         return HttpResponse.json({
           png_b64: TINY_PNG_B64,
@@ -208,7 +208,7 @@ describe("PrintPreviewDeck", () => {
     seedTrayItems(2);
     let requestCount = 0;
     server.use(
-      http.post("/api/print/preview", async ({ request }) => {
+      http.post("/api/v1/print/preview", async ({ request }) => {
         requestCount++;
         const body = (await request.json()) as { options?: { chain_mode?: string } };
         return HttpResponse.json({
@@ -243,7 +243,7 @@ describe("PrintPreviewDeck", () => {
   it("renders a non-empty `warnings` response as an alert (M13)", async () => {
     seedTrayItems(1);
     server.use(
-      http.post("/api/print/preview", () =>
+      http.post("/api/v1/print/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           chain_mode: "cut_each",
@@ -274,8 +274,8 @@ describe("PrintPreviewDeck", () => {
   it("shows the request's error detail in an alert, and recovers without a permanent spinner (M14)", async () => {
     seedTrayItems(1);
     server.use(
-      http.post("/api/print/preview", () =>
-        HttpResponse.json({ detail: "combined tape length exceeds the 1000mm maximum" }, { status: 422 }),
+      http.post("/api/v1/print/preview", () =>
+        HttpResponse.json({ error: { code: "error", message: "combined tape length exceeds the 1000mm maximum" } }, { status: 422 }),
       ),
     );
     const user = userEvent.setup();
@@ -294,7 +294,7 @@ describe("PrintPreviewDeck", () => {
   it("opening the print preview from TrayPanel's own button closes the GlobalTrayDrawer slide-over, and restores focus there on close", async () => {
     seedTrayItems(2);
     server.use(
-      http.post("/api/print/estimate", () =>
+      http.post("/api/v1/print/estimate", () =>
         HttpResponse.json({
           label_count: 2,
           label_lengths_mm: [20, 21],
@@ -473,7 +473,7 @@ describe("PrintPreviewDeck -- cycling through queued labels", () => {
   it("renders neither a cycler nor a highlight with exactly 1 segment", async () => {
     seedTrayItems(1);
     server.use(
-      http.post("/api/print/preview", () =>
+      http.post("/api/v1/print/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           chain_mode: "cut_each",
@@ -503,7 +503,7 @@ describe("PrintPreviewDeck -- cycling through queued labels", () => {
   it("cycles through all three names on a 3-item tray/3-segment response", async () => {
     seedTrayItems(3);
     server.use(
-      http.post("/api/print/preview", () =>
+      http.post("/api/v1/print/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           chain_mode: "cut_each",
@@ -541,7 +541,7 @@ describe("PrintPreviewDeck -- cycling through queued labels", () => {
   it("falls back to 'Label N' when the tray's item count doesn't match the returned segment count", async () => {
     seedTrayItems(2);
     server.use(
-      http.post("/api/print/preview", () =>
+      http.post("/api/v1/print/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           chain_mode: "cut_each",
@@ -576,7 +576,7 @@ describe("PrintPreviewDeck -- cycling through queued labels", () => {
   it("resets selectedIndex to 0 when the tray contents change while open", async () => {
     seedTrayItems(2);
     server.use(
-      http.post("/api/print/preview", async ({ request }) => {
+      http.post("/api/v1/print/preview", async ({ request }) => {
         const body = (await request.json()) as { labels?: unknown[] };
         const n = body.labels?.length ?? 0;
         return HttpResponse.json({
@@ -770,7 +770,7 @@ describe("PrintPreviewDeck -- responsive deck (xl in-flow band vs. below-xl moda
 describe("PrintPreviewDeck -- notes disclosure", () => {
   function serveWithNotes() {
     server.use(
-      http.post("/api/print/preview", () =>
+      http.post("/api/v1/print/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           chain_mode: "cut_each",

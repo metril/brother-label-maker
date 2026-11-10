@@ -34,7 +34,7 @@ assert _TAPE_24MM_TZE is not None
 
 async def _wait_for_terminal_job(client, job_id: str, max_polls: int = 250, interval: float = 0.02):
     for _ in range(max_polls):
-        resp = await client.get(f"/api/print/jobs/{job_id}")
+        resp = await client.get(f"/api/v1/print/jobs/{job_id}")
         assert resp.status_code == 200
         body = resp.json()
         if body["status"] in ("done", "failed", "canceled"):
@@ -64,7 +64,7 @@ def _expected_job_options(config) -> JobOptions:
 
 async def test_create_preset_returns_201_with_row(client):
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={
             "name": "Port Label",
             "label_type": "text",
@@ -86,7 +86,7 @@ async def test_create_preset_returns_201_with_row(client):
 
 async def test_create_preset_minimal_body_defaults(client):
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={"name": "Minimal", "label_type": "text", "definition": _text_definition()},
     )
     assert resp.status_code == 201
@@ -101,7 +101,7 @@ async def test_create_preset_rejects_tape_width_not_in_family(client):
     # not just accepted and left to surprise POST .../print later. 100mm
     # doesn't exist in ANY family (max TZE nominal is 24mm).
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={
             "name": "Bad tape",
             "label_type": "text",
@@ -113,7 +113,7 @@ async def test_create_preset_rejects_tape_width_not_in_family(client):
 
     # 9.0mm IS a real width -- but only for hse_3_1, not the default "tze".
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={
             "name": "Wrong family for width",
             "label_type": "text",
@@ -125,7 +125,7 @@ async def test_create_preset_rejects_tape_width_not_in_family(client):
     assert resp.status_code == 422
 
     ok = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={
             "name": "Right family for width",
             "label_type": "text",
@@ -140,13 +140,13 @@ async def test_create_preset_rejects_tape_width_not_in_family(client):
 
 async def test_create_preset_rejects_name_out_of_bounds(client):
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={"name": "", "label_type": "text", "definition": _text_definition()},
     )
     assert resp.status_code == 422
 
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={"name": "x" * 81, "label_type": "text", "definition": _text_definition()},
     )
     assert resp.status_code == 422
@@ -154,7 +154,7 @@ async def test_create_preset_rejects_name_out_of_bounds(client):
 
 async def test_create_preset_definition_not_matching_label_type_422(client):
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={
             "name": "Bad",
             "label_type": "text",
@@ -164,7 +164,7 @@ async def test_create_preset_definition_not_matching_label_type_422(client):
     assert resp.status_code == 422
 
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={"name": "Bad type", "label_type": "does-not-exist", "definition": {}},
     )
     assert resp.status_code == 422
@@ -175,29 +175,29 @@ async def test_create_preset_definition_not_matching_label_type_422(client):
 
 async def test_get_preset_by_id_and_404_unknown(client):
     resp = await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={"name": "P", "label_type": "text", "definition": _text_definition()},
     )
     preset_id = resp.json()["id"]
 
-    got = await client.get(f"/api/presets/{preset_id}")
+    got = await client.get(f"/api/v1/presets/{preset_id}")
     assert got.status_code == 200
     assert got.json()["id"] == preset_id
 
-    missing = await client.get("/api/presets/does-not-exist")
+    missing = await client.get("/api/v1/presets/does-not-exist")
     assert missing.status_code == 404
 
 
 async def test_list_presets_ordering_favorites_first_then_updated_desc(client):
     p1 = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "P1", "label_type": "text", "definition": _text_definition()},
         )
     ).json()
     p2 = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "P2",
                 "label_type": "text",
@@ -208,12 +208,12 @@ async def test_list_presets_ordering_favorites_first_then_updated_desc(client):
     ).json()
     p3 = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "P3", "label_type": "barcode", "definition": {"data": "X"}},
         )
     ).json()
 
-    listed = await client.get("/api/presets")
+    listed = await client.get("/api/v1/presets")
     assert listed.status_code == 200
     ids = [p["id"] for p in listed.json()]
     # favorite (p2) first, then updated_at desc among the rest (p3 newer than p1).
@@ -223,22 +223,22 @@ async def test_list_presets_ordering_favorites_first_then_updated_desc(client):
 async def test_list_presets_filters_by_label_type_and_q(client):
     text_preset = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "Rack Label", "label_type": "text", "definition": _text_definition()},
         )
     ).json()
     await client.post(
-        "/api/presets",
+        "/api/v1/presets",
         json={"name": "Shipping Tag", "label_type": "barcode", "definition": {"data": "X"}},
     )
 
-    by_type = await client.get("/api/presets", params={"label_type": "text"})
+    by_type = await client.get("/api/v1/presets", params={"label_type": "text"})
     assert [p["id"] for p in by_type.json()] == [text_preset["id"]]
 
-    by_q = await client.get("/api/presets", params={"q": "rack"})
+    by_q = await client.get("/api/v1/presets", params={"q": "rack"})
     assert [p["id"] for p in by_q.json()] == [text_preset["id"]]
 
-    by_q_miss = await client.get("/api/presets", params={"q": "nonexistent"})
+    by_q_miss = await client.get("/api/v1/presets", params={"q": "nonexistent"})
     assert by_q_miss.json() == []
 
 
@@ -248,13 +248,13 @@ async def test_list_presets_filters_by_label_type_and_q(client):
 async def test_put_preset_updates_fields_and_revalidates_definition(client):
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "Orig", "label_type": "text", "definition": _text_definition("A")},
         )
     ).json()
 
     updated = await client.put(
-        f"/api/presets/{created['id']}",
+        f"/api/v1/presets/{created['id']}",
         json={"name": "Renamed", "favorite": True},
     )
     assert updated.status_code == 200
@@ -265,13 +265,13 @@ async def test_put_preset_updates_fields_and_revalidates_definition(client):
 
     # PUT validates a changed `definition` the same way POST does.
     bad = await client.put(
-        f"/api/presets/{created['id']}",
+        f"/api/v1/presets/{created['id']}",
         json={"definition": {"lines": "not-a-list"}},
     )
     assert bad.status_code == 422
 
     good = await client.put(
-        f"/api/presets/{created['id']}",
+        f"/api/v1/presets/{created['id']}",
         json={"definition": _text_definition("B")},
     )
     assert good.status_code == 200
@@ -279,7 +279,7 @@ async def test_put_preset_updates_fields_and_revalidates_definition(client):
 
 
 async def test_put_preset_unknown_404(client):
-    resp = await client.put("/api/presets/does-not-exist", json={"name": "x"})
+    resp = await client.put("/api/v1/presets/does-not-exist", json={"name": "x"})
     assert resp.status_code == 404
 
 
@@ -291,7 +291,7 @@ async def test_put_preset_rejects_explicit_null_for_non_nullable_fields(client):
     # without any error at all). All four now 422, naming the field.
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "Orig",
                 "label_type": "text",
@@ -304,13 +304,13 @@ async def test_put_preset_rejects_explicit_null_for_non_nullable_fields(client):
     preset_id = created["id"]
 
     for field in ("name", "label_type", "favorite", "tape_family"):
-        resp = await client.put(f"/api/presets/{preset_id}", json={field: None})
+        resp = await client.put(f"/api/v1/presets/{preset_id}", json={field: None})
         assert resp.status_code == 422, field
-        assert field in resp.json()["detail"]
+        assert field in resp.json()["error"]["message"]
 
     # The preset itself must be untouched by any of the rejected attempts --
     # in particular `favorite` must NOT have been silently cleared.
-    unchanged = await client.get(f"/api/presets/{preset_id}")
+    unchanged = await client.get(f"/api/v1/presets/{preset_id}")
     assert unchanged.json()["name"] == "Orig"
     assert unchanged.json()["favorite"] is True
     assert unchanged.json()["tape_family"] == "tze"
@@ -319,7 +319,7 @@ async def test_put_preset_rejects_explicit_null_for_non_nullable_fields(client):
 async def test_put_preset_explicit_null_tape_width_mm_clears_to_any_tape(client):
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "Has tape",
                 "label_type": "text",
@@ -329,7 +329,7 @@ async def test_put_preset_explicit_null_tape_width_mm_clears_to_any_tape(client)
         )
     ).json()
 
-    resp = await client.put(f"/api/presets/{created['id']}", json={"tape_width_mm": None})
+    resp = await client.put(f"/api/v1/presets/{created['id']}", json={"tape_width_mm": None})
     assert resp.status_code == 200
     assert resp.json()["tape_width_mm"] is None
 
@@ -337,7 +337,7 @@ async def test_put_preset_explicit_null_tape_width_mm_clears_to_any_tape(client)
 async def test_put_preset_revalidates_tape_width_and_family_pair(client):
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "P",
                 "label_type": "text",
@@ -351,15 +351,15 @@ async def test_put_preset_revalidates_tape_width_and_family_pair(client):
     # Changing ONLY tape_family to one that doesn't have a 9.0mm tape must
     # re-validate against the (new family, EXISTING width) pair.
     bad = await client.put(
-        f"/api/presets/{created['id']}", json={"tape_family": "hse_2_1"}
+        f"/api/v1/presets/{created['id']}", json={"tape_family": "hse_2_1"}
     )
     assert bad.status_code == 422
 
     # Still 9.0mm/hse_3_1 -- unaffected by the rejected attempt.
-    unchanged = await client.get(f"/api/presets/{created['id']}")
+    unchanged = await client.get(f"/api/v1/presets/{created['id']}")
     assert unchanged.json()["tape_family"] == "hse_3_1"
 
-    good = await client.put(f"/api/presets/{created['id']}", json={"tape_width_mm": 5.2})
+    good = await client.put(f"/api/v1/presets/{created['id']}", json={"tape_width_mm": 5.2})
     assert good.status_code == 200  # 5.2mm IS a real hse_3_1 width
     assert good.json()["tape_width_mm"] == 5.2
 
@@ -370,18 +370,18 @@ async def test_put_preset_revalidates_tape_width_and_family_pair(client):
 async def test_delete_preset_204_then_404(client):
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "P", "label_type": "text", "definition": _text_definition()},
         )
     ).json()
 
-    resp = await client.delete(f"/api/presets/{created['id']}")
+    resp = await client.delete(f"/api/v1/presets/{created['id']}")
     assert resp.status_code == 204
 
-    missing = await client.get(f"/api/presets/{created['id']}")
+    missing = await client.get(f"/api/v1/presets/{created['id']}")
     assert missing.status_code == 404
 
-    again = await client.delete(f"/api/presets/{created['id']}")
+    again = await client.delete(f"/api/v1/presets/{created['id']}")
     assert again.status_code == 404
 
 
@@ -392,7 +392,7 @@ async def test_preset_print_creates_job_with_presets_definition(app_and_client):
     app, client = app_and_client
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "Port",
                 "label_type": "text",
@@ -402,7 +402,7 @@ async def test_preset_print_creates_job_with_presets_definition(app_and_client):
         )
     ).json()
 
-    resp = await client.post(f"/api/presets/{created['id']}/print")
+    resp = await client.post(f"/api/v1/presets/{created['id']}/print")
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
     assert job_id
@@ -415,20 +415,20 @@ async def test_preset_print_creates_job_with_presets_definition(app_and_client):
 
 
 async def test_preset_print_unknown_preset_404(client):
-    resp = await client.post("/api/presets/does-not-exist/print")
+    resp = await client.post("/api/v1/presets/does-not-exist/print")
     assert resp.status_code == 404
 
 
 async def test_preset_print_without_tape_width_422(client):
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "No tape", "label_type": "text", "definition": _text_definition()},
         )
     ).json()
     assert created["tape_width_mm"] is None
 
-    resp = await client.post(f"/api/presets/{created['id']}/print")
+    resp = await client.post(f"/api/v1/presets/{created['id']}/print")
     assert resp.status_code == 422
 
 
@@ -442,14 +442,14 @@ async def test_preset_print_any_tape_preset_with_body_tape_override_succeeds(app
     app, client = app_and_client
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={"name": "Any tape", "label_type": "text", "definition": _text_definition()},
         )
     ).json()
     assert created["tape_width_mm"] is None
 
     resp = await client.post(
-        f"/api/presets/{created['id']}/print",
+        f"/api/v1/presets/{created['id']}/print",
         json={"tape": {"width_mm": 24, "family": "tze"}},
     )
     assert resp.status_code == 202
@@ -470,7 +470,7 @@ async def test_preset_print_body_tape_overrides_presets_own_tape(app_and_client)
     app, client = app_and_client
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "Has 12mm",
                 "label_type": "text",
@@ -481,7 +481,7 @@ async def test_preset_print_body_tape_overrides_presets_own_tape(app_and_client)
     ).json()
 
     resp = await client.post(
-        f"/api/presets/{created['id']}/print",
+        f"/api/v1/presets/{created['id']}/print",
         json={"tape": {"width_mm": 24, "family": "tze"}},
     )
     assert resp.status_code == 202
@@ -517,7 +517,7 @@ async def test_preset_print_hse_3_1_9mm_resolves_correct_dots_not_tze(app_and_cl
     app, client = app_and_client
     created = (
         await client.post(
-            "/api/presets",
+            "/api/v1/presets",
             json={
                 "name": "HSe port",
                 "label_type": "text",
@@ -528,14 +528,14 @@ async def test_preset_print_hse_3_1_9mm_resolves_correct_dots_not_tze(app_and_cl
         )
     ).json()
 
-    resp = await client.post(f"/api/presets/{created['id']}/print")
+    resp = await client.post(f"/api/v1/presets/{created['id']}/print")
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
 
     job = await _wait_for_terminal_job(client, job_id)
     assert job["status"] == "done", job["error"]
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
 
     config = app.state.config
@@ -560,3 +560,23 @@ async def test_preset_print_hse_3_1_9mm_resolves_correct_dots_not_tze(app_and_cl
         _expected_job_options(config),
     )
     assert stream_resp.content == expected.data
+
+
+# --- pagination (limit/offset + X-Total-Count) ---------------------------------
+
+
+async def test_list_presets_limit_offset_and_total_header(client):
+    for i in range(3):
+        resp = await client.post(
+            "/api/v1/presets",
+            json={"name": f"p{i}", "label_type": "text", "definition": _text_definition()},
+        )
+        assert resp.status_code == 201
+
+    full = await client.get("/api/v1/presets")
+    assert isinstance(full.json(), list) and len(full.json()) == 3
+    assert full.headers["X-Total-Count"] == "3"
+
+    page = await client.get("/api/v1/presets", params={"limit": 2, "offset": 1})
+    assert [p["id"] for p in page.json()] == [p["id"] for p in full.json()[1:3]]
+    assert page.headers["X-Total-Count"] == "3"

@@ -67,7 +67,7 @@ function connectedStatusBody(mediaWidthMm: number) {
 describe("Designer tape-mismatch banner (I1)", () => {
   it("shows exactly one amber banner (role=alert) when the loaded tape doesn't match the design", async () => {
     server.use(
-      http.get("/api/printer/status", () => HttpResponse.json(connectedStatusBody(12))),
+      http.get("/api/v1/printer/status", () => HttpResponse.json(connectedStatusBody(12))),
     );
 
     renderWithProviders(<Designer />);
@@ -85,7 +85,7 @@ describe("Designer tape-mismatch banner (I1)", () => {
   it("shows no banner when the loaded tape matches the design", async () => {
     const statusSpy = vi.fn();
     server.use(
-      http.get("/api/printer/status", () => {
+      http.get("/api/v1/printer/status", () => {
         statusSpy();
         return HttpResponse.json(connectedStatusBody(24));
       }),
@@ -102,7 +102,7 @@ describe("Designer tape-mismatch banner (I1)", () => {
   it("shows no banner while the printer is disconnected", async () => {
     const statusSpy = vi.fn();
     server.use(
-      http.get("/api/printer/status", () => {
+      http.get("/api/v1/printer/status", () => {
         statusSpy();
         return HttpResponse.json({
           connected: false,
@@ -182,7 +182,7 @@ describe("Designer warning-chip -> form-row focus wiring", () => {
     });
 
     server.use(
-      http.post("/api/render/preview", () =>
+      http.post("/api/v1/render/preview", () =>
         HttpResponse.json({
           png_b64: TINY_PNG_B64,
           png_width_px: 200,

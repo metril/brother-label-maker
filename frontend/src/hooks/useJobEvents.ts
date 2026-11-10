@@ -17,10 +17,10 @@ export interface UseJobEventsResult {
 
 function wsUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/api/ws`;
+  return `${proto}//${window.location.host}/api/v1/ws`;
 }
 
-/** Native WebSocket connection to /api/ws with exponential backoff
+/** Native WebSocket connection to /api/v1/ws with exponential backoff
  * (capped at 10s) reconnect. One event stream, fanned out by job_id so any
  * number of trackers (PrintButton instances) can read the latest event for
  * their own job without opening their own socket -- see JobEventsProvider. */

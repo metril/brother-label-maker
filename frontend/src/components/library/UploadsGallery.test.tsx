@@ -19,7 +19,7 @@ function item(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe("UploadsGallery", () => {
   it("shows the empty state when there are no uploads", async () => {
-    server.use(http.get("/api/images", () => HttpResponse.json({ items: [], page: 1, page_size: 24, total: 0 })));
+    server.use(http.get("/api/v1/images", () => HttpResponse.json({ items: [], page: 1, page_size: 24, total: 0 })));
     renderWithQueryClient(<UploadsGallery />);
 
     expect(await screen.findByText(/No uploads yet/)).toBeInTheDocument();
@@ -27,7 +27,7 @@ describe("UploadsGallery", () => {
 
   it("renders a grid of uploaded thumbnails with dimensions/size captions", async () => {
     server.use(
-      http.get("/api/images", () =>
+      http.get("/api/v1/images", () =>
         HttpResponse.json({
           items: [
             item({ image_id: "img-1", width: 64, height: 48, size_bytes: 2048 }),
@@ -41,17 +41,17 @@ describe("UploadsGallery", () => {
       // H6: grid tiles must request the bounded THUMBNAIL route, never the
       // full-resolution original -- overridden here (not in the shared
       // handlers.ts) since no other suite needs this endpoint stubbed.
-      http.get("/api/images/:id/thumb", () => new HttpResponse(new Uint8Array([1, 2, 3]), { status: 200 })),
+      http.get("/api/v1/images/:id/thumb", () => new HttpResponse(new Uint8Array([1, 2, 3]), { status: 200 })),
     );
     renderWithQueryClient(<UploadsGallery />);
 
     expect(await screen.findByRole("img", { name: "Upload img-1" })).toHaveAttribute(
       "src",
-      "/api/images/img-1/thumb",
+      "/api/v1/images/img-1/thumb",
     );
     expect(screen.getByRole("img", { name: "Upload img-2" })).toHaveAttribute(
       "src",
-      "/api/images/img-2/thumb",
+      "/api/v1/images/img-2/thumb",
     );
     expect(screen.getByText("64×48 · 2.0 KB")).toBeInTheDocument();
     expect(screen.getByText("100×50 · 1.4 MB")).toBeInTheDocument();
@@ -61,7 +61,7 @@ describe("UploadsGallery", () => {
   it("Load more appends the next page's items to the grid instead of replacing it", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/images", ({ request }) => {
+      http.get("/api/v1/images", ({ request }) => {
         const url = new URL(request.url);
         const page = Number(url.searchParams.get("page") ?? "1");
         if (page === 1) {
@@ -88,7 +88,7 @@ describe("UploadsGallery", () => {
     const user = userEvent.setup();
     let deleted = false;
     server.use(
-      http.get("/api/images", () =>
+      http.get("/api/v1/images", () =>
         HttpResponse.json({
           items: deleted ? [] : [item({ image_id: "img-1" })],
           page: 1,
@@ -96,7 +96,7 @@ describe("UploadsGallery", () => {
           total: deleted ? 0 : 1,
         }),
       ),
-      http.delete("/api/images/img-1", () => {
+      http.delete("/api/v1/images/img-1", () => {
         deleted = true;
         return new HttpResponse(null, { status: 204 });
       }),
@@ -117,11 +117,11 @@ describe("UploadsGallery", () => {
     const user = userEvent.setup();
     let uploaded = false;
     server.use(
-      http.post("/api/images", () => {
+      http.post("/api/v1/images", () => {
         uploaded = true;
         return HttpResponse.json({ image_id: "img-new", width: 10, height: 10 }, { status: 201 });
       }),
-      http.get("/api/images", () =>
+      http.get("/api/v1/images", () =>
         HttpResponse.json({
           items: uploaded ? [item({ image_id: "img-new", width: 10, height: 10 })] : [],
           page: 1,
@@ -146,14 +146,14 @@ describe("UploadsGallery", () => {
   it("upload failure shows the backend's own error detail via role=alert", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/images", () => HttpResponse.json({ items: [], page: 1, page_size: 24, total: 0 })),
+      http.get("/api/v1/images", () => HttpResponse.json({ items: [], page: 1, page_size: 24, total: 0 })),
       // A realistic 422 detail string (router_images.py's own shape) --
       // the ApiError unwrapping in client.ts must surface this VERBATIM,
       // not a generic fallback, since it's the user's only feedback on
       // exactly why their upload was rejected.
-      http.post("/api/images", () =>
+      http.post("/api/v1/images", () =>
         HttpResponse.json(
-          { detail: "image is 4000x4000 (16000000 px), exceeding the 8000000px cap" },
+          { error: { code: "error", message: "image is 4000x4000 (16000000 px), exceeding the 8000000px cap" } },
           { status: 422 },
         ),
       ),
@@ -171,7 +171,7 @@ describe("UploadsGallery", () => {
 
   it("list load failure shows 'Could not load uploads.'", async () => {
     server.use(
-      http.get("/api/images", () => HttpResponse.json({ detail: "internal error" }, { status: 500 })),
+      http.get("/api/v1/images", () => HttpResponse.json({ error: { code: "error", message: "internal error" } }, { status: 500 })),
     );
     renderWithQueryClient(<UploadsGallery />);
 
@@ -200,7 +200,7 @@ describe("UploadsGallery", () => {
     // corruption visible as a real duplicate, not just a missing item).
     const dataset = Array.from({ length: 50 }, (_, i) => item({ image_id: `img-${i + 1}` }));
     server.use(
-      http.get("/api/images", ({ request }) => {
+      http.get("/api/v1/images", ({ request }) => {
         const url = new URL(request.url);
         const page = Number(url.searchParams.get("page") ?? "1");
         const pageSize = Number(url.searchParams.get("page_size") ?? "24");
@@ -212,7 +212,7 @@ describe("UploadsGallery", () => {
           total: dataset.length,
         });
       }),
-      http.delete("/api/images/:id", ({ params }) => {
+      http.delete("/api/v1/images/:id", ({ params }) => {
         const idx = dataset.findIndex((d) => d.image_id === params.id);
         if (idx !== -1) dataset.splice(idx, 1);
         return new HttpResponse(null, { status: 204 });
@@ -267,11 +267,11 @@ describe("UploadsGallery", () => {
   it("delete failure surfaces the error inside the ConfirmDialog, which stays open", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/images", () =>
+      http.get("/api/v1/images", () =>
         HttpResponse.json({ items: [item({ image_id: "img-1" })], page: 1, page_size: 24, total: 1 }),
       ),
-      http.delete("/api/images/img-1", () =>
-        HttpResponse.json({ detail: "cannot delete: referenced by an active label" }, { status: 500 }),
+      http.delete("/api/v1/images/img-1", () =>
+        HttpResponse.json({ error: { code: "error", message: "cannot delete: referenced by an active label" } }, { status: 500 }),
       ),
     );
     renderWithQueryClient(<UploadsGallery />);

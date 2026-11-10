@@ -287,8 +287,9 @@ def test_connect_without_handshake_logs_no_warning(env, caplog):
 
 
 def test_client_rejects_unpinned_server_certificate(env):
-    with pytest.raises(PrinterNotFoundError, match="does not match"):
+    with pytest.raises(PrinterNotFoundError, match="does not match") as exc_info:
         env.client(pinned=env.app_pem)  # any cert other than the bridge's
+    assert exc_info.value.code == "bridge_cert_mismatch"
 
 
 def test_tls_1_2_is_refused(env):
@@ -299,8 +300,9 @@ def test_tls_1_2_is_refused(env):
 
 
 def test_unpaired_app_gets_a_not_paired_error(env):
-    with pytest.raises(PrinterNotFoundError, match="not\n?.*paired"):
+    with pytest.raises(PrinterNotFoundError, match="not\n?.*paired") as exc_info:
         env.client(key=env.other_key, cert=env.other_cert)
+    assert exc_info.value.code == "bridge_unpaired"
 
 
 # -- protocol errors ----------------------------------------------------------

@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { extractErrorDetail, parsePydanticValidationError } from "./client";
 
 describe("extractErrorDetail", () => {
-  it("extracts a readable message from both 422 detail shapes FastAPI can send", () => {
+  it("extracts a readable message from both 422 envelope shapes (message and details)", () => {
     // Shape 1: our own handlers' HTTPException(422, detail=<string>)
     // (router_labels.py / router_print.py's error_message()).
     expect(
       extractErrorDetail(
-        { detail: "unknown label type 'barcode'; valid: ['text']" },
+        { error: { code: "error", message: "unknown label type 'barcode'; valid: ['text']" } },
         "fallback",
       ),
     ).toBe("unknown label type 'barcode'; valid: ['text']");
@@ -17,9 +17,13 @@ describe("extractErrorDetail", () => {
     expect(
       extractErrorDetail(
         {
-          detail: [
-            { loc: ["body", "definition", "tape", "width_mm"], msg: "field required", type: "missing" },
-          ],
+          error: {
+            code: "validation_error",
+            message: "request validation failed",
+            details: [
+              { loc: ["body", "definition", "tape", "width_mm"], msg: "field required", type: "missing" },
+            ],
+          },
         },
         "fallback",
       ),
@@ -33,7 +37,7 @@ describe("extractErrorDetail", () => {
   // Review fix-up: a body-level `@model_validator` ValueError that NO
   // route ever catches (e.g. Sequence's own total-labels cap check,
   // backend/render/serialize.py -- raised while FastAPI is still parsing
-  // POST /api/render/expand's request body, so it arrives as shape 2
+  // POST /api/v1/render/expand's request body, so it arrives as shape 2
   // above, never routed through error_message()) used to leak pydantic's
   // own "Value error, " prefix verbatim, since only the STRING-dump path
   // (parsePydanticValidationError) stripped it.
@@ -41,13 +45,17 @@ describe("extractErrorDetail", () => {
     expect(
       extractErrorDetail(
         {
-          detail: [
-            {
-              loc: ["body", "serialization"],
-              msg: "Value error, total labels 1500 (500 values x 3 copies) exceeds the 1000 maximum",
-              type: "value_error",
-            },
-          ],
+          error: {
+            code: "validation_error",
+            message: "request validation failed",
+            details: [
+              {
+                loc: ["body", "serialization"],
+                msg: "Value error, total labels 1500 (500 values x 3 copies) exceeds the 1000 maximum",
+                type: "value_error",
+              },
+            ],
+          },
         },
         "fallback",
       ),
@@ -55,7 +63,7 @@ describe("extractErrorDetail", () => {
   });
 
   it("turns a raw pydantic ValidationError dump (error_message()'s str(exc) for a ValidationError that slipped past client-side checks) into a readable message instead of the bracket/URL-laden original", () => {
-    // Captured verbatim from a live 422 (POST /api/render/preview,
+    // Captured verbatim from a live 422 (POST /api/v1/render/preview,
     // breaker_box with pitch_mm=5 against a minimum of 10).
     const raw =
       "1 validation error for BreakerBoxParams\npitch_mm\n  Input should be " +
@@ -63,7 +71,7 @@ describe("extractErrorDetail", () => {
       "input_type=int]\n    For further information visit " +
       "https://errors.pydantic.dev/2.13/v/greater_than_equal";
 
-    expect(extractErrorDetail({ detail: raw }, "fallback")).toBe(
+    expect(extractErrorDetail({ error: { code: "validation_error", message: raw } }, "fallback")).toBe(
       "pitch_mm: Input should be greater than or equal to 10",
     );
   });
@@ -94,7 +102,7 @@ describe("extractErrorDetail", () => {
 
   it("returns null (not a pydantic dump) for an already-readable string, so extractErrorDetail passes it through unchanged", () => {
     expect(parsePydanticValidationError("all labels in a print job must share the same tape")).toBeNull();
-    expect(extractErrorDetail({ detail: "all labels in a print job must share the same tape" }, "fallback")).toBe(
+    expect(extractErrorDetail({ error: { code: "error", message: "all labels in a print job must share the same tape" } }, "fallback")).toBe(
       "all labels in a print job must share the same tape",
     );
   });

@@ -21,10 +21,10 @@ function formatBytes(bytes: number): string {
 }
 
 /** The uploads library grid (task D2a): every image previously uploaded
- * through `POST /api/images` (logos/photos for a text label's
+ * through `POST /api/v1/images` (logos/photos for a text label's
  * `icon.kind="image"` art -- see overrides/IconField.tsx's own ImagePicker,
  * the other surface that already posts here), independent of whether any
- * label currently references it. `GET /api/images` scans
+ * label currently references it. `GET /api/v1/images` scans
  * `data_dir/uploads/*.png` directly (no DB table, see router_images.py's
  * own module docstring), so this component's list is exactly "what's on
  * disk", newest first.
@@ -43,8 +43,8 @@ function formatBytes(bytes: number): string {
  * content height, same as before -- `h-full` against an unbounded parent
  * resolves to `auto`.
  *
- * Pagination: `GET /api/images` is server-paginated (page/page_size, same
- * shape as `GET /api/history`) but this component ACCUMULATES pages
+ * Pagination: `GET /api/v1/images` is server-paginated (page/page_size, same
+ * shape as `GET /api/v1/history`) but this component ACCUMULATES pages
  * client-side behind a "Load more" button rather than a Prev/Next pager --
  * a thumbnail grid (like IconField's own symbol picker) reads better as one
  * continuously growing sheet than as a table with page controls. Built on

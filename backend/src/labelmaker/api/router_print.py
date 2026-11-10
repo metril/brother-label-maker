@@ -16,11 +16,13 @@ import dataclasses
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
+from labelmaker.api.errors import ApiError, err
+from labelmaker.api.schemas import CancelOut, EstimateOut, JobCreatedOut, JobOut, binary
 from labelmaker.driver.geometry import MARGIN_MAX_MM, MARGIN_MIN_MM, dots_to_mm
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.jobs.chained_preview import (
@@ -146,9 +148,7 @@ def _validate_serialized_print(
         try:
             r = render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
         except (KeyError, ValueError) as exc:
-            raise ValueError(
-                f"label {i} (sequence value {value!r}): {error_message(exc)}"
-            ) from exc
+            raise ValueError(f"label {i} (sequence value {value!r}): {error_message(exc)}") from exc
         rendered.append(r)
     return bound, rendered
 
@@ -177,9 +177,10 @@ async def _validate_and_render(
     """
     if body.serialization is not None:
         if len(body.labels) != 1:
-            raise HTTPException(
-                status_code=422,
-                detail=(
+            raise ApiError(
+                422,
+                "invalid_design",
+                (
                     "print requests with `serialization` must contain exactly one "
                     f"template label, got {len(body.labels)}"
                 ),
@@ -189,21 +190,19 @@ async def _validate_and_render(
                 _validate_serialized_print, body.labels[0], body.serialization, data_dir
             )
         except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+            raise ApiError(422, "invalid_design", error_message(exc)) from exc
         label_count = len(bound)
     else:
         try:
-            rendered = await anyio.to_thread.run_sync(
-                _validate_render_side, body.labels, data_dir
-            )
+            rendered = await anyio.to_thread.run_sync(_validate_render_side, body.labels, data_dir)
         except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+            raise ApiError(422, "invalid_design", error_message(exc)) from exc
         label_count = len(body.labels)
 
     tapes = {(label.tape.width_mm, label.tape.family) for label in body.labels}
     if len(tapes) > 1:
-        raise HTTPException(
-            status_code=422, detail="all labels in a print job must share the same tape"
+        raise ApiError(
+            422, "invalid_design", "all labels in a print job must share the same tape"
         )
 
     return label_count, rendered
@@ -222,10 +221,21 @@ async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int
     return label_count, lengths_mm
 
 
-@router.post("", status_code=202)
+@router.post(
+    "",
+    status_code=202,
+    response_model=JobCreatedOut,
+    summary="Queue a print job",
+    responses=err(422),
+)
 async def create_print_job(
     body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep, config: AppConfigDep
-) -> dict:
+) -> JobCreatedOut:
+    """Validate the labels, persist a job and queue it for the print worker.
+
+    Returns 202 with the new job id; progress is delivered over the
+    WebSocket and via GET /print/jobs/{id}.
+    """
     label_count, lengths_mm = await _validate_and_measure(body, config.data_dir)
     tape_estimate = estimate(
         lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
@@ -256,11 +266,16 @@ async def create_print_job(
     await bus.broadcast({"event": "job.queued", "job_id": job_id})
     await queue.put(job_id)
 
-    return {"job_id": job_id}
+    return JobCreatedOut(job_id=job_id)
 
 
-@router.post("/estimate")
-async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> dict:
+@router.post(
+    "/estimate",
+    response_model=EstimateOut,
+    summary="Estimate tape usage",
+    responses=err(422),
+)
+async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> EstimateOut:
     """Task 2.9: the SAME request body POST /api/print accepts (labels/
     options/serialization), returning a TapeEstimate + `label_count`
     WITHOUT creating a job -- no db.create_print_job call, no enqueue, no
@@ -271,7 +286,7 @@ async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> dict:
     tape_estimate = estimate(
         lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
     )
-    return {"label_count": label_count, **dataclasses.asdict(tape_estimate)}
+    return EstimateOut(label_count=label_count, **dataclasses.asdict(tape_estimate))
 
 
 class PrintPreviewRequest(PrintRequest):
@@ -344,7 +359,12 @@ class ChainedPreviewResponse(BaseModel):
     warnings: list[str]
 
 
-@router.post("/preview")
+@router.post(
+    "/preview",
+    response_model=ChainedPreviewResponse,
+    summary="Preview a chained print job",
+    responses=err(422, 507),
+)
 async def preview_print_job(
     body: PrintPreviewRequest, config: AppConfigDep
 ) -> ChainedPreviewResponse:
@@ -382,9 +402,10 @@ async def preview_print_job(
     scaled_height = height_dots * body.scale
     composite_pixels = scaled_width * scaled_height
     if composite_pixels > MAX_PREVIEW_PIXELS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
+        raise ApiError(
+            422,
+            "preview_too_large",
+            (
                 f"chained preview would be {scaled_width}x{scaled_height} px "
                 f"({composite_pixels:,} px total) at scale={body.scale}, exceeding the "
                 f"{MAX_PREVIEW_PIXELS:,}px cap -- reduce the number of labels, their "
@@ -401,11 +422,12 @@ async def preview_print_job(
         )
         png_bytes = await anyio.to_thread.run_sync(preview_png, preview.image, body.scale)
     except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
     except MemoryError as exc:
-        raise HTTPException(
-            status_code=507,
-            detail=(
+        raise ApiError(
+            507,
+            "insufficient_storage",
+            (
                 "ran out of memory building the chained preview composite "
                 f"(requested {scaled_width}x{scaled_height} px) -- try a smaller "
                 "`scale` or fewer/shorter labels"
@@ -448,16 +470,27 @@ def _job_to_response(job: dict) -> dict:
     return body
 
 
-@router.get("/jobs/{job_id}")
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobOut,
+    summary="Get a print job",
+    responses=err(404),
+)
 async def get_print_job(job_id: str, db: DbDep) -> dict:
+    """Full job resource, including its stored definition and thumbnail."""
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise ApiError(404, "not_found", "job not found")
     return _job_to_response(job)
 
 
-@router.post("/jobs/{job_id}/cancel")
-async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
+@router.post(
+    "/jobs/{job_id}/cancel",
+    response_model=CancelOut,
+    summary="Cancel a queued print job",
+    responses=err(404, 409),
+)
+async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> CancelOut:
     """Task 2.9 carry-forward: cancel via db.cancel_job_if_queued's atomic
     CAS (single `UPDATE ... WHERE status = 'queued'`) instead of a
     get-then-update pair -- closes the race where the worker dequeues and
@@ -477,18 +510,26 @@ async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
     canceled = await db.cancel_job_if_queued(job_id)
     if canceled:
         await bus.broadcast({"event": "job.canceled", "job_id": job_id})
-        return {"status": "canceled"}
+        return CancelOut(status="canceled")
 
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-    raise HTTPException(status_code=409, detail=f"cannot cancel job in status {job['status']!r}")
+        raise ApiError(404, "not_found", "job not found")
+    raise ApiError(409, "conflict", f"cannot cancel job in status {job['status']!r}")
 
 
-@router.get("/jobs/{job_id}/stream")
+@router.get(
+    "/jobs/{job_id}/stream",
+    response_class=Response,
+    summary="Download a job's raster stream",
+    responses={
+        **binary("application/octet-stream", "Printer raster stream (.bin) sent for the job"),
+        **err(404),
+    },
+)
 async def stream_print_job(job_id: str, config: AppConfigDep) -> Response:
     path = config.data_dir / "jobs" / f"{job_id}.bin"
     if not await anyio.to_thread.run_sync(path.is_file):
-        raise HTTPException(status_code=404, detail="stream not found")
+        raise ApiError(404, "not_found", "stream not found")
     data = await anyio.to_thread.run_sync(path.read_bytes)
     return Response(content=data, media_type="application/octet-stream")

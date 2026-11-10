@@ -60,11 +60,14 @@ def _entity_summary(**overrides) -> dict:
 
 
 async def test_status_unconfigured_is_always_200(client):
-    resp = await client.get("/api/homebox/status")
+    resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200
     assert resp.json() == {
-        "configured": False, "reachable": None, "healthy": None,
-        "version": None, "error": None,
+        "configured": False,
+        "reachable": None,
+        "healthy": None,
+        "version": None,
+        "error": None,
     }
 
 
@@ -79,7 +82,7 @@ async def test_status_configured_and_reachable_reports_version(app_and_client, h
         return_value=httpx.Response(200, json={"items": [], "page": 1, "pageSize": 1, "total": 0})
     )
     _, client = app_and_client
-    resp = await client.get("/api/homebox/status")
+    resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200
     body = resp.json()
     assert body["configured"] is True
@@ -93,7 +96,7 @@ async def test_status_configured_and_reachable_reports_version(app_and_client, h
 async def test_status_configured_upstream_down_is_still_200(app_and_client, hb_mock):
     hb_mock.get(f"{API}/status").mock(side_effect=httpx.ConnectError("refused"))
     _, client = app_and_client
-    resp = await client.get("/api/homebox/status")
+    resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200  # never a 5xx -- this is the frontend's show/hide probe
     body = resp.json()
     assert body["configured"] is True
@@ -107,9 +110,9 @@ async def test_status_configured_upstream_down_is_still_200(app_and_client, hb_m
 
 
 async def test_entities_unconfigured_returns_503_with_setup_hint(client):
-    resp = await client.get("/api/homebox/entities")
+    resp = await client.get("/api/v1/homebox/entities")
     assert resp.status_code == 503
-    assert "Settings page" in resp.json()["detail"]
+    assert "Settings page" in resp.json()["error"]["message"]
 
 
 # -- entities list ----------------------------------------------------------
@@ -125,7 +128,7 @@ async def test_list_entities_passthrough_params_and_snake_case_response(app_and_
     )
     _, client = app_and_client
     resp = await client.get(
-        "/api/homebox/entities",
+        "/api/v1/homebox/entities",
         params={"q": "printer", "page": 2, "page_size": 10, "parent_id": "loc-1"},
     )
     assert resp.status_code == 200
@@ -152,9 +155,9 @@ async def test_list_entities_passthrough_params_and_snake_case_response(app_and_
 async def test_upstream_401_maps_to_502_with_actionable_detail(app_and_client, hb_mock):
     hb_mock.get(f"{API}/entities").mock(return_value=httpx.Response(401))
     _, client = app_and_client
-    resp = await client.get("/api/homebox/entities")
+    resp = await client.get("/api/v1/homebox/entities")
     assert resp.status_code == 502
-    assert "API key" in resp.json()["detail"]
+    assert "API key" in resp.json()["error"]["message"]
 
 
 # -- single entity ------------------------------------------------------
@@ -171,7 +174,7 @@ async def test_get_entity_ok(app_and_client, hb_mock):
         )
     )
     _, client = app_and_client
-    resp = await client.get("/api/homebox/entities/abc")
+    resp = await client.get("/api/v1/homebox/entities/abc")
     assert resp.status_code == 200
     body = resp.json()
     assert body["serial_number"] == "SN-1"
@@ -183,7 +186,7 @@ async def test_get_entity_ok(app_and_client, hb_mock):
 async def test_get_entity_upstream_404_is_our_404(app_and_client, hb_mock):
     hb_mock.get(f"{API}/entities/missing").mock(return_value=httpx.Response(404))
     _, client = app_and_client
-    resp = await client.get("/api/homebox/entities/missing")
+    resp = await client.get("/api/v1/homebox/entities/missing")
     assert resp.status_code == 404
 
 
@@ -197,7 +200,9 @@ async def test_entities_tree_passthrough(app_and_client, hb_mock):
             200,
             json=[
                 {
-                    "id": "l1", "name": "Garage", "type": "location",
+                    "id": "l1",
+                    "name": "Garage",
+                    "type": "location",
                     "children": [
                         {"id": "l2", "name": "Shelf B", "type": "location", "children": []}
                     ],
@@ -206,7 +211,7 @@ async def test_entities_tree_passthrough(app_and_client, hb_mock):
         )
     )
     _, client = app_and_client
-    resp = await client.get("/api/homebox/entities/tree", params={"with_items": "true"})
+    resp = await client.get("/api/v1/homebox/entities/tree", params={"with_items": "true"})
     assert resp.status_code == 200
     upstream_params = httpx.QueryParams(route.calls.last.request.url.query.decode())
     assert upstream_params["withItems"] == "true"
@@ -226,7 +231,7 @@ async def test_entity_path_is_root_first(app_and_client, hb_mock):
         )
     )
     _, client = app_and_client
-    resp = await client.get("/api/homebox/entities/abc/path")
+    resp = await client.get("/api/v1/homebox/entities/abc/path")
     assert resp.status_code == 200
     assert [seg["name"] for seg in resp.json()] == ["Garage", "Shelf B", "Label printer"]
 
@@ -241,12 +246,14 @@ async def test_find_by_asset_id_many_matches(app_and_client, hb_mock):
             200,
             json={
                 "items": [_entity_summary(), _entity_summary(id="dup", name="Duplicate")],
-                "page": 1, "pageSize": 50, "total": 2,
+                "page": 1,
+                "pageSize": 50,
+                "total": 2,
             },
         )
     )
     _, client = app_and_client
-    resp = await client.get("/api/homebox/assets/000-042")
+    resp = await client.get("/api/v1/homebox/assets/000-042")
     assert resp.status_code == 200
     assert [e["name"] for e in resp.json()] == ["Label printer", "Duplicate"]
 
@@ -255,7 +262,7 @@ async def test_find_by_asset_id_many_matches(app_and_client, hb_mock):
 async def test_find_by_asset_id_upstream_404_is_empty_list_not_an_error(app_and_client, hb_mock):
     hb_mock.get(f"{API}/assets/000-404").mock(return_value=httpx.Response(404))
     _, client = app_and_client
-    resp = await client.get("/api/homebox/assets/000-404")
+    resp = await client.get("/api/v1/homebox/assets/000-404")
     assert resp.status_code == 200  # zero matches -- HomeBox's own disambiguation, not an error
     assert resp.json() == []
 
@@ -267,11 +274,11 @@ async def test_find_by_asset_id_upstream_404_is_empty_list_not_an_error(app_and_
 async def test_settings_roundtrip_when_configured(app_and_client):
     _, client = app_and_client
 
-    resp = await client.get("/api/homebox/settings")
+    resp = await client.get("/api/v1/homebox/settings")
     assert resp.json() == {"qr_base_url": None, "effective_qr_base_url": BASE}
 
     resp = await client.put(
-        "/api/homebox/settings", json={"qr_base_url": "https://public.example.com/"}
+        "/api/v1/homebox/settings", json={"qr_base_url": "https://public.example.com/"}
     )
     assert resp.status_code == 200
     # trailing slash stripped on the way in
@@ -280,22 +287,22 @@ async def test_settings_roundtrip_when_configured(app_and_client):
         "effective_qr_base_url": "https://public.example.com",
     }
 
-    resp = await client.get("/api/homebox/settings")
+    resp = await client.get("/api/v1/homebox/settings")
     assert resp.json()["qr_base_url"] == "https://public.example.com"
 
-    resp = await client.put("/api/homebox/settings", json={"qr_base_url": None})
+    resp = await client.put("/api/v1/homebox/settings", json={"qr_base_url": None})
     assert resp.status_code == 200
     # None clears the override -- back to config.homebox_url
     assert resp.json() == {"qr_base_url": None, "effective_qr_base_url": BASE}
 
 
 async def test_settings_unconfigured_effective_is_null_and_rejects_bad_scheme(client):
-    resp = await client.get("/api/homebox/settings")
+    resp = await client.get("/api/v1/homebox/settings")
     assert resp.status_code == 200
     # no stored override AND no config.homebox_url to fall back to
     assert resp.json() == {"qr_base_url": None, "effective_qr_base_url": None}
 
-    resp = await client.put("/api/homebox/settings", json={"qr_base_url": "ftp://x"})
+    resp = await client.put("/api/v1/homebox/settings", json={"qr_base_url": "ftp://x"})
     assert resp.status_code == 422
 
 
@@ -307,10 +314,8 @@ async def test_status_stays_200_when_upstream_answers_html(client, hb_mock):
     """An SSO login page / default vhost at the HomeBox URL: /v1/status answers
     200 but with HTML. The contract is ALWAYS 200 -- this must report
     reachable=False with a diagnostic, never a 500 (review finding #1)."""
-    hb_mock.get(f"{API}/status").mock(
-        return_value=httpx.Response(200, text="<html>Sign in</html>")
-    )
-    resp = await client.get("/api/homebox/status")
+    hb_mock.get(f"{API}/status").mock(return_value=httpx.Response(200, text="<html>Sign in</html>"))
+    resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200
     body = resp.json()
     assert body["configured"] is True
@@ -331,7 +336,7 @@ async def test_status_reports_pre_merge_server_as_unhealthy_with_upgrade_hint(cl
     hb_mock.get(f"{API}/items").mock(
         return_value=httpx.Response(200, json={"items": [], "page": 1, "pageSize": 1, "total": 0})
     )
-    resp = await client.get("/api/homebox/status")
+    resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200
     body = resp.json()
     assert body["reachable"] is True
@@ -345,9 +350,9 @@ async def test_proxy_routes_502_not_500_on_unparseable_upstream(client, hb_mock)
     """Same misconfigured-upstream class on a data route: non-JSON must map
     to the documented 502-with-detail, not an unhandled 500."""
     hb_mock.get(f"{API}/entities").mock(return_value=httpx.Response(200, text="<html></html>"))
-    resp = await client.get("/api/homebox/entities")
+    resp = await client.get("/api/v1/homebox/entities")
     assert resp.status_code == 502
-    assert "could not parse" in resp.json()["detail"]
+    assert "could not parse" in resp.json()["error"]["message"]
 
 
 # -- writes (homebox_writes_enabled) ---------------------------------------
@@ -370,17 +375,17 @@ def _created(name: str, asset_id: str = "000-001", **kw) -> dict:
 @pytest.mark.parametrize(
     ("method", "path", "kwargs"),
     [
-        ("post", "/api/homebox/entities/bulk", {"json": {"parent_id": "p", "names": ["a"]}}),
-        ("post", "/api/homebox/entities/e1/attachments", {"files": {"file": ("a.jpg", _JPEG)}}),
-        ("get", "/api/homebox/tags", {}),
-        ("get", "/api/homebox/entity-types", {}),
+        ("post", "/api/v1/homebox/entities/bulk", {"json": {"parent_id": "p", "names": ["a"]}}),
+        ("post", "/api/v1/homebox/entities/e1/attachments", {"files": {"file": ("a.jpg", _JPEG)}}),
+        ("get", "/api/v1/homebox/tags", {}),
+        ("get", "/api/v1/homebox/entity-types", {}),
     ],
 )
 async def test_write_routes_403_when_disabled(app_and_client, method, path, kwargs):
     _, client = app_and_client
     resp = await getattr(client, method)(path, **kwargs)
     assert resp.status_code == 403
-    assert resp.json() == {"detail": "homebox writes disabled"}
+    assert resp.json()["error"]["code"] == "writes_disabled"
 
 
 @_WRITES
@@ -394,14 +399,16 @@ async def test_bulk_create_in_order_with_partial_failure(app_and_client, hb_mock
     )
     _, client = app_and_client
     resp = await client.post(
-        "/api/homebox/entities/bulk",
+        "/api/v1/homebox/entities/bulk",
         json={"parent_id": "p", "tag_ids": ["t1"], "names": [" A ", "B", "C"], "quantity": 1},
     )
     assert resp.status_code == 200
     results = resp.json()["results"]
     assert [r["ok"] for r in results] == [True, False, True]
     assert results[0] == {
-        "index": 0, "ok": True, "error": None,
+        "index": 0,
+        "ok": True,
+        "error": None,
         "entity": {"id": "id-A", "name": "A", "asset_id": "000-001"},
     }
     assert results[1]["entity"] is None
@@ -418,10 +425,10 @@ async def test_bulk_create_aborts_on_upstream_auth_error(app_and_client, hb_mock
     route = hb_mock.post(f"{API}/entities").mock(return_value=httpx.Response(401))
     _, client = app_and_client
     resp = await client.post(
-        "/api/homebox/entities/bulk", json={"parent_id": "p", "names": ["a", "b", "c"]}
+        "/api/v1/homebox/entities/bulk", json={"parent_id": "p", "names": ["a", "b", "c"]}
     )
     assert resp.status_code == 502
-    assert "rejected the API key" in resp.json()["detail"]
+    assert "rejected the API key" in resp.json()["error"]["message"]
     assert route.call_count == 1
 
 
@@ -431,7 +438,9 @@ async def test_bulk_create_aborts_on_upstream_auth_error(app_and_client, hb_mock
 )
 async def test_bulk_create_rejects_bad_names(app_and_client, names):
     _, client = app_and_client
-    resp = await client.post("/api/homebox/entities/bulk", json={"parent_id": "p", "names": names})
+    resp = await client.post(
+        "/api/v1/homebox/entities/bulk", json={"parent_id": "p", "names": names}
+    )
     assert resp.status_code == 422
 
 
@@ -451,7 +460,7 @@ async def test_upload_photo_ok_builds_filename_and_returns_attachment_id(app_and
     )
     _, client = app_and_client
     resp = await client.post(
-        "/api/homebox/entities/e1/attachments",
+        "/api/v1/homebox/entities/e1/attachments",
         files={"file": ("whatever.bin", _PNG, "application/octet-stream")},
         data={"primary": "true"},
     )
@@ -475,7 +484,7 @@ async def test_upload_photo_heic_by_magic_even_with_wrong_header(app_and_client,
     )
     _, client = app_and_client
     resp = await client.post(
-        "/api/homebox/entities/e1/attachments",
+        "/api/v1/homebox/entities/e1/attachments",
         files={"file": ("x.txt", _HEIC, "text/plain")},
     )
     assert resp.status_code == 200
@@ -487,7 +496,7 @@ async def test_upload_photo_heic_by_magic_even_with_wrong_header(app_and_client,
 async def test_upload_photo_bad_magic_is_415_even_if_header_says_jpeg(app_and_client):
     _, client = app_and_client
     resp = await client.post(
-        "/api/homebox/entities/e1/attachments",
+        "/api/v1/homebox/entities/e1/attachments",
         files={"file": ("a.jpg", b"GIF89a" + b"\x00" * 20, "image/jpeg")},
     )
     assert resp.status_code == 415
@@ -498,7 +507,7 @@ async def test_upload_photo_over_cap_is_413(app_and_client, monkeypatch):
     monkeypatch.setattr("labelmaker.api.router_homebox.MAX_PHOTO_BYTES", 1024)
     _, client = app_and_client
     resp = await client.post(
-        "/api/homebox/entities/e1/attachments",
+        "/api/v1/homebox/entities/e1/attachments",
         files={"file": ("a.jpg", _JPEG + b"\x00" * 2048, "image/jpeg")},
     )
     assert resp.status_code == 413
@@ -511,9 +520,9 @@ async def test_tags_and_entity_types_and_upstream_422(app_and_client, hb_mock):
     )
     hb_mock.get(f"{API}/entity-types").mock(return_value=httpx.Response(422, text="bad"))
     _, client = app_and_client
-    resp = await client.get("/api/homebox/tags")
+    resp = await client.get("/api/v1/homebox/tags")
     assert resp.json() == [{"id": "t1", "name": "x"}]
-    assert (await client.get("/api/homebox/entity-types")).status_code == 422
+    assert (await client.get("/api/v1/homebox/entity-types")).status_code == 422
 
 
 _OIDC_WRITES = pytest.mark.parametrize(
@@ -537,7 +546,7 @@ _OIDC_WRITES = pytest.mark.parametrize(
 @_OIDC_WRITES
 async def test_write_routes_require_auth_in_oidc_mode(client):
     resp = await client.post(
-        "/api/homebox/entities/bulk", json={"parent_id": "p", "names": ["a"]}
+        "/api/v1/homebox/entities/bulk", json={"parent_id": "p", "names": ["a"]}
     )
     assert resp.status_code == 401
-    assert (await client.get("/api/homebox/tags")).status_code == 401
+    assert (await client.get("/api/v1/homebox/tags")).status_code == 401

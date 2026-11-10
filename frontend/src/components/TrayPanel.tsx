@@ -93,7 +93,7 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
   const previews = useTrayPreviews(items);
 
   const trayHasItems = items.length > 0;
-  const trayFull = items.length >= 100; // POST /api/print's own `labels` max_length=100
+  const trayFull = items.length >= 100; // POST /api/v1/print's own `labels` max_length=100
   const bodyLabels: LabelDefinition[] = trayHasItems
     ? items.map((i) => i.definition)
     : current !== null
@@ -150,7 +150,7 @@ export function TrayPanel({ current, onAddToTray, closeTrayDrawer }: TrayPanelPr
 
   // Carry-forward fix (see CurrentDesign.serializationHasVisibleError's own
   // doc): a settled over-cap (or otherwise server-rejected) serialization
-  // fires a genuine /api/print/estimate 422 too -- the SequenceEditor panel
+  // fires a genuine /api/v1/print/estimate 422 too -- the SequenceEditor panel
   // already shows that exact message; defer to it instead of duplicating
   // the raw text a second time down here.
   const deferEstimateErrorToPanel = !trayHasItems && current !== null && current.serializationHasVisibleError && error !== null;
