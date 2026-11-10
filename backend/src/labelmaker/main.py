@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from labelmaker.api import (
+    router_api_keys,
     router_auth,
     router_els,
     router_gallery,
@@ -34,6 +35,7 @@ from labelmaker.api import (
     router_settings,
     ws,
 )
+from labelmaker.api.api_keys import WsTicketStore
 from labelmaker.api.auth_gate import AuthGateMiddleware
 from labelmaker.api.errors import ApiError, err, register_error_handlers
 from labelmaker.api.legacy import LegacyDeprecationMiddleware
@@ -226,6 +228,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # running before AuthGate means `scope["session"]` is already decoded
     # by the time the gate reads it, for both "http" and "websocket" scopes
     # (see auth_gate.py's own docstring for the full reasoning).
+    app.state.ws_tickets = WsTicketStore()
     if cfg.auth_mode == "oidc":
         app.state.oauth = router_auth.build_oauth_client(cfg)
         app.add_middleware(AuthGateMiddleware)
@@ -237,6 +240,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             # come from the SAME config field, so they can't disagree.
             max_age=cfg.session_max_age_s,
             https_only=cfg.session_cookie_secure,
+            # Explicit (also Starlette's default): blocks cross-site POST CSRF. The
+            # cookie is always HttpOnly; Secure follows SESSION_COOKIE_SECURE.
+            same_site="lax",
         )
 
     # H5 (the 2026-08 code review): GET /api/symbols' ~1.5MB catalog (and
@@ -296,6 +302,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.include_router(router_history.router, prefix=prefix, **kw)
         app.include_router(router_homebox.router, prefix=prefix, **kw)
         app.include_router(router_settings.router, prefix=prefix, **kw)
+        app.include_router(router_api_keys.router, prefix=prefix, **kw)
         # Unauthenticated by design (HomeBox's ELS caller sends no auth, see
         # router_els.py's module docstring) -- registered UNCONDITIONALLY (task
         # 4.5 Track A: els_enabled is now DB-editable from the Settings page, so

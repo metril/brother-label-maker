@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, putHomeboxSettings } from "../api/client";
 import type { SettingRow, SettingsSource } from "../api/types";
+import { ApiKeysSection } from "../components/ApiKeysSection";
 import { Pending } from "../components/ui/Pending";
 import { NumberInput, Select, Textarea, TextInput } from "../components/ui/inputs";
 import { Switch } from "../components/ui/Switch";
@@ -836,6 +837,7 @@ export function Settings() {
           <PrinterSection rows={rows} />
           <HomeboxSection rows={rows} />
           <ElsSection rows={rows} />
+          <ApiKeysSection />
           <RuntimeSection rows={rows} />
         </>
       )}

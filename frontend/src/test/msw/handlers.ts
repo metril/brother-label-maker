@@ -605,6 +605,25 @@ export const putSettingsHandler = http.put("/api/v1/settings", async ({ request 
  * fonts/tapes/symbols/printer-status) plus preview/estimate/print/presets/
  * history/homebox -- individual tests override with server.use(...) for the
  * scenario they care about. */
+// -- API keys (Settings page) --
+export const listApiKeysHandler = http.get("/api/v1/api-keys", () => HttpResponse.json([]));
+export const createApiKeyHandler = http.post("/api/v1/api-keys", async ({ request }) => {
+  const body = (await request.json()) as { name: string; scope: "read" | "write" };
+  return HttpResponse.json(
+    {
+      id: "k1",
+      name: body.name,
+      prefix: "abcd1234",
+      scope: body.scope,
+      created_at: "2026-11-10T00:00:00Z",
+      last_used_at: null,
+      key: "lm_abcd1234-secret-plaintext",
+    },
+    { status: 201 },
+  );
+});
+export const revokeApiKeyHandler = http.delete("/api/v1/api-keys/:id", () => new HttpResponse(null, { status: 204 }));
+
 export const defaultHandlers = [
   healthHandler,
   labelTypesHandler,
@@ -647,4 +666,7 @@ export const defaultHandlers = [
   authLogoutHandler,
   getSettingsHandler,
   putSettingsHandler,
+  listApiKeysHandler,
+  createApiKeyHandler,
+  revokeApiKeyHandler,
 ];

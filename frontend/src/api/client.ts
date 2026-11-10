@@ -1,5 +1,7 @@
 import type {
   ApiErrorBody,
+  ApiKey,
+  ApiKeyCreated,
   AuthMe,
   ChainedPreviewResponse,
   CsvUploadResponse,
@@ -581,4 +583,19 @@ export function getSettings(): Promise<SettingsResponse> {
  * than refetching. */
 export function putSettings(partial: SettingsUpdate): Promise<SettingsResponse> {
   return request<SettingsResponse>("/settings", { method: "PUT", body: JSON.stringify(partial) });
+}
+
+/** GET /api/v1/api-keys -- active keys (no plaintext). */
+export function listApiKeys(): Promise<ApiKey[]> {
+  return request<ApiKey[]>("/api-keys");
+}
+
+/** POST /api/v1/api-keys -- the response carries the plaintext key once. */
+export function createApiKey(body: { name: string; scope: "read" | "write" }): Promise<ApiKeyCreated> {
+  return request<ApiKeyCreated>("/api-keys", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** DELETE /api/v1/api-keys/{id} -- revoke. */
+export function revokeApiKey(id: string): Promise<void> {
+  return request<void>(`/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

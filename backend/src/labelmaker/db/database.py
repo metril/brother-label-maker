@@ -278,8 +278,7 @@ class Database:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
         cur = await self._conn.execute(
-            f"SELECT * FROM presets {where} "
-            "ORDER BY favorite DESC, updated_at DESC, rowid DESC",
+            f"SELECT * FROM presets {where} ORDER BY favorite DESC, updated_at DESC, rowid DESC",
             params,
         )
         rows = await cur.fetchall()
@@ -320,6 +319,50 @@ class Database:
         d["definition"] = json.loads(d["definition"])
         d["favorite"] = bool(d["favorite"])
         return d
+
+    # -- api keys --------------------------------------------------------
+
+    async def create_api_key(self, name: str, scope: str, prefix: str, sha256_hash: str) -> dict:
+        key_id = uuid.uuid4().hex
+        now = _utcnow()
+        await self._conn.execute(
+            "INSERT INTO api_keys (id, name, prefix, sha256_hash, scope, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (key_id, name, prefix, sha256_hash, scope, now),
+        )
+        return {
+            "id": key_id,
+            "name": name,
+            "prefix": prefix,
+            "sha256_hash": sha256_hash,
+            "scope": scope,
+            "created_at": now,
+            "last_used_at": None,
+            "revoked_at": None,
+        }
+
+    async def list_api_keys(self) -> list[dict]:
+        """Active (non-revoked) keys, newest first."""
+        cur = await self._conn.execute(
+            "SELECT * FROM api_keys WHERE revoked_at IS NULL ORDER BY created_at DESC"
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def find_api_keys_by_prefix(self, prefix: str) -> list[dict]:
+        cur = await self._conn.execute("SELECT * FROM api_keys WHERE prefix = ?", (prefix,))
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def revoke_api_key(self, key_id: str) -> bool:
+        cur = await self._conn.execute(
+            "UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+            (_utcnow(), key_id),
+        )
+        return cur.rowcount > 0
+
+    async def touch_api_key(self, key_id: str) -> None:
+        await self._conn.execute(
+            "UPDATE api_keys SET last_used_at = ? WHERE id = ?", (_utcnow(), key_id)
+        )
 
     # -- print jobs ----------------------------------------------------
 
@@ -442,9 +485,7 @@ class Database:
 
         set_clauses = ", ".join(f"{key} = ?" for key in fields)
         params = [*fields.values(), job_id]
-        cur = await self._conn.execute(
-            f"UPDATE print_jobs SET {set_clauses} WHERE id = ?", params
-        )
+        cur = await self._conn.execute(f"UPDATE print_jobs SET {set_clauses} WHERE id = ?", params)
         if cur.rowcount == 0:
             return None
         return await self.get_job(job_id)

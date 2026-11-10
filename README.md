@@ -294,6 +294,16 @@ If `AUTH_MODE=oidc` is set but any of the four required fields above is
 missing, the app **fails at startup** (not on the first login attempt) with
 a clear error naming which env var is missing.
 
+### API keys
+
+For scripts and other machines under `AUTH_MODE=oidc`: create a key on the
+**Settings** page (name + `read` or `write` scope). The plaintext (`lm_...`) is
+shown once; only its SHA-256 is stored. Send it as `Authorization: Bearer lm_...`
+to `/api/v1/*`. `read` keys may only issue GET/HEAD/OPTIONS. Keys cannot manage
+keys (that needs a browser session). For the event WebSocket, send the bearer
+header or `POST /api/v1/ws-ticket` and connect to `/api/v1/ws?ticket=...` (60 s,
+single use) so keys never appear in URLs. Under `AUTH_MODE=none` keys are ignored.
+
 ## Security notes
 
 - **LAN-first by default.** With `AUTH_MODE=none` (the default), there is no

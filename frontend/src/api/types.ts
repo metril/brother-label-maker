@@ -880,3 +880,18 @@ export interface SettingsResponse {
  * choices, 422s (parsed the same readable way as every other route, see
  * extractErrorDetail in client.ts). */
 export type SettingsUpdate = Record<string, string | number | boolean | null>;
+
+/** GET /api/v1/api-keys item; the plaintext is never listed. */
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  scope: "read" | "write";
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** POST /api/v1/api-keys (201): `key` is the plaintext, shown once. */
+export interface ApiKeyCreated extends ApiKey {
+  key: string;
+}

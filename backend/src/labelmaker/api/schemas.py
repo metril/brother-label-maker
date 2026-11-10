@@ -278,3 +278,26 @@ class HomeboxStatusOut(BaseModel):
     healthy: bool | None = None
     version: str | None = None
     error: str | None = None
+
+
+# -- api keys / ws ticket -----------------------------------------------------------------
+
+
+class ApiKeyOut(BaseModel):
+    """An API key as listed; the plaintext is never included."""
+
+    id: str
+    name: str
+    prefix: str = Field(description="First characters after `lm_`; identifies the key in logs")
+    scope: Literal["read", "write"]
+    created_at: str
+    last_used_at: str | None = None
+
+
+class ApiKeyCreatedOut(ApiKeyOut):
+    key: str = Field(description="Full plaintext key. Shown once, at creation only.")
+
+
+class WsTicketOut(BaseModel):
+    ticket: str = Field(description="Single-use WebSocket ticket; connect with `?ticket=`")
+    expires_in: int = Field(description="Seconds until the ticket expires")
