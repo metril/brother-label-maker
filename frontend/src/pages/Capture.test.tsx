@@ -57,12 +57,44 @@ function takePhoto() {
   fireEvent.change(input, { target: { files: [new File(["x"], "p.jpg", { type: "image/jpeg" })] } });
 }
 
+/** jsdom's XHR + MSW never completes a multipart (FormData) upload on some
+ * Node/jsdom combos (the request body stream stalls), so route uploads through
+ * fetch without the body; the MSW handlers still decide the response. */
+class FetchXhr {
+  status = 0;
+  responseText = "";
+  upload: Record<string, unknown> = {};
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  ontimeout: (() => void) | null = null;
+  private method = "GET";
+  private url = "";
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+  send() {
+    fetch(new URL(this.url, window.location.href).href, { method: this.method }).then(
+      async (res) => {
+        this.status = res.status;
+        this.responseText = await res.text();
+        this.onload?.();
+      },
+      () => this.onerror?.(),
+    );
+  }
+}
+
 describe("Capture", () => {
   beforeEach(() => {
+    vi.stubGlobal("XMLHttpRequest", FetchXhr);
     URL.createObjectURL = vi.fn(() => "blob:preview");
     URL.revokeObjectURL = vi.fn();
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it("without camera support shows manual entry and a hint", () => {
     useHomebox();

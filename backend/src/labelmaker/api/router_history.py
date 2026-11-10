@@ -95,7 +95,7 @@ async def list_history(
             page=page, page_size=page_size, status=status, q=q, offset=offset
         )
     except ValueError as exc:
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_query", error_message(exc)) from exc
 
     return HistoryPageOut(
         items=[HistoryItemOut(**_to_light_item(job)) for job in result["items"]],

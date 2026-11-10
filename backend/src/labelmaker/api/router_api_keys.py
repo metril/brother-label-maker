@@ -58,7 +58,7 @@ async def create_key(body: ApiKeyCreate, db: DbDep) -> dict:
     """Returns the plaintext key once; it cannot be retrieved again."""
     name = body.name.strip()
     if not name:
-        raise ApiError(422, "validation_error", "name must not be blank")
+        raise ApiError(422, "invalid_name", "name must not be blank")
     plaintext, prefix, digest = api_keys.generate_key()
     row = await db.create_api_key(name, body.scope, prefix, digest)
     logger.info("api key created: prefix=%s scope=%s", prefix, body.scope)

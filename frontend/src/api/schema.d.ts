@@ -1195,7 +1195,7 @@ export interface components {
              */
             key: string;
             /** Last Used At */
-            last_used_at?: string | null;
+            last_used_at: string | null;
             /** Name */
             name: string;
             /**
@@ -1219,7 +1219,7 @@ export interface components {
             /** Id */
             id: string;
             /** Last Used At */
-            last_used_at?: string | null;
+            last_used_at: string | null;
             /** Name */
             name: string;
             /**
@@ -1251,18 +1251,18 @@ export interface components {
             auth_mode: "none" | "oidc";
             /** Authenticated */
             authenticated: boolean;
-            user?: components["schemas"]["AuthUserOut"] | null;
+            user: components["schemas"]["AuthUserOut"] | null;
         };
         /** AuthUserOut */
         AuthUserOut: {
             /** Email */
-            email?: string | null;
+            email: string | null;
             /** Exp */
-            exp?: number | null;
+            exp: number | null;
             /** Name */
-            name?: string | null;
+            name: string | null;
             /** Sub */
-            sub?: string | null;
+            sub: string | null;
         };
         /** Body_upload_entity_photo_api_v1_homebox_entities__entity_id__attachments_post */
         Body_upload_entity_photo_api_v1_homebox_entities__entity_id__attachments_post: {
@@ -1676,7 +1676,7 @@ export interface components {
         /** ExpandOut */
         ExpandOut: {
             /** Samples */
-            samples?: string[] | null;
+            samples: string[] | null;
             /** Total Labels */
             total_labels: number;
             /** Values */
@@ -1772,7 +1772,7 @@ export interface components {
             /** Created At */
             created_at: string;
             /** Error */
-            error?: string | null;
+            error: string | null;
             /** Id */
             id: string;
             /**
@@ -1789,16 +1789,16 @@ export interface components {
              */
             status: "queued" | "printing" | "done" | "failed" | "canceled";
             /** Strategy */
-            strategy?: string | null;
+            strategy: string | null;
             /** Tape Used Mm */
-            tape_used_mm?: number | null;
+            tape_used_mm: number | null;
             /** Tape Width Mm */
-            tape_width_mm?: number | null;
+            tape_width_mm: number | null;
             /**
              * Thumbnail Url
              * @description URL of GET /history/{id}/thumbnail, null if no thumbnail
              */
-            thumbnail_url?: string | null;
+            thumbnail_url: string | null;
         };
         /** HistoryPageOut */
         HistoryPageOut: {
@@ -1837,13 +1837,13 @@ export interface components {
             /** Configured */
             configured: boolean;
             /** Error */
-            error?: string | null;
+            error: string | null;
             /** Healthy */
-            healthy?: boolean | null;
+            healthy: boolean | null;
             /** Reachable */
-            reachable?: boolean | null;
+            reachable: boolean | null;
             /** Version */
-            version?: string | null;
+            version: string | null;
         };
         /** ImageListItem */
         ImageListItem: {
@@ -1913,7 +1913,7 @@ export interface components {
              */
             definition: unknown;
             /** Error */
-            error?: string | null;
+            error: string | null;
             /** Id */
             id: string;
             /**
@@ -1925,37 +1925,37 @@ export interface components {
             /** Label Count */
             label_count: number;
             /** Media Raw Byte */
-            media_raw_byte?: number | null;
+            media_raw_byte: number | null;
             /**
              * Status
              * @enum {string}
              */
             status: "queued" | "printing" | "done" | "failed" | "canceled";
             /** Strategy */
-            strategy?: string | null;
+            strategy: string | null;
             /** Tape Used Mm */
-            tape_used_mm?: number | null;
+            tape_used_mm: number | null;
             /** Tape Width Mm */
-            tape_width_mm?: number | null;
+            tape_width_mm: number | null;
             /**
              * Thumbnail Png B64
              * @description Base64 PNG thumbnail of the first label, if printed
              */
-            thumbnail_png_b64?: string | null;
+            thumbnail_png_b64: string | null;
         };
         /** KeepAliveOut */
         KeepAliveOut: {
             /** Enabled */
             enabled: boolean;
             /** Last Attempt At */
-            last_attempt_at?: string | null;
+            last_attempt_at: string | null;
             /** Last Error */
-            last_error?: string | null;
+            last_error: string | null;
             /**
              * Last Result
              * @description 'ok', 'skipped_busy', 'error' or null before the first attempt
              */
-            last_result?: string | null;
+            last_result: string | null;
         };
         /**
          * LabelDefinition
@@ -2063,7 +2063,7 @@ export interface components {
              * Tape Width Mm
              * @description null = any tape
              */
-            tape_width_mm?: number | null;
+            tape_width_mm: number | null;
             /** Updated At */
             updated_at: string;
         };
@@ -2116,9 +2116,9 @@ export interface components {
             /** Png Width Px */
             png_width_px: number;
             /** Sequence Value */
-            sequence_value?: string | null;
+            sequence_value: string | null;
             /** Total Labels */
-            total_labels?: number | null;
+            total_labels: number | null;
             /** Warnings */
             warnings: components["schemas"]["RenderWarning"][];
         };
@@ -2239,12 +2239,12 @@ export interface components {
              * Error
              * @description Human-readable error, if any
              */
-            error?: string | null;
+            error: string | null;
             /**
              * Error Code
              * @description Stable machine-readable classification of `error`; one of: printer_busy, printer_disconnected, printer_io_error, status_timeout, bridge_not_configured, bridge_unreachable, bridge_cert_mismatch, bridge_unpaired, bridge_busy, bridge_error. Null when there is no error.
              */
-            error_code?: string | null;
+            error_code: string | null;
             keep_alive: components["schemas"]["KeepAliveOut"];
             /**
              * Printer Mode
@@ -2252,7 +2252,7 @@ export interface components {
              */
             printer_mode: "mock" | "usb" | "remote";
             /** @description Printer status block; null when not read */
-            status?: components["schemas"]["PrinterStatusDetail"] | null;
+            status: components["schemas"]["PrinterStatusDetail"] | null;
         };
         /**
          * RenderWarning
@@ -2271,7 +2271,7 @@ export interface components {
             /** Message */
             message: string;
             /** Object Id */
-            object_id?: string | null;
+            object_id: string | null;
             /**
              * Severity
              * @default warning

@@ -100,6 +100,7 @@ describe("Diagnostics page", () => {
             is_e720bt: true,
           },
           error: null,
+          error_code: null,
           keep_alive: inertKeepAliveStatus,
         }),
       ),
@@ -118,6 +119,7 @@ describe("Diagnostics page", () => {
           printer_mode: "usb",
           status: null,
           error: null,
+          error_code: null,
           keep_alive: {
             enabled: true,
             last_attempt_at: "2026-08-02T04:00:00.000000Z",
@@ -144,6 +146,7 @@ describe("Diagnostics page", () => {
           printer_mode: "usb",
           status: null,
           error: "no USB printer found",
+          error_code: "printer_disconnected",
           keep_alive: {
             enabled: true,
             last_attempt_at: "2026-08-02T04:00:00.000000Z",

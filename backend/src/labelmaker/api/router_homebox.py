@@ -88,7 +88,7 @@ async def _proxy[T](call: Awaitable[T]) -> T:
     except HomeBoxNotFoundError as exc:
         raise ApiError(404, "not_found", str(exc)) from exc
     except HomeBoxValidationError as exc:
-        raise ApiError(422, "validation_error", str(exc)) from exc
+        raise ApiError(422, "invalid_homebox_request", str(exc)) from exc
     except HomeBoxError as exc:
         raise ApiError(502, "homebox_unavailable", str(exc)) from exc
     except ValueError as exc:

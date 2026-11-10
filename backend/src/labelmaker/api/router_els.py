@@ -303,7 +303,7 @@ async def get_els_label(
         # ValueErrors (unbundled font family, bad image mode) all surface
         # here the same readable way every other render_definition caller
         # in this app already gets (api/deps.py's error_message).
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
     return Response(content=png_bytes, media_type="image/png")
 

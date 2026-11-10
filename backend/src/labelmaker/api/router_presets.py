@@ -126,13 +126,13 @@ async def create_preset(body: PresetCreate, db: DbDep) -> dict:
     try:
         _validate_definition(body.label_type, body.definition)
     except (KeyError, ValueError) as exc:
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
     if body.tape_width_mm is not None:
         try:
             _validate_tape_width(body.tape_family, body.tape_width_mm)
         except ValueError as exc:
-            raise ApiError(422, "validation_error", error_message(exc)) from exc
+            raise ApiError(422, "invalid_tape_width", error_message(exc)) from exc
 
     return await db.create_preset(
         name=body.name,
@@ -203,7 +203,7 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
 
     for field in _NON_NULLABLE_UPDATE_FIELDS:
         if field in fields and fields[field] is None:
-            raise ApiError(422, "validation_error", f"{field} cannot be set to null")
+            raise ApiError(422, "invalid_field", f"{field} cannot be set to null")
 
     # Re-validate whenever EITHER half of the (label_type, definition) pair
     # changes -- a `label_type` change alone must still check the EXISTING
@@ -216,7 +216,7 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
         try:
             _validate_definition(label_type, definition)
         except (KeyError, ValueError) as exc:
-            raise ApiError(422, "validation_error", error_message(exc)) from exc
+            raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
     # Likewise for the (tape_family, tape_width_mm) pair -- re-check
     # against the real tape table whenever either changes, using whichever
@@ -228,7 +228,7 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
             try:
                 _validate_tape_width(family, width)
             except ValueError as exc:
-                raise ApiError(422, "validation_error", error_message(exc)) from exc
+                raise ApiError(422, "invalid_tape_width", error_message(exc)) from exc
 
     if not fields:
         return existing
@@ -289,7 +289,7 @@ async def print_preset(
         if preset["tape_width_mm"] is None:
             raise ApiError(
                 422,
-                "validation_error",
+                "invalid_request",
                 (
                     "preset has no tape_width_mm set and no `tape` was given in the "
                     "request body; cannot print without one"

@@ -367,7 +367,7 @@ async def render_preview(body: PreviewRequest, config: AppConfigDep) -> dict:
         # the same way an unknown type/tape does. Also covers
         # expand_definition's own ValueErrors (ALPHA under/overflow,
         # unknown {csv.<col>}) and the out-of-range `index` check above.
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
 
 class ExpandRequest(BaseModel):
@@ -410,7 +410,7 @@ async def expand_sequence(body: ExpandRequest) -> dict:
         # structural constraints (bad kind-specific requirements, the
         # total-labels cap, etc.) already 422 automatically via FastAPI's
         # request-body validation before this handler even runs.
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
 
 
 MAX_CSV_UPLOAD_BYTES = 1024 * 1024  # 1 MiB
@@ -439,15 +439,15 @@ def _parse_csv_upload(raw: bytes) -> dict:
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
-        raise ApiError(422, "validation_error", f"CSV file is not valid UTF-8: {exc}") from exc
+        raise ApiError(422, "invalid_csv", f"CSV file is not valid UTF-8: {exc}") from exc
 
     reader = csv.reader(io.StringIO(text))
     try:
         header = [column.strip() for column in next(reader)]
     except StopIteration:
-        raise ApiError(422, "validation_error", "CSV file is empty") from None
+        raise ApiError(422, "invalid_csv", "CSV file is empty") from None
     if not header or any(column == "" for column in header):
-        raise ApiError(422, "validation_error", "CSV header row must have non-empty column names")
+        raise ApiError(422, "invalid_csv", "CSV header row must have non-empty column names")
 
     seen: set[str] = set()
     duplicates: set[str] = set()
@@ -456,7 +456,7 @@ def _parse_csv_upload(raw: bytes) -> dict:
             duplicates.add(column)
         seen.add(column)
     if duplicates:
-        raise ApiError(422, "validation_error", f"duplicate CSV column(s): {sorted(duplicates)}")
+        raise ApiError(422, "invalid_csv", f"duplicate CSV column(s): {sorted(duplicates)}")
 
     rows: list[dict[str, str]] = []
     for line_no, raw_row in enumerate(reader, start=2):
@@ -471,12 +471,12 @@ def _parse_csv_upload(raw: bytes) -> dict:
             # to be rejected anyway once every row had already been
             # parsed and appended.
             raise ApiError(
-                422, "validation_error", f"CSV file has more than {MAX_CSV_ROWS} data rows"
+                422, "invalid_csv", f"CSV file has more than {MAX_CSV_ROWS} data rows"
             )
         if len(raw_row) != len(header):
             raise ApiError(
                 422,
-                "validation_error",
+                "invalid_csv",
                 (f"CSV row {line_no} has {len(raw_row)} column(s), expected {len(header)}"),
             )
         # Row values stripped the same way header column names are above --
@@ -485,6 +485,6 @@ def _parse_csv_upload(raw: bytes) -> dict:
         rows.append(dict(zip(header, (value.strip() for value in raw_row), strict=True)))
 
     if not rows:
-        raise ApiError(422, "validation_error", "CSV file has no data rows")
+        raise ApiError(422, "invalid_csv", "CSV file has no data rows")
 
     return {"columns": header, "rows": rows, "row_count": len(rows)}

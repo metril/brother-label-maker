@@ -87,6 +87,7 @@
           "prefix",
           "scope",
           "created_at",
+          "last_used_at",
           "key"
         ],
         "title": "ApiKeyCreatedOut",
@@ -137,7 +138,8 @@
           "name",
           "prefix",
           "scope",
-          "created_at"
+          "created_at",
+          "last_used_at"
         ],
         "title": "ApiKeyOut",
         "type": "object"
@@ -199,7 +201,8 @@
         },
         "required": [
           "auth_mode",
-          "authenticated"
+          "authenticated",
+          "user"
         ],
         "title": "AuthMeOut",
         "type": "object"
@@ -251,6 +254,12 @@
             "title": "Sub"
           }
         },
+        "required": [
+          "sub",
+          "name",
+          "email",
+          "exp"
+        ],
         "title": "AuthUserOut",
         "type": "object"
       },
@@ -1067,7 +1076,8 @@
         },
         "required": [
           "values",
-          "total_labels"
+          "total_labels",
+          "samples"
         ],
         "title": "ExpandOut",
         "type": "object"
@@ -1345,8 +1355,14 @@
           "id",
           "created_at",
           "status",
+          "error",
           "label_count",
-          "chain_mode"
+          "chain_mode",
+          "strategy",
+          "tape_width_mm",
+          "tape_used_mm",
+          "kind",
+          "thumbnail_url"
         ],
         "title": "HistoryItemOut",
         "type": "object"
@@ -1488,7 +1504,11 @@
           }
         },
         "required": [
-          "configured"
+          "configured",
+          "reachable",
+          "healthy",
+          "version",
+          "error"
         ],
         "title": "HomeboxStatusOut",
         "type": "object"
@@ -1713,9 +1733,16 @@
           "id",
           "created_at",
           "status",
+          "error",
           "definition",
           "label_count",
-          "chain_mode"
+          "chain_mode",
+          "strategy",
+          "tape_width_mm",
+          "media_raw_byte",
+          "tape_used_mm",
+          "thumbnail_png_b64",
+          "kind"
         ],
         "title": "JobOut",
         "type": "object"
@@ -1762,7 +1789,10 @@
           }
         },
         "required": [
-          "enabled"
+          "enabled",
+          "last_attempt_at",
+          "last_result",
+          "last_error"
         ],
         "title": "KeepAliveOut",
         "type": "object"
@@ -1984,6 +2014,7 @@
           "name",
           "label_type",
           "definition",
+          "tape_width_mm",
           "tape_family",
           "favorite",
           "created_at",
@@ -2160,7 +2191,9 @@
           "png_height_px",
           "length_mm",
           "min_feed_mm",
-          "warnings"
+          "warnings",
+          "total_labels",
+          "sequence_value"
         ],
         "title": "PreviewOut",
         "type": "object"
@@ -2473,6 +2506,9 @@
         "required": [
           "connected",
           "printer_mode",
+          "status",
+          "error",
+          "error_code",
           "keep_alive"
         ],
         "title": "PrinterStatusOut",
@@ -2512,7 +2548,9 @@
         },
         "required": [
           "code",
-          "message"
+          "severity",
+          "message",
+          "object_id"
         ],
         "title": "RenderWarning",
         "type": "object"
@@ -3077,7 +3115,7 @@
   "info": {
     "description": "HTTP API of the Brother P-touch Cube label maker: render and print labels, manage presets, history, images and HomeBox integration. Canonical prefix `/api/v1`; the unversioned `/api` alias is deprecated. Errors use a uniform `{error: {code, message, details}}` envelope. See API.md for guides.",
     "title": "Label Maker API",
-    "version": "0.1.0"
+    "version": "0"
   },
   "openapi": "3.1.0",
   "paths": {

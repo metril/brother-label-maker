@@ -348,3 +348,14 @@ async def test_homebox_writes_enabled_defaults_off_and_roundtrips(client):
 
     resp = await client.put("/api/v1/settings", json={"homebox_writes_enabled": None})
     assert _rows_by_key(resp.json())["homebox_writes_enabled"]["value"] is False
+
+
+async def test_put_unknown_field_message_names_field_without_echoing_values(client):
+    resp = await client.put(
+        "/api/v1/settings", json={"bogus_field": "leak_me_plant", "homebox_api_key": 123}
+    )
+    assert resp.status_code == 422
+    err = resp.json()["error"]
+    assert err["code"] == "validation_error"
+    assert "bogus_field" in err["message"]
+    assert "leak_me_plant" not in resp.text

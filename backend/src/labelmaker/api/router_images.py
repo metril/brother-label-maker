@@ -215,26 +215,26 @@ def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
         probe_format = probe.format
         width, height = probe.size
     except Image.DecompressionBombError as exc:
-        raise ApiError(422, "validation_error", f"image is too large to decode: {exc}") from exc
+        raise ApiError(422, "invalid_image", f"image is too large to decode: {exc}") from exc
     except Exception as exc:
         # PIL raises different exceptions per codec for "this isn't a
         # decodable image" (UnidentifiedImageError being the common one,
         # but a truncated/corrupt file of a recognized format can raise
         # other PIL/codec errors too) -- all of them mean the same thing to
         # this endpoint's caller: reject with a 422, not a 500.
-        raise ApiError(422, "validation_error", f"not a decodable image: {exc}") from exc
+        raise ApiError(422, "invalid_image", f"not a decodable image: {exc}") from exc
 
     if probe_format not in _ALLOWED_FORMATS:
         raise ApiError(
             422,
-            "validation_error",
+            "invalid_image",
             f"unsupported image format {probe_format!r}; allowed: png, jpeg, webp",
         )
 
     if width * height > MAX_DECODED_PIXELS:
         raise ApiError(
             422,
-            "validation_error",
+            "invalid_image",
             (
                 f"image is {width}x{height} ({width * height} px), exceeding the "
                 f"{MAX_DECODED_PIXELS}px cap"
@@ -249,7 +249,7 @@ def _process_upload(data: bytes, data_dir: Path) -> tuple[str, int, int]:
         img = Image.open(io.BytesIO(data))
         img.load()
     except Exception as exc:
-        raise ApiError(422, "validation_error", f"not a decodable image: {exc}") from exc
+        raise ApiError(422, "invalid_image", f"not a decodable image: {exc}") from exc
     if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
         img = img.convert("RGBA")
         background = Image.new("RGBA", img.size, (255, 255, 255, 255))
@@ -281,7 +281,7 @@ async def upload_image(
     """
     data = await _read_capped(request, file)
     if not data:
-        raise ApiError(422, "validation_error", "uploaded file is empty")
+        raise ApiError(422, "invalid_image", "uploaded file is empty")
 
     image_id, width, height = await anyio.to_thread.run_sync(_process_upload, data, config.data_dir)
     return ImageUploadResponse(image_id=image_id, width=width, height=height)
@@ -437,7 +437,7 @@ async def list_images(
             _list_uploaded_images, config.data_dir, page, page_size, offset
         )
     except ValueError as exc:
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_query", error_message(exc)) from exc
 
 
 def _generate_thumbnail(source_path: Path, dest_path: Path) -> None:

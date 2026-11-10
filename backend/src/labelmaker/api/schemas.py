@@ -33,6 +33,13 @@ PRINTER_ERROR_CODES = (
 )
 
 
+class Out(BaseModel):
+    """Base of every response model: fields with defaults are always present
+    on the wire, so the schema marks them required (exact generated types)."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
 def binary(media_type: str, description: str) -> dict[int | str, dict[str, Any]]:
     """`responses=` entry marking a 200 as raw bytes of `media_type`."""
     return {
@@ -46,7 +53,7 @@ def binary(media_type: str, description: str) -> dict[int | str, dict[str, Any]]
 # -- health / printer -----------------------------------------------------------
 
 
-class HealthOut(BaseModel):
+class HealthOut(Out):
     model_config = ConfigDict(
         json_schema_extra={
             "examples": [{"status": "ok", "printer_mode": "mock", "version": "1.0.0"}]
@@ -58,7 +65,7 @@ class HealthOut(BaseModel):
     version: str = Field(description="Installed application version")
 
 
-class PrinterStatusDetail(BaseModel):
+class PrinterStatusDetail(Out):
     """Parsed 32-byte printer status block (driver.status.PrinterStatus.to_dict)."""
 
     model_code: int
@@ -82,7 +89,7 @@ class PrinterStatusDetail(BaseModel):
     is_e720bt: bool
 
 
-class KeepAliveOut(BaseModel):
+class KeepAliveOut(Out):
     enabled: bool
     last_attempt_at: str | None = None
     last_result: str | None = Field(
@@ -91,7 +98,7 @@ class KeepAliveOut(BaseModel):
     last_error: str | None = None
 
 
-class PrinterStatusOut(BaseModel):
+class PrinterStatusOut(Out):
     connected: bool = Field(description="False when the printer/bridge could not be reached")
     printer_mode: PrinterMode
     status: PrinterStatusDetail | None = Field(
@@ -109,23 +116,23 @@ class PrinterStatusOut(BaseModel):
     keep_alive: KeepAliveOut
 
 
-class BridgeIdentityOut(BaseModel):
+class BridgeIdentityOut(Out):
     cert_pem: str = Field(description="This app's PUBLIC client certificate (PEM)")
     fingerprint: str = Field(description="SHA-256 fingerprint of the certificate")
 
 
-class JobCreatedOut(BaseModel):
+class JobCreatedOut(Out):
     job_id: str = Field(description="Id of the queued print job (uuid4 hex)")
 
 
-class CancelOut(BaseModel):
+class CancelOut(Out):
     status: Literal["canceled"]
 
 
 # -- jobs / history ---------------------------------------------------------------
 
 
-class JobOut(BaseModel):
+class JobOut(Out):
     """Full print job resource (GET /print/jobs/{id}, GET /history/{id})."""
 
     id: str
@@ -145,7 +152,7 @@ class JobOut(BaseModel):
     kind: JobKind = "print"
 
 
-class HistoryItemOut(BaseModel):
+class HistoryItemOut(Out):
     """Light list row; omits the (potentially large) `definition`."""
 
     id: str
@@ -163,7 +170,7 @@ class HistoryItemOut(BaseModel):
     )
 
 
-class HistoryPageOut(BaseModel):
+class HistoryPageOut(Out):
     items: list[HistoryItemOut]
     page: int
     page_size: int
@@ -173,7 +180,7 @@ class HistoryPageOut(BaseModel):
 # -- presets ---------------------------------------------------------------------
 
 
-class PresetOut(BaseModel):
+class PresetOut(Out):
     id: str
     name: str
     label_type: str
@@ -188,7 +195,7 @@ class PresetOut(BaseModel):
 # -- images ----------------------------------------------------------------------
 
 
-class ImageListItem(BaseModel):
+class ImageListItem(Out):
     image_id: str
     width: int
     height: int
@@ -196,7 +203,7 @@ class ImageListItem(BaseModel):
     mtime: str = Field(description="Upload mtime, ISO-8601 UTC")
 
 
-class ImagePageOut(BaseModel):
+class ImagePageOut(Out):
     items: list[ImageListItem]
     page: int
     page_size: int
@@ -206,7 +213,7 @@ class ImagePageOut(BaseModel):
 # -- render / print -----------------------------------------------------------------
 
 
-class PreviewOut(BaseModel):
+class PreviewOut(Out):
     png_b64: str
     png_width_px: int
     png_height_px: int
@@ -217,19 +224,19 @@ class PreviewOut(BaseModel):
     sequence_value: str | None = None
 
 
-class ExpandOut(BaseModel):
+class ExpandOut(Out):
     values: list[str]
     total_labels: int
     samples: list[str] | None = None
 
 
-class CsvUploadOut(BaseModel):
+class CsvUploadOut(Out):
     columns: list[str]
     rows: list[dict[str, str]]
     row_count: int
 
 
-class EstimateOut(BaseModel):
+class EstimateOut(Out):
     label_count: int
     label_lengths_mm: list[float]
     content_mm: float
@@ -242,14 +249,14 @@ class EstimateOut(BaseModel):
 # -- auth ---------------------------------------------------------------------------
 
 
-class AuthUserOut(BaseModel):
+class AuthUserOut(Out):
     sub: str | None = None
     name: str | None = None
     email: str | None = None
     exp: int | None = None
 
 
-class AuthMeOut(BaseModel):
+class AuthMeOut(Out):
     auth_mode: Literal["none", "oidc"]
     authenticated: bool
     user: AuthUserOut | None = None
@@ -258,9 +265,11 @@ class AuthMeOut(BaseModel):
 # -- settings --------------------------------------------------------------------------
 
 
-class SettingRow(BaseModel):
+class SettingRow(Out):
     """One settings row. `value` is absent for `homebox_api_key` (never echoed;
     `set` says whether one is configured); `set` is absent for every other row."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=False)
 
     key: str
     value: str | int | float | bool | list[str] | None = None
@@ -269,14 +278,14 @@ class SettingRow(BaseModel):
     editable: bool
 
 
-class SettingsOut(BaseModel):
+class SettingsOut(Out):
     settings: list[SettingRow]
 
 
 # -- homebox ----------------------------------------------------------------------------
 
 
-class HomeboxStatusOut(BaseModel):
+class HomeboxStatusOut(Out):
     model_config = ConfigDict(extra="forbid")
 
     configured: bool
@@ -289,7 +298,7 @@ class HomeboxStatusOut(BaseModel):
 # -- api keys / ws ticket -----------------------------------------------------------------
 
 
-class ApiKeyOut(BaseModel):
+class ApiKeyOut(Out):
     """An API key as listed; the plaintext is never included."""
 
     id: str
@@ -320,7 +329,7 @@ class ApiKeyCreatedOut(ApiKeyOut):
     key: str = Field(description="Full plaintext key. Shown once, at creation only.")
 
 
-class WsTicketOut(BaseModel):
+class WsTicketOut(Out):
     model_config = ConfigDict(
         json_schema_extra={"examples": [{"ticket": "k3v...", "expires_in": 60}]}
     )

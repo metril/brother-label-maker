@@ -117,6 +117,22 @@ def _use_envelope_for_422(app: FastAPI) -> None:
     app.openapi = openapi  # type: ignore[method-assign]
 
 
+def _validation_message(details: list[dict[str, Any]]) -> str:
+    """Names the offending fields (from `loc`) -- never the submitted values."""
+    fields: list[str] = []
+    for d in details:
+        loc = [str(p) for p in d["loc"]]
+        if loc and loc[0] in ("body", "query", "path", "header", "cookie"):
+            loc = loc[1:]
+        name = ".".join(loc)[:80]
+        if name and name not in fields:
+            fields.append(name)
+    if not fields:
+        return "request validation failed"
+    label = "invalid field" if len(fields) == 1 else "invalid fields"
+    return f"{label}: {', '.join(fields[:5])}" + (", ..." if len(fields) > 5 else "")
+
+
 def register_error_handlers(app: FastAPI) -> None:
     _use_envelope_for_422(app)
     @app.exception_handler(ApiError)
@@ -137,7 +153,7 @@ def register_error_handlers(app: FastAPI) -> None:
             {"loc": list(e.get("loc", ())), "msg": e.get("msg", ""), "type": e.get("type", "")}
             for e in exc.errors()
         ]
-        return envelope(422, "validation_error", "request validation failed", details)
+        return envelope(422, "validation_error", _validation_message(details), details)
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:

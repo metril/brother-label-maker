@@ -179,7 +179,7 @@ async def _validate_and_render(
         if len(body.labels) != 1:
             raise ApiError(
                 422,
-                "validation_error",
+                "invalid_design",
                 (
                     "print requests with `serialization` must contain exactly one "
                     f"template label, got {len(body.labels)}"
@@ -190,19 +190,19 @@ async def _validate_and_render(
                 _validate_serialized_print, body.labels[0], body.serialization, data_dir
             )
         except (KeyError, ValueError) as exc:
-            raise ApiError(422, "validation_error", error_message(exc)) from exc
+            raise ApiError(422, "invalid_design", error_message(exc)) from exc
         label_count = len(bound)
     else:
         try:
             rendered = await anyio.to_thread.run_sync(_validate_render_side, body.labels, data_dir)
         except (KeyError, ValueError) as exc:
-            raise ApiError(422, "validation_error", error_message(exc)) from exc
+            raise ApiError(422, "invalid_design", error_message(exc)) from exc
         label_count = len(body.labels)
 
     tapes = {(label.tape.width_mm, label.tape.family) for label in body.labels}
     if len(tapes) > 1:
         raise ApiError(
-            422, "validation_error", "all labels in a print job must share the same tape"
+            422, "invalid_design", "all labels in a print job must share the same tape"
         )
 
     return label_count, rendered
@@ -404,7 +404,7 @@ async def preview_print_job(
     if composite_pixels > MAX_PREVIEW_PIXELS:
         raise ApiError(
             422,
-            "validation_error",
+            "preview_too_large",
             (
                 f"chained preview would be {scaled_width}x{scaled_height} px "
                 f"({composite_pixels:,} px total) at scale={body.scale}, exceeding the "
@@ -422,7 +422,7 @@ async def preview_print_job(
         )
         png_bytes = await anyio.to_thread.run_sync(preview_png, preview.image, body.scale)
     except (KeyError, ValueError) as exc:
-        raise ApiError(422, "validation_error", error_message(exc)) from exc
+        raise ApiError(422, "invalid_design", error_message(exc)) from exc
     except MemoryError as exc:
         raise ApiError(
             507,

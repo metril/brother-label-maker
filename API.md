@@ -74,7 +74,8 @@ exceptions, has this shape:
 ```
 
 `details` is `null` except for validation errors, where it is a list of
-`{loc, msg, type}` (submitted values are never echoed). 500 responses never
+`{loc, msg, type}` (submitted values are never echoed); its `message` names
+the offending fields, e.g. `invalid field: bogus_field`. 500 responses never
 leak internals.
 
 | HTTP | `code` | Meaning |
@@ -87,7 +88,18 @@ leak internals.
 | 409 | `conflict` | State conflict (e.g. cancelling a finished job) |
 | 413 | `payload_too_large` | Upload too large |
 | 415 | `unsupported_media_type` | Unsupported upload type |
-| 422 | `validation_error` | Request failed validation (`details` lists fields) |
+| 422 | `validation_error` | Request failed schema validation (`details` lists fields) |
+| 422 | `invalid_design` | Label definition, params, tape or serialization rejected by the renderer |
+| 422 | `invalid_csv` | CSV upload is empty, malformed or over the row limit |
+| 422 | `invalid_image` | Upload is empty, undecodable, unsupported or too large to decode |
+| 422 | `invalid_query` | Pagination or filter values out of range |
+| 422 | `invalid_setting` | Settings update rejected (bad value or conflicting settings) |
+| 422 | `invalid_field` | A non-nullable field was set to null |
+| 422 | `invalid_tape_width` | Tape width does not exist for the tape family |
+| 422 | `invalid_name` | A name is blank |
+| 422 | `invalid_request` | Request is otherwise unusable (e.g. preset print without a tape) |
+| 422 | `invalid_homebox_request` | HomeBox rejected the submitted data |
+| 422 | `preview_too_large` | Chained preview would exceed the pixel cap |
 | 429 | `rate_limited` | Too many requests |
 | 500 | `internal_error` | Unhandled server error |
 | 502 | `upstream_error` | Upstream (HomeBox) failure |

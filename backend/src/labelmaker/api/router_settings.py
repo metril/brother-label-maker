@@ -163,9 +163,9 @@ async def put_settings(
         detail = "; ".join(
             f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}" for e in exc.errors()
         )
-        raise ApiError(422, "validation_error", detail) from exc
+        raise ApiError(422, "invalid_setting", detail) from exc
     except SettingsConflictError as exc:
-        raise ApiError(422, "validation_error", str(exc)) from exc
+        raise ApiError(422, "invalid_setting", str(exc)) from exc
 
     if "homebox_url" in sent or "homebox_api_key" in sent:
         # Build the new client BEFORE closing the old one, so

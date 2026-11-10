@@ -241,19 +241,7 @@ export interface PreviewRequest {
  * 24.5) -- any label under it still consumes that much tape; when
  * `length_mm < min_feed_mm`, `warnings` also carries a `code: "short_label"`
  * entry (severity "info") saying so. */
-export interface PreviewResponse {
-  png_b64: string;
-  png_width_px: number;
-  png_height_px: number;
-  length_mm: number;
-  min_feed_mm: number;
-  warnings: RenderWarning[];
-  /** Non-null only when the request included `serialization` -- the
-   * expanded total label count / the sequence value that produced the
-   * rendered `index`, respectively. */
-  total_labels: number | null;
-  sequence_value: string | null;
-}
+export type PreviewResponse = S["PreviewOut"];
 
 export type ChainMode = "cut_each" | "chain_ff" | "strip_marks";
 
@@ -489,18 +477,7 @@ export type PrinterStatusDetail = S["PrinterStatusDetail"];
  * attempt's outcome even while currently disabled or inert (mock mode). */
 export type KeepAliveStatus = S["KeepAliveOut"];
 
-export interface PrinterStatusResponse {
-  connected: boolean;
-  printer_mode: PrinterMode;
-  status: PrinterStatusDetail | null;
-  error: string | null;
-  /** Structured classification of `error` (null when there is none):
-   * printer_busy, printer_disconnected, printer_io_error, status_timeout,
-   * bridge_not_configured, bridge_unreachable, bridge_cert_mismatch,
-   * bridge_unpaired, bridge_busy, bridge_error. */
-  error_code: string | null;
-  keep_alive: KeepAliveStatus;
-}
+export type PrinterStatusResponse = S["PrinterStatusOut"];
 
 export type JobEventType =
   | "job.queued"
@@ -576,13 +553,7 @@ export interface GalleryItem {
  * null too (never got far enough to ask); `healthy: false` with
  * `reachable: true` is the pre-v0.26 API-generation mismatch, `error`
  * carrying the upgrade instructions. */
-export interface HomeboxStatus {
-  configured: boolean;
-  reachable: boolean | null;
-  healthy: boolean | null;
-  version: string | null;
-  error: string | null;
-}
+export type HomeboxStatus = S["HomeboxStatusOut"];
 
 /** Mirrors homebox/client.py's EntityTypeSummary -- the item-vs-location
  * discriminator in the unified entities API. */
@@ -731,11 +702,7 @@ export type AuthUser = S["AuthUserOut"];
  * `{auth_mode: "none", authenticated: true, user: null}` (see that route's
  * own docstring), so callers should branch on this shape, never on
  * `auth_mode` fetched/cached separately. */
-export interface AuthMe {
-  auth_mode: "none" | "oidc";
-  authenticated: boolean;
-  user: AuthUser | null;
-}
+export type AuthMe = S["AuthMeOut"];
 
 // --- Settings (task 4.5) ----------------------------------------------------
 // Mirrors backend/api/v1/router_settings.py + backend/settings_overlay.py: a
