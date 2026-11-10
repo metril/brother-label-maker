@@ -16,7 +16,7 @@ interface HistoryDetailsDialogProps {
   closeButtonRef: RefObject<HTMLButtonElement | null>;
 }
 
-/** History row "Details" (task 2.13's brief): GET /api/history/{id} (the
+/** History row "Details" (task 2.13's brief): GET /api/v1/history/{id} (the
  * FULL job resource, `definition` included) shown read-only as mono JSON,
  * plus a "Load into designer" button when that definition turns out to be
  * a single, un-serialized label (lib/history.ts's extractSingleLabel --

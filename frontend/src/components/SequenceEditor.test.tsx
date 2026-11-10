@@ -33,7 +33,7 @@ function enableSerialization() {
  * live-chips tests that need `sample` to actually carry a `{seq}` token
  * (useSequenceExpand.ts's own "first text field" derivation reads
  * selectedType/paramsByType from the store, same as the real app), which
- * is what exercises POST /api/render/expand's `samples` field (capped at
+ * is what exercises POST /api/v1/render/expand's `samples` field (capped at
  * 24 server-side) rather than its uncapped `values`. */
 function selectTextTypeWithToken(line = "PORT-{seq}") {
   useDesignerStore.getState().selectType("text", TEXT_TYPE.params_schema);
@@ -150,7 +150,7 @@ describe("SequenceEditor -- live value chips", () => {
     const user = userEvent.setup();
     const requestSpy = vi.fn();
     server.use(
-      http.post("/api/render/expand", async ({ request }) => {
+      http.post("/api/v1/render/expand", async ({ request }) => {
         requestSpy();
         const body = (await request.json()) as { serialization: { count: number } };
         const count = body.serialization.count;
@@ -195,7 +195,7 @@ describe("SequenceEditor -- live value chips", () => {
   // capped `samples.length`).
   it("'... and N more' is derived from the uncapped distinct-value total, not the (backend-capped-at-24) samples array, when the sample carries a {seq} token", async () => {
     server.use(
-      http.post("/api/render/expand", async ({ request }) => {
+      http.post("/api/v1/render/expand", async ({ request }) => {
         const body = (await request.json()) as { serialization: { count: number }; sample?: string };
         const count = body.serialization.count;
         const values = Array.from({ length: count }, (_, i) => String(i + 1).padStart(2, "0"));
@@ -270,8 +270,8 @@ describe("SequenceEditor -- CSV upload", () => {
   it("a readable server error (e.g. ragged rows) surfaces inline", async () => {
     const user = userEvent.setup();
     server.use(
-      http.post("/api/serialize/csv", () =>
-        HttpResponse.json({ detail: "CSV row 2 has 1 column(s), expected 2" }, { status: 422 }),
+      http.post("/api/v1/serialize/csv", () =>
+        HttpResponse.json({ error: { code: "error", message: "CSV row 2 has 1 column(s), expected 2" } }, { status: 422 }),
       ),
     );
     enableSerialization();

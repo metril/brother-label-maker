@@ -188,7 +188,7 @@ BRIDGE="docker compose -f docker/docker-compose.bridge.yml"
 3. **Pair:** copy the app's certificate to `app.crt` on the Pi, then:
    `$BRIDGE run --rm -T bridge python -m labelmaker.driver.bridge pair - < app.crt`
 4. **Start the bridge:** `$BRIDGE up -d`. It refuses to start until step 3 is done.
-5. **Check:** Diagnostics or `GET /api/printer/status` shows `connected: true`.
+5. **Check:** Diagnostics or `GET /api/v1/printer/status` shows `connected: true`.
 
 The bridge has no environment config: it listens on port 9177, keeps its files
 in `/data` and binds `0.0.0.0`. Outside Docker, the optional flags `--port`,
@@ -251,9 +251,9 @@ the single most common reason "mint an API key" fails on a fresh v0.26+
 HomeBox install. Set it before creating the key this app needs. Mint the key
 (an `hb_`-prefixed static key) from your HomeBox user profile's API Keys page.
 It stays server-side — the browser only ever talks to this app's
-`/api/homebox/*` proxy routes.
+`/api/v1/homebox/*` proxy routes.
 
-The QR base URL (`PUT /api/homebox/settings`) is separate and falls back to
+The QR base URL (`PUT /api/v1/homebox/settings`) is separate and falls back to
 the HomeBox URL when unset.
 
 **Phone capture:** on your phone open `<app-url>/capture` (or tap **Capture**
@@ -261,14 +261,16 @@ in the nav) and use Add to Home Screen for one-tap access. It scans a label's
 QR code and attaches a photo to that HomeBox item.
 
 **External Label Service:** enabling ELS on the Settings page registers
-`GET /api/els/label` so HomeBox can delegate its own label rendering to this
+`GET /api/v1/els/label` (also `/api/els/label`) so HomeBox can delegate its own label rendering to this
 app, at the tape width set there. Point HomeBox's own
 `HBOX_LABEL_MAKER_LABEL_SERVICE_URL` at it (e.g.
-`http://labelmaker:8000/api/els/label` on a shared Docker network).
+`http://labelmaker:8000/api/v1/els/label` on a shared Docker network; the legacy
+`/api/els/label` path still works and is not deprecated, so existing HomeBox
+configs need no change).
 
 **Security caveat:** HomeBox's ELS caller sends this endpoint a plain,
 unauthenticated `GET` — that's HomeBox's own design (`fetchLabelFromURL`),
-not a shortcut on our side, and there's no way to make it otherwise. `/api/els/label`
+not a shortcut on our side, and there's no way to make it otherwise. `/api/v1/els/label`
 is therefore exempt from the OIDC gate below even in `AUTH_MODE=oidc`
 (gating it would just break every HomeBox print button with no security
 benefit, since HomeBox has no browser session to present). Leave ELS off
@@ -279,7 +281,7 @@ internet.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `AUTH_MODE` | `none` | `none` = today's zero-auth LAN behavior, byte-for-byte (no session middleware is even added). `oidc` = gate every `/api/*` route (except `/api/health`, `/api/auth/*`, `/api/els/*`) behind a signed session cookie. |
+| `AUTH_MODE` | `none` | `none` = today's zero-auth LAN behavior, byte-for-byte (no session middleware is even added). `oidc` = gate every `/api/v1/*` route (except `/api/v1/health`, `/api/v1/auth/*`, `/api/v1/els/*`) behind a signed session cookie. |
 | `OIDC_ISSUER` | unset, **required if** `AUTH_MODE=oidc` | Your IdP's issuer URL, e.g. `https://auth.example.com/realms/labelmaker`. The rest of the endpoints are discovered from `{issuer}/.well-known/openid-configuration`. |
 | `OIDC_CLIENT_ID` | unset, **required if** `AUTH_MODE=oidc` | OIDC client id. |
 | `OIDC_CLIENT_SECRET` | unset, **required if** `AUTH_MODE=oidc` | Confidential client secret — stays server-side. |
@@ -311,7 +313,7 @@ a clear error naming which env var is missing.
   doesn't just allow "anyone read-only", it lets **any website on the
   internet ride a signed-in user's session** if they have it open in
   another tab. Only ever list specific origins you actually trust.
-- **ELS exposure.** `/api/els/label` is unauthenticated by HomeBox's own
+- **ELS exposure.** `/api/v1/els/label` is unauthenticated by HomeBox's own
   design (see the [ELS notes](#homebox-and-the-external-label-service) above) and cannot be gated without
   breaking the integration. Keep ELS off unless HomeBox can
   reach this app on a network you control.
@@ -384,7 +386,7 @@ cd backend && uv run uvicorn labelmaker.main:app --port 8000
 cd frontend && npm run build
 cd backend && DATA_DIR=/tmp/lm-data STATIC_DIR=../frontend/dist uv run uvicorn labelmaker.main:app --port 8001
 
-# frontend dev server (proxies /api to :8000)
+# frontend dev server (proxies /api, incl. /api/v1 and the WebSocket, to :8000)
 cd frontend && npm run dev          # http://localhost:5173
 
 # tests + lint (1265 backend tests, 233 frontend tests, all green as of this writing)

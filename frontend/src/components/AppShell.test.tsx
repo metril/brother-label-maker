@@ -38,7 +38,7 @@ function currentDesign(overrides: Partial<CurrentDesign> = {}): CurrentDesign {
   };
 }
 
-/** task 4.1: AppShell's own auth gating on top of GET /api/auth/me --
+/** task 4.1: AppShell's own auth gating on top of GET /api/v1/auth/me --
  * every OTHER AppShell/App test in the suite exercises the "none" mode
  * default (test/msw/handlers.ts's authMeNoneHandler), which is the real
  * proof that mode stays a no-op; these two cover the "oidc" branch
@@ -52,7 +52,7 @@ describe("AppShell auth gating (task 4.1)", () => {
 
   it("renders a sign-in panel instead of the app when oidc mode reports unauthenticated", async () => {
     server.use(
-      http.get("/api/auth/me", () =>
+      http.get("/api/v1/auth/me", () =>
         HttpResponse.json({ auth_mode: "oidc", authenticated: false, user: null }),
       ),
     );
@@ -65,7 +65,7 @@ describe("AppShell auth gating (task 4.1)", () => {
 
     expect(await screen.findByRole("heading", { name: "Sign in required" })).toBeInTheDocument();
     const signInLink = screen.getByRole("link", { name: "Sign in" });
-    expect(signInLink).toHaveAttribute("href", "/api/auth/login");
+    expect(signInLink).toHaveAttribute("href", "/api/v1/auth/login");
 
     // The app itself (nav, children) never rendered at all.
     expect(screen.queryByText("designer content")).not.toBeInTheDocument();
@@ -74,7 +74,7 @@ describe("AppShell auth gating (task 4.1)", () => {
 
   it("shows the signed-in user's name and a working sign-out button when oidc mode reports authenticated", async () => {
     server.use(
-      http.get("/api/auth/me", () =>
+      http.get("/api/v1/auth/me", () =>
         HttpResponse.json({
           auth_mode: "oidc",
           authenticated: true,
@@ -103,7 +103,7 @@ describe("AppShell auth gating (task 4.1)", () => {
 
     let logoutCalled = false;
     server.use(
-      http.post("/api/auth/logout", () => {
+      http.post("/api/v1/auth/logout", () => {
         logoutCalled = true;
         return new HttpResponse(null, { status: 204 });
       }),
@@ -454,7 +454,7 @@ describe("AppShell Capture nav link", () => {
   it("does not render the Capture link when HomeBox is disabled", async () => {
     let served = false;
     server.use(
-      http.get("/api/homebox/status", () => {
+      http.get("/api/v1/homebox/status", () => {
         served = true;
         return HttpResponse.json({ configured: false, reachable: false, healthy: false, version: null, error: null });
       }),

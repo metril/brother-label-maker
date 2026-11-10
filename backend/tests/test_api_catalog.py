@@ -29,7 +29,7 @@ from labelmaker.render.symbols import list_symbols
 
 
 async def test_fonts_returns_the_four_bundled_families_with_expected_shape(client):
-    resp = await client.get("/api/fonts")
+    resp = await client.get("/api/v1/fonts")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
@@ -45,7 +45,7 @@ async def test_fonts_returns_the_four_bundled_families_with_expected_shape(clien
 
 
 async def test_tapes_returns_all_fifteen_tze_and_hse(client):
-    resp = await client.get("/api/tapes")
+    resp = await client.get("/api/v1/tapes")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
@@ -62,14 +62,14 @@ async def test_tapes_returns_all_fifteen_tze_and_hse(client):
 
 
 async def test_tapes_tze_family_has_the_six_expected_widths_in_order(client):
-    resp = await client.get("/api/tapes")
+    resp = await client.get("/api/v1/tapes")
     body = resp.json()
     tze = [t for t in body if t["family"] == "tze"]
     assert [t["nominal_mm"] for t in tze] == [3.5, 6, 9, 12, 18, 24]
 
 
 async def test_tapes_print_mm_is_dots_to_mm_of_print_dots_rounded_to_0_1(client):
-    resp = await client.get("/api/tapes")
+    resp = await client.get("/api/v1/tapes")
     body = resp.json()
     tape_24mm_tze = next(t for t in body if t["family"] == "tze" and t["nominal_mm"] == 24)
     assert tape_24mm_tze["print_dots"] == 128
@@ -77,7 +77,7 @@ async def test_tapes_print_mm_is_dots_to_mm_of_print_dots_rounded_to_0_1(client)
 
 
 async def test_tapes_max_length_mm_matches_family(client):
-    resp = await client.get("/api/tapes")
+    resp = await client.get("/api/v1/tapes")
     body = resp.json()
     tze = next(t for t in body if t["family"] == "tze" and t["nominal_mm"] == 24)
     hse = next(t for t in body if t["family"] == "hse_2_1" and t["nominal_mm"] == 23.6)
@@ -89,7 +89,7 @@ async def test_tapes_max_length_mm_matches_family(client):
 
 
 async def test_symbols_returns_the_full_curated_catalog(client):
-    resp = await client.get("/api/symbols")
+    resp = await client.get("/api/v1/symbols")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
@@ -107,7 +107,7 @@ async def test_symbols_returns_the_full_curated_catalog(client):
 
 
 async def test_symbol_svg_returns_the_raw_svg_for_a_known_id(client):
-    resp = await client.get("/api/symbols/bolt")
+    resp = await client.get("/api/v1/symbols/bolt")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/svg+xml"
     assert resp.text.strip().startswith("<svg")
@@ -115,7 +115,7 @@ async def test_symbol_svg_returns_the_raw_svg_for_a_known_id(client):
 
 
 async def test_symbol_svg_unknown_id_returns_404(client):
-    resp = await client.get("/api/symbols/not-a-real-icon")
+    resp = await client.get("/api/v1/symbols/not-a-real-icon")
     assert resp.status_code == 404
 
 
@@ -150,7 +150,7 @@ async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_
     # route-level monkeypatch this test previously also needed is gone).
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 
-    resp = await client.get("/api/symbols")
+    resp = await client.get("/api/v1/symbols")
     assert resp.status_code == 200
     assert [entry["id"] for entry in resp.json()] == ["a"]
     first_etag = resp.headers["etag"]
@@ -169,7 +169,7 @@ async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_
     newer_ns = index_path.stat().st_mtime_ns + 1_000_000_000  # +1s, unambiguously newer
     os.utime(index_path, ns=(newer_ns, newer_ns))
 
-    resp2 = await client.get("/api/symbols")
+    resp2 = await client.get("/api/v1/symbols")
     assert resp2.status_code == 200
     assert {entry["id"] for entry in resp2.json()} == {"a", "b"}, (
         "GET /api/symbols served stale cached bytes across an index.json mtime change"
@@ -178,24 +178,24 @@ async def test_symbols_route_serves_cached_bytes_and_invalidates_on_index_mtime_
 
 
 async def test_symbols_route_sets_etag_and_cache_control(client):
-    resp = await client.get("/api/symbols")
+    resp = await client.get("/api/v1/symbols")
     assert resp.status_code == 200
     assert resp.headers["cache-control"] == "public, max-age=86400"
     assert resp.headers["etag"].startswith('W/"')
 
 
 async def test_symbols_route_returns_304_when_if_none_match_matches(client):
-    resp = await client.get("/api/symbols")
+    resp = await client.get("/api/v1/symbols")
     etag = resp.headers["etag"]
 
-    resp2 = await client.get("/api/symbols", headers={"If-None-Match": etag})
+    resp2 = await client.get("/api/v1/symbols", headers={"If-None-Match": etag})
     assert resp2.status_code == 304
     assert resp2.headers["etag"] == etag
     assert resp2.content == b""
 
 
 async def test_symbols_route_is_gzip_compressed_when_accepted(client):
-    resp = await client.get("/api/symbols", headers={"Accept-Encoding": "gzip"})
+    resp = await client.get("/api/v1/symbols", headers={"Accept-Encoding": "gzip"})
     assert resp.status_code == 200
     assert resp.headers.get("content-encoding") == "gzip"
     # `content-length` reflects the bytes actually sent over the wire
@@ -211,13 +211,13 @@ async def test_symbols_route_is_gzip_compressed_when_accepted(client):
 
 
 async def test_symbols_route_not_compressed_when_gzip_not_accepted(client):
-    resp = await client.get("/api/symbols", headers={"Accept-Encoding": "identity"})
+    resp = await client.get("/api/v1/symbols", headers={"Accept-Encoding": "identity"})
     assert resp.status_code == 200
     assert "content-encoding" not in resp.headers
 
 
 async def test_symbol_svg_route_sets_etag_last_modified_and_cache_control(client):
-    resp = await client.get("/api/symbols/bolt")
+    resp = await client.get("/api/v1/symbols/bolt")
     assert resp.status_code == 200
     assert resp.headers["cache-control"] == "public, max-age=86400"
     assert resp.headers["etag"].startswith('W/"')
@@ -225,10 +225,10 @@ async def test_symbol_svg_route_sets_etag_last_modified_and_cache_control(client
 
 
 async def test_symbol_svg_route_returns_304_when_if_none_match_matches(client):
-    resp = await client.get("/api/symbols/bolt")
+    resp = await client.get("/api/v1/symbols/bolt")
     etag = resp.headers["etag"]
 
-    resp2 = await client.get("/api/symbols/bolt", headers={"If-None-Match": etag})
+    resp2 = await client.get("/api/v1/symbols/bolt", headers={"If-None-Match": etag})
     assert resp2.status_code == 304
     assert resp2.headers["etag"] == etag
     assert resp2.content == b""
@@ -239,7 +239,7 @@ async def test_symbol_svg_route_returns_304_when_if_none_match_matches(client):
 
 
 async def test_symbol_svg_route_sets_nosniff_header_for_a_normal_symbol(client):
-    resp = await client.get("/api/symbols/bolt")
+    resp = await client.get("/api/v1/symbols/bolt")
     assert resp.status_code == 200
     assert resp.headers["x-content-type-options"] == "nosniff"
 
@@ -255,7 +255,7 @@ async def test_symbol_svg_route_rejects_script_sibling(client, monkeypatch, tmp_
     )
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 
-    resp = await client.get("/api/symbols/hostile_script")
+    resp = await client.get("/api/v1/symbols/hostile_script")
     assert resp.status_code == 404
 
 
@@ -270,7 +270,7 @@ async def test_symbol_svg_route_rejects_onload_attribute(client, monkeypatch, tm
     )
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 
-    resp = await client.get("/api/symbols/hostile_onload")
+    resp = await client.get("/api/v1/symbols/hostile_onload")
     assert resp.status_code == 404
 
 
@@ -286,7 +286,7 @@ async def test_symbol_svg_route_rejects_xlink_href(client, monkeypatch, tmp_path
     )
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 
-    resp = await client.get("/api/symbols/hostile_xlink")
+    resp = await client.get("/api/v1/symbols/hostile_xlink")
     assert resp.status_code == 404
 
 
@@ -310,5 +310,5 @@ async def test_symbol_svg_route_404s_when_manifest_path_escapes_symbols_dir(
     _write_symbols_index(tmp_path, entries)
     monkeypatch.setattr(symbols_module, "SYMBOLS_DIR", tmp_path)
 
-    resp = await client.get("/api/symbols/escaping")
+    resp = await client.get("/api/v1/symbols/escaping")
     assert resp.status_code == 404

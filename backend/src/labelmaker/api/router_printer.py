@@ -29,6 +29,7 @@ from labelmaker.api.deps import (
     QueueDep,
     SettingsDep,
 )
+from labelmaker.api.errors import err
 from labelmaker.driver.geometry import MARGIN_MIN_MM
 from labelmaker.driver.printer import get_status
 from labelmaker.driver.protocol import ChainMode
@@ -43,7 +44,7 @@ from labelmaker.driver.transport import (
 )
 from labelmaker.settings_overlay import EffectiveSettings
 
-router = APIRouter(prefix="/printer", tags=["printer"])
+router = APIRouter(prefix="/printer", tags=["printer"], responses=err(409, 503))
 
 # C1: how long a status check waits for USB_LOCK before giving up and
 # reporting "busy" instead of queuing up behind a print job that could take
@@ -105,6 +106,7 @@ async def printer_status(
     if printer_mode == "mock":
         fetch = _fetch_mock_status
     else:
+
         def fetch() -> PrinterStatus:
             return _fetch_usb_status(effective, config.data_dir)
 

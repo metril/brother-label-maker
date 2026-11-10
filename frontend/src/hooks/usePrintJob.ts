@@ -82,11 +82,11 @@ export interface UsePrintJobResult {
   cancel: () => void;
 }
 
-/** The job tray's print-job lifecycle: POST /api/print, then track the job
+/** The job tray's print-job lifecycle: POST /api/v1/print, then track the job
  * to a terminal state two ways at once -- the shared WS event stream
- * (useJobEvent, live push) and a 1s poll of GET /api/print/jobs/{id} as a
+ * (useJobEvent, live push) and a 1s poll of GET /api/v1/print/jobs/{id} as a
  * fallback, whichever source reports a terminal status first wins -- plus
- * POST /api/print/jobs/{id}/cancel while the job is still queued. A REAL
+ * POST /api/v1/print/jobs/{id}/cancel while the job is still queued. A REAL
  * timer (not query data) enforces a 30s cap on SILENCE (restarted by every
  * WS frame/successful poll) before a terminal state, same reasoning as the
  * original (pre-2.12) PrintButton.tsx: TanStack Query's structural sharing keeps `data` reference-stable across polls

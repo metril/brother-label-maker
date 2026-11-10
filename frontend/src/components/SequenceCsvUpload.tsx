@@ -12,7 +12,7 @@ interface SequenceCsvUploadProps {
   onPatch: (partial: Partial<Sequence>) => void;
 }
 
-/** CSV-kind Sequence editing (task 2.11): POST /api/serialize/csv -> show
+/** CSV-kind Sequence editing (task 2.11): POST /api/v1/serialize/csv -> show
  * the detected columns (as `{csv.<col>}` reference chips -- the actual
  * INSERT affordance lives per-text-field, see schema/TokenInsertButtons.
  * tsx), a row count, and a first-5-rows preview table, mono and

@@ -48,14 +48,14 @@ def _rows_by_key(body: dict) -> dict[str, dict]:
 
 
 async def test_get_settings_returns_exactly_the_allowlisted_keys(client):
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     assert resp.status_code == 200
     rows = _rows_by_key(resp.json())
     assert rows.keys() == _EXPECTED_ROW_KEYS
 
 
 async def test_get_settings_reflects_app_config_defaults(client):
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     rows = _rows_by_key(resp.json())
     assert rows["printer_mode"]["value"] == "mock"
     assert rows["printer_init_strategy"]["value"] == "classic"
@@ -88,7 +88,7 @@ async def test_get_settings_reflects_app_config_defaults(client):
 
 
 async def test_get_settings_never_leaks_oidc_or_session_material(client):
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     text = resp.text.lower()
     for forbidden in _FORBIDDEN_SUBSTRINGS:
         assert forbidden not in text
@@ -100,7 +100,7 @@ async def test_get_settings_never_leaks_oidc_or_session_material(client):
     indirect=True,
 )
 async def test_get_settings_reports_homebox_config_without_leaking_the_key(client):
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     rows = _rows_by_key(resp.json())
     assert rows["homebox_url"]["value"] == "https://hb.test"
     assert rows["homebox_url"]["source"] == "default"
@@ -114,7 +114,7 @@ async def test_get_settings_reports_homebox_config_without_leaking_the_key(clien
 
 
 async def test_put_homebox_api_key_never_echoes_the_planted_value(client):
-    resp = await client.put("/api/settings", json={"homebox_api_key": "hb_super_secret_plant"})
+    resp = await client.put("/api/v1/settings", json={"homebox_api_key": "hb_super_secret_plant"})
     assert resp.status_code == 200
     assert "hb_super_secret_plant" not in resp.text
     row = _rows_by_key(resp.json())["homebox_api_key"]
@@ -122,7 +122,7 @@ async def test_put_homebox_api_key_never_echoes_the_planted_value(client):
     assert row["set"] is True
     assert row["source"] == "db"
 
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     assert "hb_super_secret_plant" not in resp.text
 
 
@@ -130,24 +130,24 @@ async def test_put_homebox_api_key_never_echoes_the_planted_value(client):
 
 
 async def test_put_printer_flip_pins_roundtrip_changes_provenance(client):
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
     assert row["source"] == "default"
 
-    resp = await client.put("/api/settings", json={"printer_flip_pins": True})
+    resp = await client.put("/api/v1/settings", json={"printer_flip_pins": True})
     assert resp.status_code == 200
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is True
     assert row["source"] == "db"
 
     # Persists across a fresh GET, not just the PUT's own echoed response.
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is True
     assert row["source"] == "db"
 
-    resp = await client.put("/api/settings", json={"printer_flip_pins": None})
+    resp = await client.put("/api/v1/settings", json={"printer_flip_pins": None})
     assert resp.status_code == 200
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
@@ -163,28 +163,28 @@ async def test_put_els_enabled_roundtrip_gates_the_els_route(client):
     effect, not just the row's own value/provenance."""
     els_params = {"TitleText": "Cordless Drill", "URL": "https://homebox.example.com/item/1"}
 
-    resp = await client.get("/api/els/label", params=els_params)
+    resp = await client.get("/api/v1/els/label", params=els_params)
     assert resp.status_code == 404
 
-    resp = await client.put("/api/settings", json={"els_enabled": True})
+    resp = await client.put("/api/v1/settings", json={"els_enabled": True})
     assert resp.status_code == 200
     row = _rows_by_key(resp.json())["els_enabled"]
     assert row["value"] is True
     assert row["source"] == "db"
 
-    resp = await client.get("/api/els/label", params=els_params)
+    resp = await client.get("/api/v1/els/label", params=els_params)
     assert resp.status_code == 200
 
-    resp = await client.put("/api/settings", json={"els_enabled": False})
+    resp = await client.put("/api/v1/settings", json={"els_enabled": False})
     assert resp.status_code == 200
 
-    resp = await client.get("/api/els/label", params=els_params)
+    resp = await client.get("/api/v1/els/label", params=els_params)
     assert resp.status_code == 404
 
 
 async def test_put_is_a_true_partial_update(client):
     """Setting one field leaves every other field's provenance untouched."""
-    resp = await client.put("/api/settings", json={"printer_bit_order": "lsb_first"})
+    resp = await client.put("/api/v1/settings", json={"printer_bit_order": "lsb_first"})
     assert resp.status_code == 200
     rows = _rows_by_key(resp.json())
     assert rows["printer_bit_order"]["value"] == "lsb_first"
@@ -197,28 +197,28 @@ async def test_put_is_a_true_partial_update(client):
 
 
 async def test_put_unknown_key_is_422(client):
-    resp = await client.put("/api/settings", json={"bogus_field": 1})
+    resp = await client.put("/api/v1/settings", json={"bogus_field": 1})
     assert resp.status_code == 422
-    assert "bogus_field" in resp.json()["detail"]
+    assert "bogus_field" in resp.json()["error"]["message"]
 
 
 async def test_put_invalid_literal_is_422(client):
-    resp = await client.put("/api/settings", json={"printer_mode": "not-a-mode"})
+    resp = await client.put("/api/v1/settings", json={"printer_mode": "not-a-mode"})
     assert resp.status_code == 422
 
 
 async def test_put_els_tape_mm_out_of_bounds_is_422(client):
-    resp = await client.put("/api/settings", json={"els_tape_mm": 100})
+    resp = await client.put("/api/v1/settings", json={"els_tape_mm": 100})
     assert resp.status_code == 422
 
 
 async def test_put_homebox_url_bad_scheme_is_422(client):
-    resp = await client.put("/api/settings", json={"homebox_url": "ftp://x"})
+    resp = await client.put("/api/v1/settings", json={"homebox_url": "ftp://x"})
     assert resp.status_code == 422
 
 
 async def test_put_homebox_api_key_blank_is_422(client):
-    resp = await client.put("/api/settings", json={"homebox_api_key": "   "})
+    resp = await client.put("/api/v1/settings", json={"homebox_api_key": "   "})
     assert resp.status_code == 422
 
 
@@ -230,7 +230,7 @@ async def test_put_422_never_echoes_key_value_for_a_typo_d_field_name(client):
     # rejected input_value for this error too -- error_message()'s
     # str(exc) form would embed it, echoing the sentinel back into detail.
     resp = await client.put(
-        "/api/settings", json={"homebox_apikey": _SENTINEL_KEY}
+        "/api/v1/settings", json={"homebox_apikey": _SENTINEL_KEY}
     )
     assert resp.status_code == 422
     assert _SENTINEL_KEY not in resp.text
@@ -239,7 +239,7 @@ async def test_put_422_never_echoes_key_value_for_a_typo_d_field_name(client):
 async def test_put_422_never_echoes_key_value_for_wrong_json_type(client):
     # string_type: a list instead of a string for homebox_api_key.
     resp = await client.put(
-        "/api/settings", json={"homebox_api_key": [_SENTINEL_KEY]}
+        "/api/v1/settings", json={"homebox_api_key": [_SENTINEL_KEY]}
     )
     assert resp.status_code == 422
     assert _SENTINEL_KEY not in resp.text
@@ -249,7 +249,7 @@ async def test_put_422_never_echoes_key_value_for_a_too_long_key(client):
     # string_too_long: max_length=500 on homebox_api_key.
     too_long_key = _SENTINEL_KEY + ("x" * 500)
     resp = await client.put(
-        "/api/settings", json={"homebox_api_key": too_long_key}
+        "/api/v1/settings", json={"homebox_api_key": too_long_key}
     )
     assert resp.status_code == 422
     assert _SENTINEL_KEY not in resp.text
@@ -258,11 +258,11 @@ async def test_put_422_never_echoes_key_value_for_a_too_long_key(client):
 async def test_put_invalid_batch_applies_nothing(client):
     """A batch with one bad field must not partially apply the good ones."""
     resp = await client.put(
-        "/api/settings", json={"printer_flip_pins": True, "printer_mode": "not-a-mode"}
+        "/api/v1/settings", json={"printer_flip_pins": True, "printer_mode": "not-a-mode"}
     )
     assert resp.status_code == 422
 
-    resp = await client.get("/api/settings")
+    resp = await client.get("/api/v1/settings")
     row = _rows_by_key(resp.json())["printer_flip_pins"]
     assert row["value"] is False
     assert row["source"] == "default"
@@ -283,13 +283,13 @@ async def test_put_homebox_url_rebuilds_client_using_effective_env_key(app_and_c
     app, client = app_and_client
     assert app.state.homebox is None  # url unset even though the key is (env)
 
-    resp = await client.put("/api/settings", json={"homebox_url": "https://hb2.test"})
+    resp = await client.put("/api/v1/settings", json={"homebox_url": "https://hb2.test"})
     assert resp.status_code == 200
     assert app.state.homebox is not None
     assert app.state.homebox.base_url == "https://hb2.test"
     assert app.state.homebox._client.headers["Authorization"] == "Bearer hb_env_key"
 
-    resp = await client.put("/api/settings", json={"homebox_url": None})
+    resp = await client.put("/api/v1/settings", json={"homebox_url": None})
     assert resp.status_code == 200
     assert app.state.homebox is None  # key alone isn't enough once the url override clears
 
@@ -299,7 +299,7 @@ async def test_put_homebox_url_and_key_together_builds_and_closes_old_client(app
     assert app.state.homebox is None
 
     resp = await client.put(
-        "/api/settings",
+        "/api/v1/settings",
         json={"homebox_url": "https://hb3.test", "homebox_api_key": "hb_new_key"},
     )
     assert resp.status_code == 200
@@ -310,7 +310,7 @@ async def test_put_homebox_url_and_key_together_builds_and_closes_old_client(app
 
     # A second PUT rebuilds AGAIN -- the first client is not reused, and is
     # actually closed, not just discarded and left dangling.
-    resp = await client.put("/api/settings", json={"homebox_url": "https://hb4.test"})
+    resp = await client.put("/api/v1/settings", json={"homebox_url": "https://hb4.test"})
     assert resp.status_code == 200
     second_client = app.state.homebox
     assert second_client is not first_client
@@ -318,7 +318,7 @@ async def test_put_homebox_url_and_key_together_builds_and_closes_old_client(app
     assert first_client._client.is_closed is True
 
     resp = await client.put(
-        "/api/settings", json={"homebox_url": None, "homebox_api_key": None}
+        "/api/v1/settings", json={"homebox_url": None, "homebox_api_key": None}
     )
     assert resp.status_code == 200
     assert app.state.homebox is None
@@ -329,21 +329,21 @@ async def test_put_unrelated_field_does_not_touch_homebox_client(app_and_client)
     app, client = app_and_client
     assert app.state.homebox is None
 
-    resp = await client.put("/api/settings", json={"printer_flip_pins": True})
+    resp = await client.put("/api/v1/settings", json={"printer_flip_pins": True})
     assert resp.status_code == 200
     assert app.state.homebox is None
 
 
 async def test_homebox_writes_enabled_defaults_off_and_roundtrips(client):
-    rows = _rows_by_key((await client.get("/api/settings")).json())
+    rows = _rows_by_key((await client.get("/api/v1/settings")).json())
     assert rows["homebox_writes_enabled"]["value"] is False
     assert rows["homebox_writes_enabled"]["source"] == "default"
 
-    resp = await client.put("/api/settings", json={"homebox_writes_enabled": True})
+    resp = await client.put("/api/v1/settings", json={"homebox_writes_enabled": True})
     assert resp.status_code == 200
     row = _rows_by_key(resp.json())["homebox_writes_enabled"]
     assert row["value"] is True
     assert row["source"] == "db"
 
-    resp = await client.put("/api/settings", json={"homebox_writes_enabled": None})
+    resp = await client.put("/api/v1/settings", json={"homebox_writes_enabled": None})
     assert _rows_by_key(resp.json())["homebox_writes_enabled"]["value"] is False

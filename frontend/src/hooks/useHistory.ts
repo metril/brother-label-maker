@@ -9,7 +9,7 @@ interface UseHistoryListParams {
   q?: string;
 }
 
-/** GET /api/history (task 2.13), paginated + filterable -- see
+/** GET /api/v1/history (task 2.13), paginated + filterable -- see
  * api/router_history.py's list_history (422s outside page>=1/
  * 1<=page_size<=100, which the History page's own controls stay within by
  * construction). `placeholderData` keeps the CURRENT page's rows on screen

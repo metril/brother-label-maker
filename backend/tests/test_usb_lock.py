@@ -55,7 +55,7 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
     monkeypatch.setattr("labelmaker.jobs.worker._print", _slow_print)
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_TEXT_LABEL], "options": {"chain_mode": "cut_each"}},
     )
     assert resp.status_code == 202
@@ -73,7 +73,7 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
             pytest.fail("worker never acquired USB_LOCK")
         await anyio.sleep(0.01)
 
-    status_resp = await client.get("/api/printer/status")
+    status_resp = await client.get("/api/v1/printer/status")
     assert status_resp.status_code == 200
     body = status_resp.json()
     keep_alive = body.pop("keep_alive")  # commit 6: additive, checked separately below
@@ -94,7 +94,7 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
     # has returned (released the lock in its `finally`) on the OTHER side
     # too, not just that our own probe above briefly saw it free.
     for _ in range(300):
-        job_resp = await client.get(f"/api/print/jobs/{job_id}")
+        job_resp = await client.get(f"/api/v1/print/jobs/{job_id}")
         if job_resp.json()["status"] in ("done", "failed", "canceled"):
             break
         await anyio.sleep(0.02)
@@ -102,7 +102,7 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
         pytest.fail("job never reached a terminal state")
     assert job_resp.json()["status"] == "failed"  # _slow_print always raises
 
-    status_resp2 = await client.get("/api/printer/status")
+    status_resp2 = await client.get("/api/v1/printer/status")
     assert status_resp2.status_code == 200
     body2 = status_resp2.json()
     assert body2["connected"] is True

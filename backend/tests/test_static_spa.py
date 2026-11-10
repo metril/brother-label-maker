@@ -74,10 +74,10 @@ async def test_deep_link_serves_spa_index_html(spa_client):
 
 
 async def test_unknown_api_path_still_404s_json(spa_client):
-    resp = await spa_client.get("/api/nonexistent")
+    resp = await spa_client.get("/api/v1/nonexistent")
     assert resp.status_code == 404
     assert resp.headers["content-type"].startswith("application/json")
-    assert resp.json() == {"detail": "not found"}
+    assert resp.json()["error"]["code"] == "not_found"
 
 
 async def test_real_static_asset_still_served(spa_client):
@@ -108,7 +108,7 @@ async def test_capture_route_falls_through_to_index_html(spa_client):
 async def test_real_api_endpoint_still_wins_over_the_catch_all(spa_client):
     """Registration order: routers are added before the catch-all, so a
     genuinely-real endpoint like /api/health is never shadowed by it."""
-    resp = await spa_client.get("/api/health")
+    resp = await spa_client.get("/api/v1/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
@@ -169,7 +169,7 @@ async def test_no_static_dir_leaves_app_bootable_and_unmatched_paths_404(tmp_pat
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            health = await client.get("/api/health")
+            health = await client.get("/api/v1/health")
             assert health.status_code == 200
 
             resp = await client.get("/presets")

@@ -20,16 +20,17 @@ actually wants the definition.
 from __future__ import annotations
 
 import anyio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import ValidationError
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
+from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_print import PrintRequest, _job_to_response, _validate_and_measure
 from labelmaker.api.router_printer import create_feed_cut_job
 from labelmaker.render.estimate import estimate
 
-router = APIRouter(prefix="/history", tags=["history"])
+router = APIRouter(prefix="/history", tags=["history"], responses=err(404, 409, 422))
 
 _LIGHT_ITEM_FIELDS = (
     "id",
@@ -61,9 +62,8 @@ def _to_light_item(job: dict) -> dict:
     relying on that never drifting.
     """
     item = {key: job[key] for key in _LIGHT_ITEM_FIELDS}
-    item["thumbnail_url"] = (
-        f"/api/history/{job['id']}/thumbnail" if job["has_thumbnail"] else None
-    )
+    thumb = f"/api/v1/history/{job['id']}/thumbnail"
+    item["thumbnail_url"] = thumb if job["has_thumbnail"] else None
     return item
 
 
@@ -78,7 +78,7 @@ async def list_history(
     try:
         result = await db.list_jobs(page=page, page_size=page_size, status=status, q=q)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "validation_error", error_message(exc)) from exc
 
     return {
         "items": [_to_light_item(job) for job in result["items"]],
@@ -92,7 +92,7 @@ async def list_history(
 async def get_history_job(job_id: str, db: DbDep) -> dict:
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise ApiError(404, "not_found", "job not found")
     return _job_to_response(job)  # same full shape as GET /api/print/jobs/{id}
 
 
@@ -100,7 +100,7 @@ async def get_history_job(job_id: str, db: DbDep) -> dict:
 async def get_history_thumbnail(job_id: str, db: DbDep) -> Response:
     job = await db.get_job(job_id)
     if job is None or not job.get("preview_png"):
-        raise HTTPException(status_code=404, detail="thumbnail not found")
+        raise ApiError(404, "not_found", "thumbnail not found")
     return Response(content=job["preview_png"], media_type="image/png")
 
 
@@ -138,7 +138,7 @@ async def reprint_job(
     """
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise ApiError(404, "not_found", "job not found")
 
     if job["kind"] == "feed_cut":
         new_job = await create_feed_cut_job(db, queue, bus)
@@ -147,12 +147,12 @@ async def reprint_job(
     try:
         print_request = PrintRequest.model_validate(job["definition"])
     except ValidationError as exc:
-        raise HTTPException(status_code=409, detail=error_message(exc)) from exc
+        raise ApiError(409, "conflict", error_message(exc)) from exc
 
     try:
         label_count, lengths_mm = await _validate_and_measure(print_request, config.data_dir)
-    except HTTPException as exc:
-        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    except ApiError as exc:
+        raise ApiError(409, "conflict", exc.detail) from exc
 
     # task 2.9: same POST-time tape_used_mm estimate POST /api/print stores
     # (router_print.py's create_print_job) -- reprint is otherwise
@@ -214,7 +214,7 @@ async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Re
     if not deleted:
         job = await db.get_job(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            raise ApiError(404, "not_found", "job not found")
         if job["status"] == "queued":
             detail = "job is 'queued'; cancel it first"
         else:
@@ -222,7 +222,7 @@ async def delete_history_job(job_id: str, db: DbDep, config: AppConfigDep) -> Re
                 "job is 'printing'; wait for it to finish "
                 "(interrupted jobs are marked failed at restart)"
             )
-        raise HTTPException(status_code=409, detail=detail)
+        raise ApiError(409, "conflict", detail)
 
     stream_path = config.data_dir / "jobs" / f"{job_id}.bin"
     if await anyio.to_thread.run_sync(stream_path.is_file):

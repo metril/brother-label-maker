@@ -16,7 +16,7 @@ function section(heading: string): HTMLElement {
 describe("Diagnostics page", () => {
   it("renders all four sections from mocked responses, including the raw-byte hex display", async () => {
     server.use(
-      http.get("/api/history", () =>
+      http.get("/api/v1/history", () =>
         HttpResponse.json({
           items: [
             {
@@ -52,19 +52,19 @@ describe("Diagnostics page", () => {
     expect(within(within(printer).getByText("Connected").closest("div")!).getByText("yes")).toBeInTheDocument();
 
     // HomeBox section: configured/reachable/healthy/version/error, fully
-    // rendered from the mocked GET /api/homebox/status.
+    // rendered from the mocked GET /api/v1/homebox/status.
     const homebox = section("HomeBox");
     expect(await within(homebox).findByText("0.26.2")).toBeInTheDocument();
 
-    // App section: /api/health's printer_mode + version, auth mode from
-    // GET /api/auth/me, and the WS connection state (auto-opens under
+    // App section: /api/v1/health's printer_mode + version, auth mode from
+    // GET /api/v1/auth/me, and the WS connection state (auto-opens under
     // test, see test/setup.ts's MockWebSocket).
     const app = section("App");
     expect(await within(app).findByText("0.1.0")).toBeInTheDocument();
     expect(within(app).getByText("none")).toBeInTheDocument();
     await waitFor(() => expect(within(app).getByText("live")).toBeInTheDocument());
 
-    // Print worker section: the last 5 jobs (here, 1) via GET /api/history,
+    // Print worker section: the last 5 jobs (here, 1) via GET /api/v1/history,
     // plus a link to the full History page.
     const worker = section("Print worker");
     expect(await within(worker).findByText("job-recent-1")).toBeInTheDocument();
@@ -74,7 +74,7 @@ describe("Diagnostics page", () => {
 
   it("an unrecognized media byte renders the explicit unknown state", async () => {
     server.use(
-      http.get("/api/printer/status", () =>
+      http.get("/api/v1/printer/status", () =>
         HttpResponse.json({
           connected: true,
           printer_mode: "mock",
@@ -112,7 +112,7 @@ describe("Diagnostics page", () => {
 
   it("shows the keep-awake poller's status in the Printer section", async () => {
     server.use(
-      http.get("/api/printer/status", () =>
+      http.get("/api/v1/printer/status", () =>
         HttpResponse.json({
           connected: true,
           printer_mode: "usb",
@@ -138,7 +138,7 @@ describe("Diagnostics page", () => {
 
   it("shows a readable label and the raw error for a keep-awake poll failure", async () => {
     server.use(
-      http.get("/api/printer/status", () =>
+      http.get("/api/v1/printer/status", () =>
         HttpResponse.json({
           connected: false,
           printer_mode: "usb",
@@ -162,11 +162,11 @@ describe("Diagnostics page", () => {
   });
 
   describe("Feed & cut", () => {
-    it("clicking it POSTs /api/printer/cut", async () => {
+    it("clicking it POSTs /api/v1/printer/cut", async () => {
       const user = userEvent.setup();
       let posted = false;
       server.use(
-        http.post("/api/printer/cut", () => {
+        http.post("/api/v1/printer/cut", () => {
           posted = true;
           return HttpResponse.json({ job_id: "cut-job-1" }, { status: 202 });
         }),
@@ -182,7 +182,7 @@ describe("Diagnostics page", () => {
     it("renders the server's error message inline near the raw status block, role=alert", async () => {
       const user = userEvent.setup();
       server.use(
-        http.post("/api/printer/cut", () => HttpResponse.json({ detail: "cannot queue: printer busy" }, { status: 409 })),
+        http.post("/api/v1/printer/cut", () => HttpResponse.json({ error: { code: "error", message: "cannot queue: printer busy" } }, { status: 409 })),
       );
 
       renderWithProviders(<Diagnostics />, { route: "/diagnostics" });

@@ -17,14 +17,14 @@ interface DebouncedInput {
   serialization: Sequence | null;
 }
 
-/** POST /api/print/estimate (task 2.9), debounced the same way usePreview
- * debounces /api/render/preview -- the Job Tray's "how much tape will this
+/** POST /api/v1/print/estimate (task 2.9), debounced the same way usePreview
+ * debounces /api/v1/render/preview -- the Job Tray's "how much tape will this
  * use?" readout, refetched whenever the label set OR the chosen chain
  * mode/margin/auto-cut changes. Never creates a job (no history entry,
  * nothing enqueued) -- see router_print.py's estimate_print_job.
  *
  * `labels` (task 2.12, generalized from the single-`definition` shape task
- * 2.9-2.11 had): the SAME `labels` array POST /api/print's own body takes --
+ * 2.9-2.11 had): the SAME `labels` array POST /api/v1/print's own body takes --
  * either the tray's own item definitions, or a one-element array wrapping
  * the current (unsaved) design when the tray is empty (see JobTray.tsx's
  * own `bodyLabels`). `isRenderable` is applied to the DEBOUNCED value, not

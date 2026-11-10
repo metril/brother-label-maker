@@ -25,9 +25,9 @@ describe("TapeSelector", () => {
     expect(screen.getByRole("button", { name: "24mm" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("shows a pending indicator while /api/tapes is loading", async () => {
+  it("shows a pending indicator while /api/v1/tapes is loading", async () => {
     server.use(
-      http.get("/api/tapes", async () => {
+      http.get("/api/v1/tapes", async () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
         return HttpResponse.json([]);
       }),
@@ -49,16 +49,16 @@ describe("TapeSelector", () => {
     expect(onChange).toHaveBeenCalledWith({ width_mm: 5.8, family: "hse_2_1" });
   });
 
-  // Task 4.3: a failed GET /api/tapes used to leave this on the pending
+  // Task 4.3: a failed GET /api/v1/tapes used to leave this on the pending
   // indicator forever -- `isPending` does go false once the fetch errors
   // out, but `data` stays undefined, and the old `isPending || !tapes`
   // guard treated those identically.
-  it("shows a role=alert message with a Retry button when /api/tapes fails, and recovers on retry", async () => {
+  it("shows a role=alert message with a Retry button when /api/v1/tapes fails, and recovers on retry", async () => {
     let attempt = 0;
     server.use(
-      http.get("/api/tapes", () => {
+      http.get("/api/v1/tapes", () => {
         attempt += 1;
-        if (attempt === 1) return HttpResponse.json({ detail: "boom" }, { status: 500 });
+        if (attempt === 1) return HttpResponse.json({ error: { code: "error", message: "boom" } }, { status: 500 });
         return HttpResponse.json([{ family: "tze", nominal_mm: 24, print_dots: 128, print_mm: 18.1, max_length_mm: 1000 }]);
       }),
     );

@@ -8,7 +8,7 @@ import type { OverrideFieldProps } from "./types";
 /** Every label type's `font_family` field (a bare `type: string` in the
  * schema -- pydantic doesn't know the valid set, it's a runtime
  * `_VALID_FAMILIES` check) gets the real bundled catalog from GET
- * /api/fonts instead of a free-text box a typo could 422. Field-name-keyed
+ * /api/v1/fonts instead of a free-text box a typo could 422. Field-name-keyed
  * (see overrides.ts), not type-keyed -- it's the same override across all
  * 9 types. */
 export function FontFamilyField({ fieldKey, value, onChange, path }: OverrideFieldProps) {
@@ -43,7 +43,7 @@ export function FontFamilyField({ fieldKey, value, onChange, path }: OverrideFie
           options={fonts.map((font) => ({ value: font.family, label: font.display_name }))}
         />
       )}
-      <p className={helpText}>Bundled font family (see GET /api/fonts).</p>
+      <p className={helpText}>Bundled font family (see GET /api/v1/fonts).</p>
     </div>
   );
 }

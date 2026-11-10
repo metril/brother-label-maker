@@ -16,11 +16,12 @@ import dataclasses
 from pathlib import Path
 
 import anyio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
+from labelmaker.api.errors import ApiError, err
 from labelmaker.driver.geometry import MARGIN_MAX_MM, MARGIN_MIN_MM, dots_to_mm
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.jobs.chained_preview import (
@@ -32,7 +33,7 @@ from labelmaker.render.document import LabelDefinition, RenderedLabel
 from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition, ordered_values
 
-router = APIRouter(prefix="/print", tags=["print"])
+router = APIRouter(prefix="/print", tags=["print"], responses=err(404, 409, 422, 507))
 
 # H1 (the 2026-08 code review): POST /print/preview composites every
 # label into one PIL strip and then upscales it by `scale` (1..8) -- nothing
@@ -146,9 +147,7 @@ def _validate_serialized_print(
         try:
             r = render_definition(LabelDefinition.model_validate(raw), data_dir=data_dir)
         except (KeyError, ValueError) as exc:
-            raise ValueError(
-                f"label {i} (sequence value {value!r}): {error_message(exc)}"
-            ) from exc
+            raise ValueError(f"label {i} (sequence value {value!r}): {error_message(exc)}") from exc
         rendered.append(r)
     return bound, rendered
 
@@ -177,9 +176,10 @@ async def _validate_and_render(
     """
     if body.serialization is not None:
         if len(body.labels) != 1:
-            raise HTTPException(
-                status_code=422,
-                detail=(
+            raise ApiError(
+                422,
+                "validation_error",
+                (
                     "print requests with `serialization` must contain exactly one "
                     f"template label, got {len(body.labels)}"
                 ),
@@ -189,21 +189,19 @@ async def _validate_and_render(
                 _validate_serialized_print, body.labels[0], body.serialization, data_dir
             )
         except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+            raise ApiError(422, "validation_error", error_message(exc)) from exc
         label_count = len(bound)
     else:
         try:
-            rendered = await anyio.to_thread.run_sync(
-                _validate_render_side, body.labels, data_dir
-            )
+            rendered = await anyio.to_thread.run_sync(_validate_render_side, body.labels, data_dir)
         except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+            raise ApiError(422, "validation_error", error_message(exc)) from exc
         label_count = len(body.labels)
 
     tapes = {(label.tape.width_mm, label.tape.family) for label in body.labels}
     if len(tapes) > 1:
-        raise HTTPException(
-            status_code=422, detail="all labels in a print job must share the same tape"
+        raise ApiError(
+            422, "validation_error", "all labels in a print job must share the same tape"
         )
 
     return label_count, rendered
@@ -382,9 +380,10 @@ async def preview_print_job(
     scaled_height = height_dots * body.scale
     composite_pixels = scaled_width * scaled_height
     if composite_pixels > MAX_PREVIEW_PIXELS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
+        raise ApiError(
+            422,
+            "validation_error",
+            (
                 f"chained preview would be {scaled_width}x{scaled_height} px "
                 f"({composite_pixels:,} px total) at scale={body.scale}, exceeding the "
                 f"{MAX_PREVIEW_PIXELS:,}px cap -- reduce the number of labels, their "
@@ -401,11 +400,12 @@ async def preview_print_job(
         )
         png_bytes = await anyio.to_thread.run_sync(preview_png, preview.image, body.scale)
     except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "validation_error", error_message(exc)) from exc
     except MemoryError as exc:
-        raise HTTPException(
-            status_code=507,
-            detail=(
+        raise ApiError(
+            507,
+            "insufficient_storage",
+            (
                 "ran out of memory building the chained preview composite "
                 f"(requested {scaled_width}x{scaled_height} px) -- try a smaller "
                 "`scale` or fewer/shorter labels"
@@ -452,7 +452,7 @@ def _job_to_response(job: dict) -> dict:
 async def get_print_job(job_id: str, db: DbDep) -> dict:
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
+        raise ApiError(404, "not_found", "job not found")
     return _job_to_response(job)
 
 
@@ -481,14 +481,14 @@ async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
 
     job = await db.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-    raise HTTPException(status_code=409, detail=f"cannot cancel job in status {job['status']!r}")
+        raise ApiError(404, "not_found", "job not found")
+    raise ApiError(409, "conflict", f"cannot cancel job in status {job['status']!r}")
 
 
 @router.get("/jobs/{job_id}/stream")
 async def stream_print_job(job_id: str, config: AppConfigDep) -> Response:
     path = config.data_dir / "jobs" / f"{job_id}.bin"
     if not await anyio.to_thread.run_sync(path.is_file):
-        raise HTTPException(status_code=404, detail="stream not found")
+        raise ApiError(404, "not_found", "stream not found")
     data = await anyio.to_thread.run_sync(path.read_bytes)
     return Response(content=data, media_type="application/octet-stream")

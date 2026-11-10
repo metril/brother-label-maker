@@ -59,7 +59,7 @@ _ASSET_PARAMS = {
 
 
 async def test_disabled_by_default_returns_404(client):
-    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    resp = await client.get("/api/v1/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 404
 
 
@@ -69,7 +69,7 @@ async def test_disabled_with_no_query_params_still_returns_404_not_422(client):
     binds/validates this route's own Query(...) params -- so a disabled
     request missing every required param (TitleText/URL) must still 404,
     not 422 enumerating the missing params to an unauthenticated caller."""
-    resp = await client.get("/api/els/label")
+    resp = await client.get("/api/v1/els/label")
     assert resp.status_code == 404
 
 
@@ -79,24 +79,24 @@ async def test_enabled_via_settings_put_gates_the_route_same_as_app_config(clien
     app_config-level `_ENABLED`/`_ENABLED_9MM` markers (the env tier), this
     one flips it through PUT /api/settings (the db tier) instead, and must
     gate/ungate this route identically either way."""
-    resp = await client.put("/api/settings", json={"els_enabled": True})
+    resp = await client.put("/api/v1/settings", json={"els_enabled": True})
     assert resp.status_code == 200
 
-    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    resp = await client.get("/api/v1/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
 
-    resp = await client.put("/api/settings", json={"els_enabled": False})
+    resp = await client.put("/api/v1/settings", json={"els_enabled": False})
     assert resp.status_code == 200
 
-    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    resp = await client.get("/api/v1/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 404
 
 
 @_ENABLED
 async def test_enabled_renders_decodable_png_at_native_tape_height(app_and_client):
     app, client = app_and_client
-    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    resp = await client.get("/api/v1/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
 
@@ -110,7 +110,7 @@ async def test_enabled_renders_decodable_png_at_native_tape_height(app_and_clien
 @_ENABLED_9MM
 async def test_els_tape_mm_config_changes_rendered_height(app_and_client):
     app, client = app_and_client
-    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    resp = await client.get("/api/v1/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 200
     img = Image.open(io.BytesIO(resp.content))
     tape = Tape(width_mm=9.0, family="tze").resolve()
@@ -122,7 +122,7 @@ async def test_els_tape_mm_config_changes_rendered_height(app_and_client):
 async def test_qr_decodes_to_url_param(app_and_client):
     zxingcpp = pytest.importorskip("zxingcpp")
     _, client = app_and_client
-    resp = await client.get("/api/els/label", params=_ASSET_PARAMS)
+    resp = await client.get("/api/v1/els/label", params=_ASSET_PARAMS)
     assert resp.status_code == 200
 
     img = Image.open(io.BytesIO(resp.content))
@@ -137,7 +137,7 @@ async def test_missing_required_param_is_422(app_and_client):
     _, client = app_and_client
     params = dict(_ASSET_PARAMS)
     del params["URL"]
-    resp = await client.get("/api/els/label", params=params)
+    resp = await client.get("/api/v1/els/label", params=params)
     assert resp.status_code == 422
 
 
@@ -145,7 +145,7 @@ async def test_missing_required_param_is_422(app_and_client):
 async def test_invalid_param_type_is_422(app_and_client):
     _, client = app_and_client
     params = {**_ASSET_PARAMS, "Width": "not-a-number"}
-    resp = await client.get("/api/els/label", params=params)
+    resp = await client.get("/api/v1/els/label", params=params)
     assert resp.status_code == 422
 
 
@@ -157,7 +157,7 @@ async def test_overlong_title_text_is_422_not_silently_truncated(app_and_client)
     app, not a silent truncation."""
     _, client = app_and_client
     params = {**_ASSET_PARAMS, "TitleText": "A" * 121}
-    resp = await client.get("/api/els/label", params=params)
+    resp = await client.get("/api/v1/els/label", params=params)
     assert resp.status_code == 422
 
 
@@ -173,7 +173,7 @@ async def test_top_level_item_with_empty_description_still_renders(app_and_clien
         "DescriptionText": "",
     }
     del params["AdditionalInformation"]
-    resp = await client.get("/api/els/label", params=params)
+    resp = await client.get("/api/v1/els/label", params=params)
     assert resp.status_code == 200
 
 
@@ -184,6 +184,6 @@ async def test_homebox_user_agent_hits_no_auth_barrier(app_and_client):
     credentials at all, must succeed exactly like any other client."""
     _, client = app_and_client
     resp = await client.get(
-        "/api/els/label", params=_ASSET_PARAMS, headers={"User-Agent": _HB_USER_AGENT}
+        "/api/v1/els/label", params=_ASSET_PARAMS, headers={"User-Agent": _HB_USER_AGENT}
     )
     assert resp.status_code == 200

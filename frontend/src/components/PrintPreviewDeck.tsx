@@ -189,7 +189,7 @@ export function PrintPreviewDeck() {
   // copy, no re-seed-on-open effect.
   const mode = useTrayStore((s) => s.chainMode);
   const autoCut = useTrayStore((s) => s.autoCut);
-  // /api/tapes' full geometry catalog -- needed below (M10) to size the
+  // /api/v1/tapes' full geometry catalog -- needed below (M10) to size the
   // strip off the tape's PRINT height, not its nominal width. Same source
   // Designer.tsx's own FeedDeck usage reads.
   const { data: tapes } = useTapes();
@@ -324,10 +324,10 @@ export function PrintPreviewDeck() {
   // router_print.py's _validate_and_measure) -- the nominal tape width is
   // therefore the same read off any one of them.
   const tapeWidthMm = labels[0]?.tape.width_mm ?? 0;
-  // /api/tapes' matching row (nominal_mm+family exact match, same lookup
+  // /api/v1/tapes' matching row (nominal_mm+family exact match, same lookup
   // Designer.tsx does for FeedDeck's own tapeInfo prop) -- gives print_mm,
   // which LabelDefinition.tape itself doesn't carry (only width_mm/family).
-  // null for the brief window before /api/tapes resolves (staleTime:
+  // null for the brief window before /api/v1/tapes resolves (staleTime:
   // Infinity, so effectively once per session).
   const tapeInfo = tapes?.find((t) => t.family === labels[0]?.tape.family && t.nominal_mm === tapeWidthMm) ?? null;
   const lastSegment = preview && preview.segments.length > 0 ? preview.segments[preview.segments.length - 1]! : null;
@@ -346,7 +346,7 @@ export function PrintPreviewDeck() {
   // FeedDeck's own (correct) strip. `minFeedMm: 0` is a throwaway: this
   // deck has no feed-waste indicator, only `printableHeightPx` below is
   // read off the result. Falls back to the nominal width for printMm while
-  // `tapeInfo` is still null (the brief pre-/api/tapes window above).
+  // `tapeInfo` is still null (the brief pre-/api/v1/tapes window above).
   const geo = computeFeedDeckGeometry(contentWidthMm, tapeWidthMm, tapeInfo?.print_mm ?? tapeWidthMm, 0, pxPerMm);
   const stripWidthPx = geo.stripWidthPx;
   const stripHeightPx = geo.printableHeightPx;

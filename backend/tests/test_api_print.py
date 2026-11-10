@@ -69,7 +69,7 @@ async def _wait_for_terminal_job(client, job_id: str, max_polls: int = 250, inte
     from a fixed single wait -- returns as soon as the job leaves 'queued'/
     'printing', or fails the test if it never does."""
     for _ in range(max_polls):
-        resp = await client.get(f"/api/print/jobs/{job_id}")
+        resp = await client.get(f"/api/v1/print/jobs/{job_id}")
         assert resp.status_code == 200
         body = resp.json()
         if body["status"] in ("done", "failed", "canceled"):
@@ -123,7 +123,7 @@ async def test_print_walking_skeleton_e2e_mock_mode(app_and_client):
     app, client = app_and_client
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
     )
     assert resp.status_code == 202
@@ -134,7 +134,7 @@ async def test_print_walking_skeleton_e2e_mock_mode(app_and_client):
     assert job["status"] == "done"
     assert job["error"] is None
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
     assert stream_resp.headers["content-type"] == "application/octet-stream"
 
@@ -166,7 +166,7 @@ async def test_print_walking_skeleton_e2e_mock_mode(app_and_client):
 async def test_print_backfills_strategy_tape_width_and_media_raw_byte_on_done(app_and_client):
     app, client = app_and_client
 
-    resp = await client.post("/api/print", json={"labels": [_text_label("HELLO")]})
+    resp = await client.post("/api/v1/print", json={"labels": [_text_label("HELLO")]})
     job_id = resp.json()["job_id"]
 
     job = await _wait_for_terminal_job(client, job_id)
@@ -190,7 +190,7 @@ async def test_print_chain_ff_two_labels_stream_byte_parity(app_and_client):
     labels = [_text_label("ONE"), _text_label("TWO")]
 
     resp = await client.post(
-        "/api/print", json={"labels": labels, "options": {"chain_mode": "chain_ff"}}
+        "/api/v1/print", json={"labels": labels, "options": {"chain_mode": "chain_ff"}}
     )
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
@@ -198,7 +198,7 @@ async def test_print_chain_ff_two_labels_stream_byte_parity(app_and_client):
     job = await _wait_for_terminal_job(client, job_id)
     assert job["status"] == "done"
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
 
     config = app.state.config
@@ -246,7 +246,7 @@ async def test_print_stream_honors_non_default_strategy_bit_order_and_flip_pins(
     )
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
     )
     assert resp.status_code == 202
@@ -255,7 +255,7 @@ async def test_print_stream_honors_non_default_strategy_bit_order_and_flip_pins(
     job = await _wait_for_terminal_job(client, job_id)
     assert job["status"] == "done", job["error"]
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
 
     defn = LabelDefinition.model_validate(_text_label("HELLO"))
@@ -293,7 +293,7 @@ async def test_print_stream_honors_settings_overlay_override_over_app_config_def
     )
 
     put_resp = await client.put(
-        "/api/settings",
+        "/api/v1/settings",
         json={
             "printer_init_strategy": "e310bt",
             "printer_bit_order": "lsb_first",
@@ -303,7 +303,7 @@ async def test_print_stream_honors_settings_overlay_override_over_app_config_def
     assert put_resp.status_code == 200
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
     )
     assert resp.status_code == 202
@@ -312,7 +312,7 @@ async def test_print_stream_honors_settings_overlay_override_over_app_config_def
     job = await _wait_for_terminal_job(client, job_id)
     assert job["status"] == "done", job["error"]
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
 
     defn = LabelDefinition.model_validate(_text_label("HELLO"))
@@ -355,14 +355,14 @@ async def test_cancel_lifecycle_and_worker_skips_already_canceled_job(app_and_cl
     )
     job_id = job["id"]  # created directly in the db -- deliberately NOT enqueued yet
 
-    resp = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    resp = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert resp.status_code == 200
     assert resp.json() == {"status": "canceled"}
 
-    resp_again = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    resp_again = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert resp_again.status_code == 409
 
-    resp_unknown = await client.post("/api/print/jobs/does-not-exist/cancel")
+    resp_unknown = await client.post("/api/v1/print/jobs/does-not-exist/cancel")
     assert resp_unknown.status_code == 404
 
     # Now put the already-canceled id on the REAL queue: the worker must
@@ -375,7 +375,7 @@ async def test_cancel_lifecycle_and_worker_skips_already_canceled_job(app_and_cl
     final = await db.get_job(job_id)
     assert final["status"] == "canceled"  # untouched by the worker
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 404  # worker never wrote a stream file
 
 
@@ -396,7 +396,7 @@ async def test_print_failure_marks_job_failed_and_broadcasts_job_failed(
     app.state.bus.register(recorder)
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
     )
     job_id = resp.json()["job_id"]
@@ -442,7 +442,7 @@ async def test_print_tape_mismatch_gets_friendly_error_message(app_and_client, m
     )
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
     )
     job_id = resp.json()["job_id"]
@@ -488,10 +488,10 @@ async def test_worker_survives_a_failure_outside_the_per_job_try_block(
     monkeypatch.setattr(Database, "start_job_if_queued", _flaky_start)
     caplog.set_level(logging.ERROR, logger="labelmaker.jobs.worker")
 
-    resp1 = await client.post("/api/print", json={"labels": [_text_label("ONE")]})
+    resp1 = await client.post("/api/v1/print", json={"labels": [_text_label("ONE")]})
     job1_id = resp1.json()["job_id"]
 
-    resp2 = await client.post("/api/print", json={"labels": [_text_label("TWO")]})
+    resp2 = await client.post("/api/v1/print", json={"labels": [_text_label("TWO")]})
     job2_id = resp2.json()["job_id"]
 
     job2 = await _wait_for_terminal_job(client, job2_id)
@@ -500,7 +500,7 @@ async def test_worker_survives_a_failure_outside_the_per_job_try_block(
     # job1/job2 are processed strictly in order by the single-coroutine
     # worker loop, so by the time job2 is done, job1's outer-except handling
     # (including its own update_job call) has already fully run.
-    job1 = await client.get(f"/api/print/jobs/{job1_id}")
+    job1 = await client.get(f"/api/v1/print/jobs/{job1_id}")
     job1_body = job1.json()
     assert job1_body["status"] == "failed"  # no longer orphaned at "queued"
     assert job1_body["error"] == "internal: simulated db hiccup on the first update_job call"
@@ -522,18 +522,18 @@ async def test_print_rejects_mixed_tapes_with_422(client):
         _text_label("ONE"),
         {**_text_label("TWO"), "tape": {"width_mm": 12, "family": "tze"}},
     ]
-    resp = await client.post("/api/print", json={"labels": labels})
+    resp = await client.post("/api/v1/print", json={"labels": labels})
     assert resp.status_code == 422
 
 
 async def test_print_rejects_invalid_label_definition_with_422(client):
     bad_label = {**_text_label("HELLO"), "type": "does-not-exist"}
-    resp = await client.post("/api/print", json={"labels": [bad_label]})
+    resp = await client.post("/api/v1/print", json={"labels": [bad_label]})
     assert resp.status_code == 422
 
 
 async def test_print_rejects_empty_labels_list_with_422(client):
-    resp = await client.post("/api/print", json={"labels": []})
+    resp = await client.post("/api/v1/print", json={"labels": []})
     assert resp.status_code == 422
 
 
@@ -553,7 +553,7 @@ async def test_print_with_serialization_e2e_label_count_and_stream_byte_parity(a
     serialization = {"kind": "list", "values": ["A", "B", "C"], "copies_per_value": 1}
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={
             "labels": [_serial_template()],
             "serialization": serialization,
@@ -569,7 +569,7 @@ async def test_print_with_serialization_e2e_label_count_and_stream_byte_parity(a
     # the single template entry `labels` was posted with.
     assert job["label_count"] == 3
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
 
     # Byte-parity against an in-test expand_definition() + render/rasterize
@@ -591,7 +591,7 @@ async def test_print_with_serialization_e2e_label_count_and_stream_byte_parity(a
 
     # The DB snapshot stores the TEMPLATE + spec UNEXPANDED (task 2.4's
     # DECIDED contract), not the 3 already-expanded labels.
-    job_resp = await client.get(f"/api/print/jobs/{job_id}")
+    job_resp = await client.get(f"/api/v1/print/jobs/{job_id}")
     definition = job_resp.json()["definition"]
     assert len(definition["labels"]) == 1
     assert definition["labels"][0]["params"]["lines"] == ["Port {seq}"]
@@ -601,7 +601,7 @@ async def test_print_with_serialization_e2e_label_count_and_stream_byte_parity(a
 
 async def test_print_serialization_requires_exactly_one_template_label(client):
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={
             "labels": [_text_label("ONE"), _text_label("TWO")],
             "serialization": {"kind": "list", "values": ["A", "B"]},
@@ -620,7 +620,7 @@ async def test_print_serialization_alpha_underflow_rejected_before_queueing(clie
     before = await db.list_jobs(page_size=100)  # page_size is capped at 100 (task 2.8)
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={
             "labels": [_serial_template("{seq}")],
             "serialization": {"kind": "alpha", "alpha_start": "A", "step": -1, "count": 2},
@@ -634,14 +634,14 @@ async def test_print_serialization_alpha_underflow_rejected_before_queueing(clie
 
 async def test_print_serialization_csv_unknown_column_rejected_before_queueing(client):
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={
             "labels": [_serial_template("{csv.missing}")],
             "serialization": {"kind": "csv", "rows": [{"port": "1"}]},
         },
     )
     assert resp.status_code == 422
-    assert "missing" in resp.json()["detail"]
+    assert "missing" in resp.json()["error"]["message"]
 
 
 async def test_print_serialization_pre_flight_422_names_the_failing_label_and_value(client):
@@ -653,14 +653,14 @@ async def test_print_serialization_pre_flight_422_names_the_failing_label_and_va
     # value, not just repeat the underlying validation message.
     too_long_value = "X" * 250
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={
             "labels": [_serial_template("{seq}")],
             "serialization": {"kind": "list", "values": ["A", "B", too_long_value]},
         },
     )
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
+    detail = resp.json()["error"]["message"]
     assert "label 2" in detail
     assert too_long_value in detail
     assert "200" in detail  # the underlying TextLabelParams message survives intact
@@ -670,12 +670,12 @@ async def test_print_serialization_pre_flight_422_names_the_failing_label_and_va
 
 
 async def test_get_unknown_job_404(client):
-    resp = await client.get("/api/print/jobs/does-not-exist")
+    resp = await client.get("/api/v1/print/jobs/does-not-exist")
     assert resp.status_code == 404
 
 
 async def test_stream_unknown_job_404(client):
-    resp = await client.get("/api/print/jobs/does-not-exist/stream")
+    resp = await client.get("/api/v1/print/jobs/does-not-exist/stream")
     assert resp.status_code == 404
 
 
@@ -689,7 +689,7 @@ async def test_stream_unknown_job_404(client):
 
 async def test_print_text_with_image_icon_completes_and_uses_uploaded_image(client):
     upload = await client.post(
-        "/api/images",
+        "/api/v1/images",
         files={"file": ("logo.png", io.BytesIO(_icon_png_bytes()), "image/png")},
     )
     assert upload.status_code == 201
@@ -700,7 +700,7 @@ async def test_print_text_with_image_icon_completes_and_uses_uploaded_image(clie
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": image_id}},
     }
-    resp = await client.post("/api/print", json={"labels": [label]})
+    resp = await client.post("/api/v1/print", json={"labels": [label]})
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
 
@@ -720,9 +720,9 @@ async def test_print_unknown_image_icon_rejected_before_queueing(client, app_and
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["CAM-3"], "icon": {"kind": "image", "image_id": unknown_id}},
     }
-    resp = await client.post("/api/print", json={"labels": [label]})
+    resp = await client.post("/api/v1/print", json={"labels": [label]})
     assert resp.status_code == 422
-    assert "unknown image_id" in resp.json()["detail"]
+    assert "unknown image_id" in resp.json()["error"]["message"]
 
     after = await db.list_jobs(page_size=100)
     assert after["total"] == before["total"]  # nothing was ever persisted
@@ -751,9 +751,9 @@ async def test_print_with_malicious_image_icon_id_rejected_before_queueing(
         "tape": {"width_mm": 24, "family": "tze"},
         "params": {"lines": ["X"], "icon": {"kind": "image", "image_id": malicious_image_id}},
     }
-    resp = await client.post("/api/print", json={"labels": [label]})
+    resp = await client.post("/api/v1/print", json={"labels": [label]})
     assert resp.status_code == 422
-    assert "invalid image_id" in resp.json()["detail"]
+    assert "invalid image_id" in resp.json()["error"]["message"]
 
     after = await db.list_jobs(page_size=100)
     assert after["total"] == before["total"]  # nothing was ever persisted
@@ -818,7 +818,7 @@ async def test_post_print_error_status_marks_job_failed(app_and_client, monkeypa
     monkeypatch.setattr(worker, "_print", _print_then_error)
 
     resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={"labels": [_text_label("HELLO")], "options": {"chain_mode": "cut_each"}},
     )
     job = await _wait_for_terminal_job(client, resp.json()["job_id"])
@@ -826,5 +826,5 @@ async def test_post_print_error_status_marks_job_failed(app_and_client, monkeypa
     assert "No media" in job["error"]
     assert job["tape_used_mm"]  # the tape was really consumed -- still recorded
     assert job["strategy"] is not None  # backfill (written with the failure) happened
-    stream = await client.get(f"/api/print/jobs/{job['id']}/stream")
+    stream = await client.get(f"/api/v1/print/jobs/{job['id']}/stream")
     assert stream.status_code == 200  # .bin was written before failing

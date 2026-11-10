@@ -8,7 +8,7 @@ interface HomeboxLocationTreeProps {
 }
 
 /** The browse page's left location tree (task 3.4): a collapsible nested
- * list straight from GET /api/homebox/entities/tree, filtered to
+ * list straight from GET /api/v1/homebox/entities/tree, filtered to
  * `type === "location"` at every level -- the tree can carry item nodes too
  * once `with_items=true` is passed, which this page never does (see hooks/
  * useHomeboxTree.ts), so the filter here is defensive, not load-bearing.

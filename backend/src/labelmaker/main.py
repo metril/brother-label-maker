@@ -12,8 +12,9 @@ import os
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
@@ -34,6 +35,8 @@ from labelmaker.api import (
     ws,
 )
 from labelmaker.api.auth_gate import AuthGateMiddleware
+from labelmaker.api.errors import ApiError, register_error_handlers
+from labelmaker.api.legacy import LegacyDeprecationMiddleware
 from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
 from labelmaker.homebox import build_client
@@ -202,6 +205,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     else:
         app = FastAPI(lifespan=lifespan)
+    register_error_handlers(app)
 
     # Auth (task 4.1) -- ONLY added in oidc mode, so `auth_mode == "none"`
     # (the default) never runs a byte of this: no SessionMiddleware, no
@@ -243,6 +247,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # (most of this API) where compression overhead would outweigh the
     # savings.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
+    app.add_middleware(LegacyDeprecationMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
@@ -252,7 +257,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.get("/api/health")
+    health_router = APIRouter()
+
+    @health_router.get("/health", tags=["health"])
     async def health() -> dict:
         # `version` (task 4.2): additive field -- this app's own installed
         # version, so the diagnostics page can show it next to backend
@@ -270,27 +277,33 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # "none" mode (see router_auth.py's own docstring), and the auth gate
     # itself exempts the whole /api/auth/* prefix so login/callback/logout
     # stay reachable by a not-yet-signed-in session.
-    app.include_router(router_auth.router, prefix="/api")
-    app.include_router(router_labels.router, prefix="/api")
-    app.include_router(router_gallery.router, prefix="/api")
-    app.include_router(router_images.router, prefix="/api")
-    app.include_router(router_print.router, prefix="/api")
-    app.include_router(router_printer.router, prefix="/api")
-    app.include_router(router_presets.router, prefix="/api")
-    app.include_router(router_history.router, prefix="/api")
-    app.include_router(router_homebox.router, prefix="/api")
-    app.include_router(router_settings.router, prefix="/api")
-    # Unauthenticated by design (HomeBox's ELS caller sends no auth, see
-    # router_els.py's module docstring) -- registered UNCONDITIONALLY (task
-    # 4.5 Track A: els_enabled is now DB-editable from the Settings page, so
-    # whether this route answers can no longer be decided once, here, at
-    # process startup). The route itself checks the settings overlay's
-    # EFFECTIVE els_enabled on every request instead (get_els_label's first
-    # line) and 404s when it's off -- same contract as before (disabled ->
-    # 404, the route "doesn't exist"; never 503, the route "exists but
-    # refuses"), just enforced per-request rather than by registration.
-    app.include_router(router_els.router, prefix="/api")
-    app.include_router(ws.router, prefix="/api")
+    def _mount_api(prefix: str, **kw: Any) -> None:
+        app.include_router(router_auth.router, prefix=prefix, **kw)
+        app.include_router(router_labels.router, prefix=prefix, **kw)
+        app.include_router(router_gallery.router, prefix=prefix, **kw)
+        app.include_router(router_images.router, prefix=prefix, **kw)
+        app.include_router(router_print.router, prefix=prefix, **kw)
+        app.include_router(router_printer.router, prefix=prefix, **kw)
+        app.include_router(router_presets.router, prefix=prefix, **kw)
+        app.include_router(router_history.router, prefix=prefix, **kw)
+        app.include_router(router_homebox.router, prefix=prefix, **kw)
+        app.include_router(router_settings.router, prefix=prefix, **kw)
+        # Unauthenticated by design (HomeBox's ELS caller sends no auth, see
+        # router_els.py's module docstring) -- registered UNCONDITIONALLY (task
+        # 4.5 Track A: els_enabled is now DB-editable from the Settings page, so
+        # whether this route answers can no longer be decided once, here, at
+        # process startup). The route itself checks the settings overlay's
+        # EFFECTIVE els_enabled on every request instead (get_els_label's first
+        # line) and 404s when it's off -- same contract as before (disabled ->
+        # 404, the route "doesn't exist"; never 503, the route "exists but
+        # refuses"), just enforced per-request rather than by registration.
+        app.include_router(router_els.router, prefix=prefix, **kw)
+        app.include_router(ws.router, prefix=prefix, **kw)
+        app.include_router(health_router, prefix=prefix, **kw)
+
+    # Canonical /api/v1; /api stays as a deprecated, schema-hidden alias.
+    _mount_api("/api/v1")
+    _mount_api("/api", include_in_schema=False)
 
     # Registered last (after every /api/* route above) so it only ever
     # catches paths none of the API routers matched -- Starlette tries
@@ -359,7 +372,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
         async def spa_fallback(full_path: str) -> FileResponse:
             if full_path == "api" or full_path.startswith("api/"):
-                raise HTTPException(status_code=404, detail="not found")
+                raise ApiError(404, "not_found", "not found")
 
             try:
                 candidate = (static_dir / full_path).resolve()

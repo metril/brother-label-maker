@@ -148,7 +148,7 @@ VOLUME /data
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/health', timeout=3)" || exit 1
+    CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)" || exit 1
 
 # PATH already puts /app/backend/.venv/bin first (see ENV above), so
 # `uvicorn` resolves straight to the venv's entry point -- no `uv run` (and

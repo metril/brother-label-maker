@@ -39,15 +39,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
 from labelmaker.api.deps import AppConfigDep, SettingsDep
+from labelmaker.api.errors import ApiError, err
 from labelmaker.config import AppConfig
 from labelmaker.homebox import build_client
 from labelmaker.settings_overlay import SettingsConflictError, SettingsOverlay, SettingsOverrides
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(prefix="/settings", tags=["settings"], responses=err(422))
 
 # Declaration order of SettingsOverrides' own fields (a plain dict, so this
 # is insertion-ordered and stable -- unlike the `OVERRIDABLE_FIELDS`
@@ -86,16 +87,29 @@ def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> dict:
             # whether one is currently set (db override OR env), so the
             # Settings page can render "Key set"/"Not set" without this
             # route ever echoing the secret itself back to the browser.
-            rows.append({"key": field, "set": bool(effective.homebox_api_key),
-                         "source": source, "editable": True})
+            rows.append(
+                {
+                    "key": field,
+                    "set": bool(effective.homebox_api_key),
+                    "source": source,
+                    "editable": True,
+                }
+            )
         else:
-            rows.append({"key": field, "value": getattr(effective, field),
-                         "source": source, "editable": True})
+            rows.append(
+                {
+                    "key": field,
+                    "value": getattr(effective, field),
+                    "source": source,
+                    "editable": True,
+                }
+            )
 
     for field in _READONLY_FIELDS:
         value = str(config.data_dir) if field == "data_dir" else getattr(config, field)
-        rows.append({"key": field, "value": value,
-                     "source": _cfg_source(config, field), "editable": False})
+        rows.append(
+            {"key": field, "value": value, "source": _cfg_source(config, field), "editable": False}
+        )
 
     return {"settings": rows}
 
@@ -121,9 +135,9 @@ async def put_settings(
         detail = "; ".join(
             f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}" for e in exc.errors()
         )
-        raise HTTPException(status_code=422, detail=detail) from exc
+        raise ApiError(422, "validation_error", detail) from exc
     except SettingsConflictError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise ApiError(422, "validation_error", str(exc)) from exc
 
     if "homebox_url" in body or "homebox_api_key" in body:
         # Build the new client BEFORE closing the old one, so

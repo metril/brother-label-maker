@@ -14,10 +14,10 @@ function createWrapper() {
 }
 
 describe("useFeedCut", () => {
-  it("feedCut() POSTs /api/printer/cut and leaves error null on success", async () => {
+  it("feedCut() POSTs /api/v1/printer/cut and leaves error null on success", async () => {
     let calls = 0;
     server.use(
-      http.post("/api/printer/cut", () => {
+      http.post("/api/v1/printer/cut", () => {
         calls += 1;
         return HttpResponse.json({ job_id: "cut-job-1" }, { status: 202 });
       }),
@@ -36,7 +36,7 @@ describe("useFeedCut", () => {
 
   it("surfaces the server's error message inline on failure", async () => {
     server.use(
-      http.post("/api/printer/cut", () => HttpResponse.json({ detail: "cannot queue: printer busy" }, { status: 409 })),
+      http.post("/api/v1/printer/cut", () => HttpResponse.json({ error: { code: "error", message: "cannot queue: printer busy" } }, { status: 409 })),
     );
 
     const { result } = renderHook(() => useFeedCut(), { wrapper: createWrapper() });
@@ -56,7 +56,7 @@ describe("useFeedCut", () => {
   it("stays busy through a cooldown after a successful cut, then re-enables -- a second feedCut() during the cooldown is a no-op", async () => {
     let calls = 0;
     server.use(
-      http.post("/api/printer/cut", () => {
+      http.post("/api/v1/printer/cut", () => {
         calls += 1;
         return HttpResponse.json({ job_id: "cut-job-cooldown" }, { status: 202 });
       }),
@@ -99,7 +99,7 @@ describe("useFeedCut", () => {
 
   it("does not stay busy after a FAILED request -- the cooldown only follows a successful 202", async () => {
     server.use(
-      http.post("/api/printer/cut", () => HttpResponse.json({ detail: "printer busy" }, { status: 409 })),
+      http.post("/api/v1/printer/cut", () => HttpResponse.json({ error: { code: "error", message: "printer busy" } }, { status: 409 })),
     );
 
     const { result } = renderHook(() => useFeedCut(), { wrapper: createWrapper() });
@@ -115,9 +115,9 @@ describe("useFeedCut", () => {
   it("a retry (calling feedCut() again) clears the previous error immediately, without waiting for the new request to settle", async () => {
     let shouldFail = true;
     server.use(
-      http.post("/api/printer/cut", () =>
+      http.post("/api/v1/printer/cut", () =>
         shouldFail
-          ? HttpResponse.json({ detail: "cannot queue: printer busy" }, { status: 409 })
+          ? HttpResponse.json({ error: { code: "error", message: "cannot queue: printer busy" } }, { status: 409 })
           : HttpResponse.json({ job_id: "cut-job-2" }, { status: 202 }),
       ),
     );

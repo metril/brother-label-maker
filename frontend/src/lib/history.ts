@@ -4,8 +4,8 @@
 
 import type { LabelDefinition } from "../api/types";
 
-/** A print job's stored `definition` (GET /api/history/{id}, same full
- * shape as GET /api/print/jobs/{id}) is the FULL PrintRequest that was
+/** A print job's stored `definition` (GET /api/v1/history/{id}, same full
+ * shape as GET /api/v1/print/jobs/{id}) is the FULL PrintRequest that was
  * submitted -- `{labels, options?, serialization?}` (router_print.py's
  * create_print_job stores `request.model_dump(mode="json")` verbatim) --
  * NOT a single LabelDefinition. "Load into designer" (task 2.13's brief)

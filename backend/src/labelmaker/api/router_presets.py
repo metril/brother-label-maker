@@ -26,18 +26,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from labelmaker.api import router_print
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
+from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_print import PrintOptions, PrintRequest
 from labelmaker.render import get_renderer
 from labelmaker.render.document import LabelDefinition, Tape
 from labelmaker.render.serialize import Sequence
 
-router = APIRouter(prefix="/presets", tags=["presets"])
+router = APIRouter(prefix="/presets", tags=["presets"], responses=err(404, 422))
 
 _TapeFamily = Literal["tze", "hse_2_1", "hse_3_1"]
 
@@ -117,13 +118,13 @@ async def create_preset(body: PresetCreate, db: DbDep) -> dict:
     try:
         _validate_definition(body.label_type, body.definition)
     except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "validation_error", error_message(exc)) from exc
 
     if body.tape_width_mm is not None:
         try:
             _validate_tape_width(body.tape_family, body.tape_width_mm)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+            raise ApiError(422, "validation_error", error_message(exc)) from exc
 
     return await db.create_preset(
         name=body.name,
@@ -146,7 +147,7 @@ async def list_presets(
 async def get_preset(preset_id: str, db: DbDep) -> dict:
     preset = await db.get_preset(preset_id)
     if preset is None:
-        raise HTTPException(status_code=404, detail="preset not found")
+        raise ApiError(404, "not_found", "preset not found")
     return preset
 
 
@@ -154,13 +155,13 @@ async def get_preset(preset_id: str, db: DbDep) -> dict:
 async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
     existing = await db.get_preset(preset_id)
     if existing is None:
-        raise HTTPException(status_code=404, detail="preset not found")
+        raise ApiError(404, "not_found", "preset not found")
 
     fields = body.model_dump(exclude_unset=True)
 
     for field in _NON_NULLABLE_UPDATE_FIELDS:
         if field in fields and fields[field] is None:
-            raise HTTPException(status_code=422, detail=f"{field} cannot be set to null")
+            raise ApiError(422, "validation_error", f"{field} cannot be set to null")
 
     # Re-validate whenever EITHER half of the (label_type, definition) pair
     # changes -- a `label_type` change alone must still check the EXISTING
@@ -173,7 +174,7 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
         try:
             _validate_definition(label_type, definition)
         except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+            raise ApiError(422, "validation_error", error_message(exc)) from exc
 
     # Likewise for the (tape_family, tape_width_mm) pair -- re-check
     # against the real tape table whenever either changes, using whichever
@@ -185,7 +186,7 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
             try:
                 _validate_tape_width(family, width)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+                raise ApiError(422, "validation_error", error_message(exc)) from exc
 
     if not fields:
         return existing
@@ -196,7 +197,7 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
 async def delete_preset(preset_id: str, db: DbDep) -> Response:
     deleted = await db.delete_preset(preset_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="preset not found")
+        raise ApiError(404, "not_found", "preset not found")
     return Response(status_code=204)
 
 
@@ -216,7 +217,7 @@ async def print_preset(
 ) -> dict:
     preset = await db.get_preset(preset_id)
     if preset is None:
-        raise HTTPException(status_code=404, detail="preset not found")
+        raise ApiError(404, "not_found", "preset not found")
 
     # Review fix-up: an explicit `tape` in the body always wins -- the only
     # way to print an "any tape" preset (tape_width_mm is null) at all, and
@@ -227,9 +228,10 @@ async def print_preset(
     tape = body.tape if body is not None else None
     if tape is None:
         if preset["tape_width_mm"] is None:
-            raise HTTPException(
-                status_code=422,
-                detail=(
+            raise ApiError(
+                422,
+                "validation_error",
+                (
                     "preset has no tape_width_mm set and no `tape` was given in the "
                     "request body; cannot print without one"
                 ),

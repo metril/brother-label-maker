@@ -41,10 +41,11 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, Query, Request, UploadFile
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from labelmaker.api.deps import DbDep, HomeBoxDep, SettingsDep
+from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_images import _read_capped
 from labelmaker.homebox import (
     Entity,
@@ -58,7 +59,7 @@ from labelmaker.homebox import (
     TreeItem,
 )
 
-router = APIRouter(tags=["homebox"])
+router = APIRouter(tags=["homebox"], responses=err(403, 404, 422, 502, 503))
 
 QR_BASE_URL_KEY = "homebox_qr_base_url"
 
@@ -79,15 +80,16 @@ async def _proxy[T](call: Awaitable[T]) -> T:
     try:
         return await call
     except HomeBoxNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise ApiError(404, "not_found", str(exc)) from exc
     except HomeBoxValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise ApiError(422, "validation_error", str(exc)) from exc
     except HomeBoxError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise ApiError(502, "homebox_unavailable", str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"HomeBox returned a response this app could not parse: {exc}",
+        raise ApiError(
+            502,
+            "homebox_unavailable",
+            f"HomeBox returned a response this app could not parse: {exc}",
         ) from exc
 
 
@@ -106,8 +108,13 @@ async def homebox_status(settings: SettingsDep) -> dict:
     """
     effective = settings.effective()
     if not (effective.homebox_url and effective.homebox_api_key):
-        return {"configured": False, "reachable": None, "healthy": None, "version": None,
-                "error": None}
+        return {
+            "configured": False,
+            "reachable": None,
+            "healthy": None,
+            "version": None,
+            "error": None,
+        }
     from labelmaker.homebox import HomeBoxClient  # narrow import for monkeypatching in tests
 
     version: str | None = None
@@ -123,18 +130,33 @@ async def homebox_status(settings: SettingsDep) -> dict:
             await probe_client.close()
     except HomeBoxVersionError as exc:
         # Server answers but speaks the pre-merge API generation.
-        return {"configured": True, "reachable": True, "healthy": False, "version": version,
-                "error": str(exc)}
+        return {
+            "configured": True,
+            "reachable": True,
+            "healthy": False,
+            "version": version,
+            "error": str(exc),
+        }
     except HomeBoxError as exc:
-        return {"configured": True, "reachable": False, "healthy": None, "version": None,
-                "error": str(exc)}
+        return {
+            "configured": True,
+            "reachable": False,
+            "healthy": None,
+            "version": None,
+            "error": str(exc),
+        }
     except Exception as exc:  # noqa: B902 -- non-JSON / non-HomeBox response shape
         # Whatever answered at the HomeBox URL is not a HomeBox API (SSO login
         # page, default vhost, ...). This endpoint's contract is "always
         # 200"; a 500 here would read as "the app is broken" instead of
         # "HomeBox is misconfigured".
-        return {"configured": True, "reachable": False, "healthy": None, "version": None,
-                "error": f"HomeBox URL answered, but not with a HomeBox API response: {exc}"}
+        return {
+            "configured": True,
+            "reachable": False,
+            "healthy": None,
+            "version": None,
+            "error": f"HomeBox URL answered, but not with a HomeBox API response: {exc}",
+        }
     return {
         "configured": True,
         "reachable": True,
@@ -158,7 +180,9 @@ async def list_entities(
 ) -> EntityPage:
     return await _proxy(
         homebox.list_entities(
-            q=q, page=page, page_size=page_size,
+            q=q,
+            page=page,
+            page_size=page_size,
             parent_ids=[parent_id] if parent_id else None,
         )
     )
@@ -196,7 +220,7 @@ _HEIF_BRANDS = {b"mif1", b"msf1", b"heif"}
 
 def _require_writes(settings: SettingsDep) -> None:
     if not settings.effective().homebox_writes_enabled:
-        raise HTTPException(status_code=403, detail="homebox writes disabled")
+        raise ApiError(403, "writes_disabled", "homebox writes disabled")
 
 
 _WritesGate = [Depends(_require_writes)]
@@ -283,7 +307,7 @@ async def bulk_create_entities(body: BulkCreateRequest, homebox: HomeBoxDep) -> 
         except HomeBoxError as exc:
             # Auth/version/unavailable would fail every remaining row too:
             # abort with the same 502 _proxy gives them.
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise ApiError(502, "homebox_unavailable", str(exc)) from exc
         results.append(
             BulkRowResult(
                 index=index,
@@ -305,8 +329,10 @@ async def upload_entity_photo(
     raw = await _read_capped(request, file, max_bytes=MAX_PHOTO_BYTES, status_code=413)
     sniffed = _sniff_image(raw[:16])
     if sniffed is None:
-        raise HTTPException(
-            status_code=415, detail="unsupported image type (allowed: jpeg, png, webp, heic, heif)"
+        raise ApiError(
+            415,
+            "unsupported_media_type",
+            "unsupported image type (allowed: jpeg, png, webp, heic, heif)",
         )
     ext, content_type = sniffed
     entity = await _proxy(homebox.get_entity(entity_id))

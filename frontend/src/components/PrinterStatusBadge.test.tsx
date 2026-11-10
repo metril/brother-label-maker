@@ -15,7 +15,7 @@ describe("PrinterStatusBadge", () => {
 
   it("shows the error string when the printer is disconnected", async () => {
     server.use(
-      http.get("/api/printer/status", () =>
+      http.get("/api/v1/printer/status", () =>
         HttpResponse.json({
           connected: false,
           printer_mode: "usb",

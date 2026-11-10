@@ -73,7 +73,7 @@ describe("IconField", () => {
     expect(onChangeSpy).toHaveBeenCalledWith({ kind: "symbol", id: "electrical_services" });
   });
 
-  it("image upload: selecting a file POSTs to /api/images and shows a thumbnail from the returned image_id", async () => {
+  it("image upload: selecting a file POSTs to /api/v1/images and shows a thumbnail from the returned image_id", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<Harness initial={null} />);
 
@@ -82,7 +82,7 @@ describe("IconField", () => {
     await user.upload(screen.getByLabelText("Upload image"), file);
 
     const thumb = await screen.findByAltText("Uploaded icon");
-    expect(thumb).toHaveAttribute("src", expect.stringContaining("/api/images/img-1"));
+    expect(thumb).toHaveAttribute("src", expect.stringContaining("/api/v1/images/img-1"));
   });
 
   it("clear removes the image icon back to null", async () => {

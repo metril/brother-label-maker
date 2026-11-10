@@ -12,7 +12,7 @@ the plain, unparametrized `app_config` (auth_mode="none", conftest.py's own
 `_DEFAULT_APP_CONFIG_KWARGS`) to pin down that the zero-auth default is
 untouched by this task -- not by re-testing the whole existing suite (the
 brief is explicit that the EXISTING suite passing is the real proof of
-that), just the one new shared surface (`/api/auth/me`) plus one ordinary
+that), just the one new shared surface (`/api/v1/auth/me`) plus one ordinary
 route as a canary.
 
 -- Mocking the IdP --
@@ -153,14 +153,14 @@ async def _complete_login(
     back on its own 302 (see module docstring's "-- Why the full round trip
     needs a real login first --")."""
     login_params = {"next": next_path} if next_path is not None else None
-    login_resp = await client.get("/api/auth/login", params=login_params)
+    login_resp = await client.get("/api/v1/auth/login", params=login_params)
     assert login_resp.status_code == 302
     params = httpx.URL(login_resp.headers["location"]).params
 
     _mock_token_response(idp_mock, _sign_id_token(nonce=params["nonce"], **id_token_kwargs))
 
     callback_resp = await client.get(
-        "/api/auth/callback", params={"code": "auth-code-1", "state": params["state"]}
+        "/api/v1/auth/callback", params={"code": "auth-code-1", "state": params["state"]}
     )
     assert callback_resp.status_code == 302
     assert callback_resp.headers["location"] == expect_location
@@ -170,13 +170,13 @@ async def _complete_login(
 
 
 async def test_me_mode_none_shape_and_existing_routes_still_open(client):
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     assert resp.json() == {"auth_mode": "none", "authenticated": True, "user": None}
 
     # The real proof this task didn't touch the default path: an ordinary
     # route still answers normally with no session cookie involved at all.
-    tapes_resp = await client.get("/api/tapes")
+    tapes_resp = await client.get("/api/v1/tapes")
     assert tapes_resp.status_code == 200
 
 
@@ -184,9 +184,9 @@ async def test_login_callback_logout_404_in_none_mode(client):
     """login/callback/logout only make sense with a real IdP configured --
     404 (the route doesn't exist), never a 500 from a missing
     app.state.oauth."""
-    assert (await client.get("/api/auth/login")).status_code == 404
-    assert (await client.get("/api/auth/callback")).status_code == 404
-    assert (await client.post("/api/auth/logout")).status_code == 404
+    assert (await client.get("/api/v1/auth/login")).status_code == 404
+    assert (await client.get("/api/v1/auth/callback")).status_code == 404
+    assert (await client.post("/api/v1/auth/logout")).status_code == 404
 
 
 # -- fast-fail config validation --------------------------------------------
@@ -294,9 +294,11 @@ async def test_docs_and_openapi_are_withheld_in_oidc_mode(client):
 
 @_OIDC_CONFIGURED
 async def test_unauthenticated_api_route_returns_401_json(client):
-    resp = await client.get("/api/tapes")
+    resp = await client.get("/api/v1/tapes")
     assert resp.status_code == 401
-    assert resp.json() == {"detail": "authentication required"}
+    assert resp.json() == {
+        "error": {"code": "auth_required", "message": "authentication required", "details": None}
+    }
 
 
 @_OIDC_WITH_ELS
@@ -306,11 +308,11 @@ async def test_health_and_els_stay_open_when_oidc_unauthenticated(app_and_client
     kind by design (see router_els.py)."""
     _, client = app_and_client
 
-    health_resp = await client.get("/api/health")
+    health_resp = await client.get("/api/v1/health")
     assert health_resp.status_code == 200
 
     els_resp = await client.get(
-        "/api/els/label",
+        "/api/v1/els/label",
         params={"TitleText": "Garage", "URL": "https://homebox.example.com/location/1"},
     )
     assert els_resp.status_code == 200
@@ -321,7 +323,7 @@ async def test_health_and_els_stay_open_when_oidc_unauthenticated(app_and_client
 async def test_me_unauthenticated_in_oidc_mode(client):
     """/auth/me itself is exempt from the gate (must always answer, so a
     signed-out browser can ask "am I signed in?" at all)."""
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     assert resp.json() == {"auth_mode": "oidc", "authenticated": False, "user": None}
 
@@ -332,7 +334,7 @@ async def test_me_unauthenticated_in_oidc_mode(client):
 @_OIDC_CONFIGURED
 async def test_login_redirects_to_authorize_url_with_state_and_nonce(app_and_client, idp_mock):
     _, client = app_and_client
-    resp = await client.get("/api/auth/login")
+    resp = await client.get("/api/v1/auth/login")
     assert resp.status_code == 302
 
     location = httpx.URL(resp.headers["location"])
@@ -348,7 +350,7 @@ async def test_login_redirects_to_authorize_url_with_state_and_nonce(app_and_cli
 async def test_callback_rejects_mismatched_state(client, idp_mock):
     """A `state` this app never issued (or already consumed) -- authlib's
     own MismatchingStateError, mapped to this route's 401."""
-    resp = await client.get("/api/auth/callback", params={"code": "x", "state": "not-a-real-state"})
+    resp = await client.get("/api/v1/auth/callback", params={"code": "x", "state": "not-a-real-state"})
     assert resp.status_code == 401
 
 
@@ -362,7 +364,7 @@ async def test_full_callback_round_trip_sets_session_and_me_flips_authenticated(
     _, client = app_and_client
     await _complete_login(client, idp_mock)
 
-    me_resp = await client.get("/api/auth/me")
+    me_resp = await client.get("/api/v1/auth/me")
     assert me_resp.status_code == 200
     body = me_resp.json()
     assert body["auth_mode"] == "oidc"
@@ -373,7 +375,7 @@ async def test_full_callback_round_trip_sets_session_and_me_flips_authenticated(
     assert isinstance(body["user"]["exp"], int)
 
     # The session cookie now lets a previously-401'd route through.
-    tapes_resp = await client.get("/api/tapes")
+    tapes_resp = await client.get("/api/v1/tapes")
     assert tapes_resp.status_code == 200
 
 
@@ -403,16 +405,16 @@ async def test_login_next_is_honoured_only_for_safe_relative_paths(
 async def test_logout_clears_session_and_me_flips_back(app_and_client, idp_mock):
     _, client = app_and_client
     await _complete_login(client, idp_mock)
-    assert (await client.get("/api/auth/me")).json()["authenticated"] is True
+    assert (await client.get("/api/v1/auth/me")).json()["authenticated"] is True
 
-    logout_resp = await client.post("/api/auth/logout")
+    logout_resp = await client.post("/api/v1/auth/logout")
     assert logout_resp.status_code == 204
     assert logout_resp.content == b""
 
-    me_resp = await client.get("/api/auth/me")
+    me_resp = await client.get("/api/v1/auth/me")
     assert me_resp.json() == {"auth_mode": "oidc", "authenticated": False, "user": None}
 
-    tapes_resp = await client.get("/api/tapes")
+    tapes_resp = await client.get("/api/v1/tapes")
     assert tapes_resp.status_code == 401
 
 
@@ -425,7 +427,7 @@ async def test_session_expires_after_session_max_age_passes(app_and_client, idp_
     once it passes, re-authentication is forced."""
     _, client = app_and_client
     await _complete_login(client, idp_mock, exp_delta=60)
-    assert (await client.get("/api/auth/me")).json()["authenticated"] is True
+    assert (await client.get("/api/v1/auth/me")).json()["authenticated"] is True
 
     # Advance past the 8h session deadline (an hour past the id_token's own
     # 60s exp must NOT be enough -- that's the review fix under test).
@@ -436,14 +438,14 @@ async def test_session_expires_after_session_max_age_passes(app_and_client, idp_
     # itself (which would now recurse into the very lambda replacing it).
     real_time = time.time
     monkeypatch.setattr(auth_gate.time, "time", lambda: real_time() + 3600)
-    assert (await client.get("/api/auth/me")).json()["authenticated"] is True
+    assert (await client.get("/api/v1/auth/me")).json()["authenticated"] is True
 
     monkeypatch.setattr(auth_gate.time, "time", lambda: real_time() + 8 * 3600 + 60)
 
-    me_resp = await client.get("/api/auth/me")
+    me_resp = await client.get("/api/v1/auth/me")
     assert me_resp.json() == {"auth_mode": "oidc", "authenticated": False, "user": None}
 
-    tapes_resp = await client.get("/api/tapes")
+    tapes_resp = await client.get("/api/v1/tapes")
     assert tapes_resp.status_code == 401
 
 
@@ -465,11 +467,11 @@ def test_ws_rejects_unauthenticated_then_accepts_after_login(app_config):
 
         with TestClient(app, follow_redirects=False) as test_client:
             with pytest.raises(WebSocketDisconnect) as exc_info:
-                with test_client.websocket_connect("/api/ws"):
+                with test_client.websocket_connect("/api/v1/ws"):
                     pass
             assert exc_info.value.code == 4401
 
-            login_resp = test_client.get("/api/auth/login")
+            login_resp = test_client.get("/api/v1/auth/login")
             params = httpx.URL(login_resp.headers["location"]).params
             idp.post(TOKEN_URL).mock(
                 return_value=httpx.Response(
@@ -483,11 +485,11 @@ def test_ws_rejects_unauthenticated_then_accepts_after_login(app_config):
                 )
             )
             callback_resp = test_client.get(
-                "/api/auth/callback", params={"code": "auth-code-1", "state": params["state"]}
+                "/api/v1/auth/callback", params={"code": "auth-code-1", "state": params["state"]}
             )
             assert callback_resp.status_code == 302
 
             # Accepted this time -- no exception means the gate let the
             # (now-authenticated) handshake through to ws.py's own accept().
-            with test_client.websocket_connect("/api/ws"):
+            with test_client.websocket_connect("/api/v1/ws"):
                 pass

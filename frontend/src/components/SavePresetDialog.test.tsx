@@ -29,7 +29,7 @@ describe("SavePresetDialog", () => {
     const user = userEvent.setup();
     let capturedBody: Record<string, unknown> | undefined;
     server.use(
-      http.post("/api/presets", async ({ request }) => {
+      http.post("/api/v1/presets", async ({ request }) => {
         capturedBody = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json(
           {
@@ -90,7 +90,7 @@ describe("SavePresetDialog", () => {
     const user = userEvent.setup();
     let capturedBody: Record<string, unknown> | undefined;
     server.use(
-      http.post("/api/presets", async ({ request }) => {
+      http.post("/api/v1/presets", async ({ request }) => {
         capturedBody = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json(
           {
@@ -140,7 +140,7 @@ describe("SavePresetDialog", () => {
     const user = userEvent.setup();
     let posted = false;
     server.use(
-      http.post("/api/presets", () => {
+      http.post("/api/v1/presets", () => {
         posted = true;
         return HttpResponse.json({}, { status: 201 });
       }),

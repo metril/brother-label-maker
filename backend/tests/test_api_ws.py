@@ -55,9 +55,9 @@ def test_ws_observes_job_queued_started_done_in_order(tmp_path):
     config = AppConfig(printer_mode="mock", data_dir=tmp_path / "data")
     app = create_app(config)
 
-    with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+    with TestClient(app) as client, client.websocket_connect("/api/v1/ws") as ws:
         resp = client.post(
-            "/api/print",
+            "/api/v1/print",
             json={
                 "labels": [
                     {
@@ -98,14 +98,14 @@ def test_ws_tolerates_a_binary_frame_and_still_delivers_a_later_event(tmp_path):
     config = AppConfig(printer_mode="mock", data_dir=tmp_path / "data")
     app = create_app(config)
 
-    with TestClient(app) as client, client.websocket_connect("/api/ws") as ws:
+    with TestClient(app) as client, client.websocket_connect("/api/v1/ws") as ws:
         # A stray binary frame -- ws.py's old `receive_text()` loop would
         # raise on this (unexpected message type) and tear the connection
         # down; the fixed `receive()` loop must just ignore it.
         ws.send_bytes(b"\x00\x01\x02\xff")
 
         resp = client.post(
-            "/api/print",
+            "/api/v1/print",
             json={
                 "labels": [
                     {

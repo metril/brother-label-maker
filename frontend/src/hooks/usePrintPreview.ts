@@ -16,7 +16,7 @@ export interface UsePrintPreviewResult {
   error: string | null;
 }
 
-/** POST /api/print/preview (Track C2) -- PrintPreviewDeck's own data
+/** POST /api/v1/print/preview (Track C2) -- PrintPreviewDeck's own data
  * source. Deliberately NOT debounced the way usePrintEstimate/usePreview
  * are: those debounce keystroke-level churn on `labels` itself, but this
  * hook's `labels`/`options` only ever change from a discrete click (a

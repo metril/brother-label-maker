@@ -13,21 +13,21 @@ import type { HomeboxEntitySummary, HomeboxPathSegment, LabelDefinition, Tape } 
 const ASSET_ID_SHAPE_RE = /^#?\d{3}-\d{3,}$/;
 
 /** True when `text` (trimmed) looks like a HomeBox asset id -- the browse
- * page's own signal to ALSO query GET /api/homebox/assets/{id} alongside
+ * page's own signal to ALSO query GET /api/v1/homebox/assets/{id} alongside
  * the normal entities search (see pages/Homebox.tsx). */
 export function matchesAssetIdShape(text: string): boolean {
   return ASSET_ID_SHAPE_RE.test(text.trim());
 }
 
 /** Strips the search box's own optional leading "#" before the id is used
- * as a literal path segment in GET /api/homebox/assets/{id} -- HomeBox's
+ * as a literal path segment in GET /api/v1/homebox/assets/{id} -- HomeBox's
  * asset ids themselves never carry one. */
 export function stripAssetIdHash(text: string): string {
   return text.trim().replace(/^#/, "");
 }
 
 /** Turns a root-first ancestor PATH (the entity itself last, per
- * GET /api/homebox/entities/{id}/path's own contract) into the breadcrumb
+ * GET /api/v1/homebox/entities/{id}/path's own contract) into the breadcrumb
  * string a homebox_asset/homebox_location label prints: the entity's OWN
  * segment is always dropped (its name is already printed separately, as
  * `name`/`asset_id`), and only LOCATION-typed ancestors are kept -- an
@@ -59,7 +59,7 @@ function clamp(text: string, max: number): string {
  * OWN current tape selection is (stores/designer.ts's `tape`, the same
  * value every Designer-added tray item snapshots) -- HomeBox entities carry
  * no tape opinion of their own. `qrBaseUrl` is
- * GET /api/homebox/settings' `effective_qr_base_url`; when it's null this
+ * GET /api/v1/homebox/settings' `effective_qr_base_url`; when it's null this
  * NEVER fabricates a scheme/host -- `show_qr` goes false and `qr_data`
  * falls back to a bare path (still non-empty, satisfying the render types'
  * own `min_length=1`, but never a lie about where it resolves).

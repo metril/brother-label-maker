@@ -16,15 +16,15 @@ interface TapeSelectorProps {
   onChange: (tape: Tape) => void;
 }
 
-/** Tape family + width picker, driven entirely by GET /api/tapes
+/** Tape family + width picker, driven entirely by GET /api/v1/tapes
  * (backend/driver/geometry.py's all_tapes() -- TZe + both HSe heat-shrink
- * families) -- "widths from /api/tapes filtered by family" per the task
+ * families) -- "widths from /api/v1/tapes filtered by family" per the task
  * brief. Switching family snaps the width to that family's own smallest
  * tape (the old width almost never exists in the new family's catalog). */
 export function TapeSelector({ tape, onChange }: TapeSelectorProps) {
   const { data: tapes, isPending, isError, refetch, isRefetching } = useTapes();
 
-  // Task 4.3 fix-up: a failed GET /api/tapes used to leave this stuck on
+  // Task 4.3 fix-up: a failed GET /api/v1/tapes used to leave this stuck on
   // the placeholder branch below forever. react-query's `isPending` DOES
   // flip false once retries exhaust (status becomes "error") -- but `data`
   // stays undefined, so the old `isPending || !tapes` guard kept rendering

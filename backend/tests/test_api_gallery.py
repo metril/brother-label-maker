@@ -36,7 +36,7 @@ def _clear_gallery_cache():
 
 
 async def test_gallery_renders_every_entry_as_decodable_png(client):
-    resp = await client.get("/api/gallery")
+    resp = await client.get("/api/v1/gallery")
     assert resp.status_code == 200
     items = resp.json()
     assert len(items) == len(gallery_entries())
@@ -52,7 +52,7 @@ async def test_gallery_renders_every_entry_as_decodable_png(client):
 
 
 async def test_gallery_covers_all_eleven_registered_types(client):
-    resp = await client.get("/api/gallery")
+    resp = await client.get("/api/v1/gallery")
     assert resp.status_code == 200
     covered = {item["type"] for item in resp.json()}
     registered = {info.type for info in list_types()}
@@ -61,7 +61,7 @@ async def test_gallery_covers_all_eleven_registered_types(client):
 
 
 async def test_gallery_item_shape_supports_open_in_designer_and_deckstrip(client):
-    resp = await client.get("/api/gallery")
+    resp = await client.get("/api/v1/gallery")
     items = resp.json()
     for item in items:
         # "Open in designer" loads type+params+tape into the store; DeckStrip
@@ -80,7 +80,7 @@ async def test_gallery_item_shape_supports_open_in_designer_and_deckstrip(client
 
 
 async def test_gallery_serialized_entry_pictures_first_instance(client):
-    resp = await client.get("/api/gallery")
+    resp = await client.get("/api/v1/gallery")
     by_id = {item["id"]: item for item in resp.json()}
     serialized = by_id["patch-panel-serialized"]
     # Sequence(kind=numeric, start=1, count=4) -> 4 labels, instance 0 = "1".
@@ -104,8 +104,8 @@ async def test_gallery_second_request_is_served_from_cache(client, monkeypatch):
 
     monkeypatch.setattr(router_gallery, "_render_entry", counting_render)
 
-    first = await client.get("/api/gallery")
-    second = await client.get("/api/gallery")
+    first = await client.get("/api/v1/gallery")
+    second = await client.get("/api/v1/gallery")
     assert first.status_code == second.status_code == 200
     # Rendered exactly once per entry across BOTH requests...
     assert sorted(calls) == sorted(entry.id for entry in gallery_entries())

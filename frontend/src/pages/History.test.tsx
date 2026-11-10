@@ -25,7 +25,7 @@ function item(overrides: Partial<Record<string, unknown>> = {}) {
     strategy: "classic",
     tape_width_mm: 24,
     tape_used_mm: 123.4,
-    thumbnail_url: "/api/history/job-1/thumbnail",
+    thumbnail_url: "/api/v1/history/job-1/thumbnail",
     ...overrides,
   };
 }
@@ -45,14 +45,14 @@ async function findTable() {
 
 describe("History page", () => {
   it("shows the empty state when there's nothing printed yet", async () => {
-    server.use(http.get("/api/history", () => HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 })));
+    server.use(http.get("/api/v1/history", () => HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 })));
     renderWithProviders(<History />);
 
     expect(await screen.findByText("Nothing printed yet.")).toBeInTheDocument();
   });
 
   it("renders rows with thumbnail/status/mono values", async () => {
-    server.use(http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })));
+    server.use(http.get("/api/v1/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })));
     renderWithProviders(<History />);
 
     const table = await findTable();
@@ -60,7 +60,7 @@ describe("History page", () => {
     expect(within(table).getByText("3")).toBeInTheDocument();
     expect(within(table).getByText("24mm")).toBeInTheDocument();
     expect(within(table).getByText("123.4 mm")).toBeInTheDocument();
-    expect(within(table).getByAltText("")).toHaveAttribute("src", "/api/history/job-1/thumbnail");
+    expect(within(table).getByAltText("")).toHaveAttribute("src", "/api/v1/history/job-1/thumbnail");
   });
 
   // Feed & cut design doc (2026-08-04): a feed_cut job has no real label
@@ -70,7 +70,7 @@ describe("History page", () => {
   // HistoryRow.tsx's own doc on this.
   it("a feed_cut job's row shows the humanized 'Feed & cut' label and renders sanely with no label content", async () => {
     server.use(
-      http.get("/api/history", () =>
+      http.get("/api/v1/history", () =>
         HttpResponse.json({
           items: [
             item({
@@ -101,7 +101,7 @@ describe("History page", () => {
 
   it("shows the failure text for a failed job", async () => {
     server.use(
-      http.get("/api/history", () =>
+      http.get("/api/v1/history", () =>
         HttpResponse.json({ items: [item({ status: "failed", error: "printer out of tape" })], page: 1, page_size: 20, total: 1 }),
       ),
     );
@@ -112,11 +112,11 @@ describe("History page", () => {
     expect(within(table).getByText("printer out of tape")).toBeInTheDocument();
   });
 
-  it("status/search filters and page size drive GET /api/history's own query params, within bounds", async () => {
+  it("status/search filters and page size drive GET /api/v1/history's own query params, within bounds", async () => {
     const user = userEvent.setup();
     const seenQueries: URLSearchParams[] = [];
     server.use(
-      http.get("/api/history", ({ request }) => {
+      http.get("/api/v1/history", ({ request }) => {
         seenQueries.push(new URL(request.url).searchParams);
         return HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 });
       }),
@@ -147,7 +147,7 @@ describe("History page", () => {
     const user = userEvent.setup();
     const seenPages: string[] = [];
     server.use(
-      http.get("/api/history", ({ request }) => {
+      http.get("/api/v1/history", ({ request }) => {
         const page = new URL(request.url).searchParams.get("page") ?? "1";
         seenPages.push(page);
         return HttpResponse.json({ items: [item()], page: Number(page), page_size: 20, total: 25 });
@@ -167,8 +167,8 @@ describe("History page", () => {
   it("Reprint POSTs and surfaces the new job's live status via WS", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
-      http.post("/api/history/job-1/reprint", () => HttpResponse.json({ job_id: "job-2" }, { status: 202 })),
+      http.get("/api/v1/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.post("/api/v1/history/job-1/reprint", () => HttpResponse.json({ job_id: "job-2" }, { status: 202 })),
     );
     renderWithProviders(<History />);
     const table = await findTable();
@@ -189,8 +189,8 @@ describe("History page", () => {
   it("Reprint failure surfaces a readable role=alert message inline, not silently", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
-      http.post("/api/history/job-1/reprint", () => HttpResponse.json({ detail: "job not found" }, { status: 404 })),
+      http.get("/api/v1/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.post("/api/v1/history/job-1/reprint", () => HttpResponse.json({ error: { code: "error", message: "job not found" } }, { status: 404 })),
     );
     renderWithProviders(<History />);
     const table = await findTable();
@@ -209,9 +209,9 @@ describe("History page", () => {
   it("Reprint 409 (a stale stored definition) also surfaces a readable role=alert message", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
-      http.post("/api/history/job-1/reprint", () =>
-        HttpResponse.json({ detail: "font 'Deleted Font' is no longer available" }, { status: 409 }),
+      http.get("/api/v1/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.post("/api/v1/history/job-1/reprint", () =>
+        HttpResponse.json({ error: { code: "error", message: "font 'Deleted Font' is no longer available" } }, { status: 409 }),
       ),
     );
     renderWithProviders(<History />);
@@ -229,7 +229,7 @@ describe("History page", () => {
   // already established for a repeated-row list.
   it("gives each row's actions a distinct, row-identifying accessible name", async () => {
     server.use(
-      http.get("/api/history", () =>
+      http.get("/api/v1/history", () =>
         HttpResponse.json({
           items: [item({ id: "job-1" }), item({ id: "job-2", created_at: "2026-07-27T10:00:00.000000Z" })],
           page: 1,
@@ -259,7 +259,7 @@ describe("History page", () => {
   it("keeps each row's accessible name pinned to its own job id across a re-sort, not to table position", async () => {
     let order: "asc" | "desc" = "asc";
     server.use(
-      http.get("/api/history", () =>
+      http.get("/api/v1/history", () =>
         HttpResponse.json({
           items:
             order === "asc"
@@ -294,8 +294,8 @@ describe("History page", () => {
   it("Details shows the job's full definition and offers Load into designer for a single label", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
-      http.get("/api/history/job-1", () =>
+      http.get("/api/v1/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.get("/api/v1/history/job-1", () =>
         HttpResponse.json({
           id: "job-1",
           created_at: "2026-07-27T11:55:00.000000Z",
@@ -331,8 +331,8 @@ describe("History page", () => {
     const user = userEvent.setup();
     const deleteSpy = vi.fn();
     server.use(
-      http.get("/api/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
-      http.delete("/api/history/job-1", () => {
+      http.get("/api/v1/history", () => HttpResponse.json({ items: [item()], page: 1, page_size: 20, total: 1 })),
+      http.delete("/api/v1/history/job-1", () => {
         deleteSpy();
         return new HttpResponse(null, { status: 204 });
       }),
@@ -358,7 +358,7 @@ describe("History page", () => {
     const user = userEvent.setup();
     let call = 0;
     server.use(
-      http.get("/api/history", ({ request }) => {
+      http.get("/api/v1/history", ({ request }) => {
         call += 1;
         const page = new URL(request.url).searchParams.get("page");
         if (call === 1) {
@@ -388,7 +388,7 @@ describe("History page", () => {
   it("a WS terminal event on a listed job updates its row status in place, then invalidates the list", async () => {
     let fetchCount = 0;
     server.use(
-      http.get("/api/history", () => {
+      http.get("/api/v1/history", () => {
         fetchCount += 1;
         return HttpResponse.json({ items: [item({ status: "printing" })], page: 1, page_size: 20, total: 1 });
       }),

@@ -24,11 +24,12 @@ import anyio
 from fastapi import APIRouter
 
 from labelmaker.api.deps import AppConfigDep
+from labelmaker.api.errors import err
 from labelmaker.api.router_labels import _render_and_encode
 from labelmaker.render.document import LabelDefinition, Tape
 from labelmaker.render.gallery import GALLERY_SCALE, GalleryEntry, GalleryItem, gallery_entries
 
-router = APIRouter(tags=["gallery"])
+router = APIRouter(tags=["gallery"], responses=err(404))
 
 _cache: dict[str, GalleryItem] = {}
 

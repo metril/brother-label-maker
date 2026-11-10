@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { extractErrorDetail } from "../api/client";
 import type { HomeboxAttachmentResponse } from "../api/types";
 import { toUploadJpeg } from "../lib/captureImage";
 
@@ -28,14 +29,13 @@ function kindForStatus(status: number): AttachErrorKind {
 
 function detailFrom(text: string, fallback: string): string {
   try {
-    const d: unknown = (JSON.parse(text) as { detail?: unknown }).detail;
-    return typeof d === "string" && d ? d : fallback;
+    return extractErrorDetail(JSON.parse(text), fallback);
   } catch {
     return fallback;
   }
 }
 
-/** POST /api/homebox/entities/{id}/attachments as multipart via XHR (fetch
+/** POST /api/v1/homebox/entities/{id}/attachments as multipart via XHR (fetch
  * has no upload progress). Rejects with a typed AttachError. */
 export function uploadAttachment(
   entityId: string,
@@ -46,7 +46,7 @@ export function uploadAttachment(
 ): Promise<AttachResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/homebox/entities/${encodeURIComponent(entityId)}/attachments`);
+    xhr.open("POST", `/api/v1/homebox/entities/${encodeURIComponent(entityId)}/attachments`);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
     };

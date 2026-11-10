@@ -77,7 +77,7 @@ function SettingErrorText({ mutation }: { mutation: ReturnType<typeof useUpdateS
 }
 
 // --- Printer section: three Selects + one Switch, each independently ------
-// editable (a change fires PUT /api/settings immediately -- no separate
+// editable (a change fires PUT /api/v1/settings immediately -- no separate
 // Save button, matching Switch's own "takes effect immediately" ethos and
 // keeping a fixed, small choice set out of the buffered-text-input pattern
 // the URL/number fields below need instead).

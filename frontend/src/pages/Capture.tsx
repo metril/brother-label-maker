@@ -33,7 +33,7 @@ const secondaryBtn =
   "flex min-h-14 w-full items-center justify-center rounded-xl border border-deck-600 bg-deck-800 px-5 text-[16px] font-medium text-deck-200 transition active:scale-[0.98] active:bg-deck-700 disabled:opacity-50";
 
 async function fetchEntity(id: string): Promise<HomeboxEntitySummary> {
-  const res = await fetch(`/api/homebox/entities/${encodeURIComponent(id)}`);
+  const res = await fetch(`/api/v1/homebox/entities/${encodeURIComponent(id)}`);
   if (!res.ok) {
     const fallback = `request failed: ${res.status} ${res.statusText}`;
     const body: unknown = await res.json().catch(() => null);
@@ -57,7 +57,7 @@ function ProblemBanner({ problem, onRetry }: { problem: Problem; onRetry?: () =>
     <div role="alert" className="rounded-xl border border-rust-500 bg-deck-800 px-4 py-3 text-[15px]">
       <p>{problem.message}</p>
       {problem.kind === "auth" && (
-        <a href="/api/auth/login?next=/capture" className="mt-2 inline-block font-semibold text-amber-300 underline">
+        <a href="/api/v1/auth/login?next=/capture" className="mt-2 inline-block font-semibold text-amber-300 underline">
           Sign in
         </a>
       )}

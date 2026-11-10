@@ -7,7 +7,7 @@ import { server } from "./msw/server";
  * order -- so a test can grab the instance useJobEvents created (usually
  * `mockWebSocketInstances.at(-1)!`) and drive it directly: `.open()` to
  * simulate a successful connection, `.emit({...})` to push a server frame
- * (JSON-stringified, matching the real /api/ws contract), or just leave it
+ * (JSON-stringified, matching the real /api/v1/ws contract), or just leave it
  * alone (defaults to auto-open, see below). Cleared after every test. */
 export const mockWebSocketInstances: MockWebSocket[] = [];
 
@@ -43,7 +43,7 @@ export class MockWebSocket {
     this.onopen?.();
   }
 
-  /** Simulate the server pushing a JSON event frame (the real /api/ws
+  /** Simulate the server pushing a JSON event frame (the real /api/v1/ws
    * contract is always JSON: {event, job_id, error?}). */
   emit(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) });

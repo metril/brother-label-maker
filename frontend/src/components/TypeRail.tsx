@@ -24,7 +24,7 @@ function groupByCategory(types: LabelTypeInfo[]): [string, LabelTypeInfo[]][] {
   return orderedKeys.map((key) => [key, groups.get(key)!]);
 }
 
-/** The design system's left rail: every label type from GET /api/label-
+/** The design system's left rail: every label type from GET /api/v1/label-
  * types, grouped by category, driving useDesignerStore's selectedType. A
  * roving-tabindex listbox -- ArrowUp/ArrowDown move focus across the WHOLE
  * flattened list (category grouping is visual only), Enter/Space activates

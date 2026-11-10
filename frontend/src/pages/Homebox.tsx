@@ -41,7 +41,7 @@ const PAGE_SIZE = 50;
  * see api/router_homebox.py's list_entities), a paginated results list with
  * multi-select, and "Add N to tray" -- the ONE way this page hands labels to
  * the SAME job tray Designer.tsx's own "Add to tray" uses (stores/tray.ts,
- * no parallel mechanism). Unreachable outside GET /api/homebox/status
+ * no parallel mechanism). Unreachable outside GET /api/v1/homebox/status
  * reporting `configured` (AppShell's own nav gate); a direct visit while
  * unconfigured still renders its own explanatory empty state below, rather
  * than 404ing or crashing on the routes' own 503s. */

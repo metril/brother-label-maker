@@ -27,7 +27,7 @@ function Harness({ initial, onChangeSpy }: { initial: unknown; onChangeSpy?: (v:
 }
 
 describe("FontFamilyField", () => {
-  it("renders the bundled font catalog from GET /api/fonts as select options", async () => {
+  it("renders the bundled font catalog from GET /api/v1/fonts as select options", async () => {
     renderWithQueryClient(<Harness initial="Inter" />);
 
     const select = await screen.findByLabelText("Font family");
@@ -35,16 +35,16 @@ describe("FontFamilyField", () => {
     expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
   });
 
-  // Task 4.3: a failed GET /api/fonts used to leave this on the `···`
+  // Task 4.3: a failed GET /api/v1/fonts used to leave this on the `···`
   // pending indicator forever (`isPending` goes false on error, but `data`
   // stays undefined and the old `isPending || !fonts` guard conflated the
   // two) -- no error text, no way to try again short of a full reload.
-  it("shows a role=alert message with a Retry button when /api/fonts fails, and recovers on retry", async () => {
+  it("shows a role=alert message with a Retry button when /api/v1/fonts fails, and recovers on retry", async () => {
     let attempt = 0;
     server.use(
-      http.get("/api/fonts", () => {
+      http.get("/api/v1/fonts", () => {
         attempt += 1;
-        if (attempt === 1) return HttpResponse.json({ detail: "boom" }, { status: 500 });
+        if (attempt === 1) return HttpResponse.json({ error: { code: "error", message: "boom" } }, { status: 500 });
         return HttpResponse.json([{ family: "Inter", display_name: "Inter" }]);
       }),
     );

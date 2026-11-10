@@ -24,24 +24,24 @@ const item = {
 
 function useHomebox(opts: { matches?: unknown[]; writes?: boolean; attach?: () => Response | Promise<Response> } = {}) {
   server.use(
-    http.get("/api/settings", () =>
+    http.get("/api/v1/settings", () =>
       HttpResponse.json({
         settings: defaultSettingsBody.settings.map((row) =>
           row.key === "homebox_writes_enabled" ? { ...row, value: opts.writes ?? true } : row,
         ),
       }),
     ),
-    http.get("/api/homebox/settings", () =>
+    http.get("/api/v1/homebox/settings", () =>
       HttpResponse.json({ qr_base_url: null, effective_qr_base_url: "http://hb.local" }),
     ),
-    http.get("/api/homebox/assets/:assetId", () => HttpResponse.json(opts.matches ?? [item])),
-    http.get("/api/homebox/entities/:id/path", () =>
+    http.get("/api/v1/homebox/assets/:assetId", () => HttpResponse.json(opts.matches ?? [item])),
+    http.get("/api/v1/homebox/entities/:id/path", () =>
       HttpResponse.json([
         { id: "loc", name: "Garage", type: "location" },
         { id: "item-1", name: "Impact Driver", type: "item" },
       ]),
     ),
-    http.post("/api/homebox/entities/:id/attachments", async () =>
+    http.post("/api/v1/homebox/entities/:id/attachments", async () =>
       opts.attach ? opts.attach() : HttpResponse.json({ entity_id: "item-1", attachment_id: "att-1", primary: true }),
     ),
   );
@@ -95,7 +95,7 @@ describe("Capture", () => {
   });
 
   it("maps a 403 upload to the Settings hint and keeps the photo for retry", async () => {
-    useHomebox({ attach: () => HttpResponse.json({ detail: "writes disabled" }, { status: 403 }) });
+    useHomebox({ attach: () => HttpResponse.json({ error: { code: "error", message: "writes disabled" } }, { status: 403 }) });
     const user = userEvent.setup();
     renderWithProviders(<Capture />, { route: "/capture" });
     await openItem(user);
@@ -115,11 +115,11 @@ describe("Capture", () => {
   });
 
   it("links to sign-in on a 401 lookup", async () => {
-    server.use(http.get("/api/homebox/assets/:assetId", () => HttpResponse.json({ detail: "no" }, { status: 401 })));
+    server.use(http.get("/api/v1/homebox/assets/:assetId", () => HttpResponse.json({ error: { code: "error", message: "no" } }, { status: 401 })));
     const user = userEvent.setup();
     renderWithProviders(<Capture />, { route: "/capture" });
     await user.type(screen.getByLabelText("Find item"), "5{Enter}");
-    expect(await screen.findByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/api/auth/login?next=/capture");
+    expect(await screen.findByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/api/v1/auth/login?next=/capture");
   });
 
   it("close button leaves the capture page", async () => {
@@ -139,7 +139,7 @@ describe("Capture", () => {
   it("searches by item name and opens the chosen result", async () => {
     useHomebox();
     server.use(
-      http.get("/api/homebox/entities", ({ request }) => {
+      http.get("/api/v1/homebox/entities", ({ request }) => {
         const q = new URL(request.url).searchParams.get("q");
         return HttpResponse.json({ items: q === "impact" ? [item] : [], page: 1, page_size: 20, total: q === "impact" ? 1 : 0 });
       }),
@@ -154,7 +154,7 @@ describe("Capture", () => {
   it("clears search text and results after scanning another", async () => {
     useHomebox();
     server.use(
-      http.get("/api/homebox/entities", () => HttpResponse.json({ items: [item], page: 1, page_size: 20, total: 1 })),
+      http.get("/api/v1/homebox/entities", () => HttpResponse.json({ items: [item], page: 1, page_size: 20, total: 1 })),
     );
     const user = userEvent.setup();
     renderWithProviders(<Capture />, { route: "/capture" });

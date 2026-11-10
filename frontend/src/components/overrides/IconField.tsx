@@ -15,7 +15,7 @@ type IconMode = "none" | "symbol" | "image";
  * -- not schema-walked generically (a discriminator union is one shape too
  * bespoke to earn a generic renderer for a single field across one type),
  * a bespoke picker instead: symbol grid (searchable by tag, from GET
- * /api/symbols) or image upload (POST /api/images) with a thumbnail and a
+ * /api/v1/symbols) or image upload (POST /api/v1/images) with a thumbnail and a
  * clear affordance, per the task brief. */
 export function IconField({ value, onChange }: OverrideFieldProps) {
   const icon = (value ?? null) as Icon | null;

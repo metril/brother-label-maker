@@ -6,7 +6,7 @@ interface UsePresetsParams {
   q?: string;
 }
 
-/** GET /api/presets (task 2.13), filtered by `label_type`/`q` -- the
+/** GET /api/v1/presets (task 2.13), filtered by `label_type`/`q` -- the
  * Presets page's own search box + type filter drive these straight through
  * as query params (see api/router_presets.py's list_presets). */
 export function usePresets({ labelType, q }: UsePresetsParams) {

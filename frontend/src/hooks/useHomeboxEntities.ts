@@ -10,7 +10,7 @@ interface UseHomeboxEntitiesParams {
   enabled: boolean;
 }
 
-/** GET /api/homebox/entities (task 3.4), server-paginated + filtered by the
+/** GET /api/v1/homebox/entities (task 3.4), server-paginated + filtered by the
  * browse page's own search box (`q`) and selected location-tree node
  * (`parentId`) -- both combine server-side (router_homebox.py's
  * list_entities). `placeholderData` keeps the current page's rows on screen
@@ -26,7 +26,7 @@ export function useHomeboxEntities({ q, page, pageSize, parentId, enabled }: Use
   });
 }
 
-/** GET /api/homebox/assets/{id} (task 3.4) -- the "Asset ID matches"
+/** GET /api/v1/homebox/assets/{id} (task 3.4) -- the "Asset ID matches"
  * disambiguation section, queried ALONGSIDE (not instead of) the normal
  * entities search whenever the raw search text looks like a HomeBox asset
  * id (lib/homebox.ts's matchesAssetIdShape). Zero/one/many results all

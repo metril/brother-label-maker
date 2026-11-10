@@ -177,10 +177,11 @@ is an image generator, not a print sink).
 from __future__ import annotations
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
 from labelmaker.api.deps import AppConfigDep, SettingsDep, error_message
+from labelmaker.api.errors import ApiError, err
 from labelmaker.config import AppConfig
 from labelmaker.render import LabelDefinition, Tape, preview_png, rasterize, render_definition
 from labelmaker.render.types.homebox_location import HomeboxLocationParams
@@ -200,10 +201,12 @@ def _require_els_enabled(settings: SettingsDep) -> None:
     param names to an unauthenticated caller (`/api/els/` is exempt from
     AuthGateMiddleware even in oidc mode)."""
     if not settings.effective().els_enabled:
-        raise HTTPException(status_code=404, detail="not found")
+        raise ApiError(404, "not_found", "not found")
 
 
-router = APIRouter(tags=["els"], dependencies=[Depends(_require_els_enabled)])
+router = APIRouter(
+    tags=["els"], dependencies=[Depends(_require_els_enabled)], responses=err(404, 422)
+)
 
 
 def _secondary_text(description_text: str, additional_information: str | None) -> str:
@@ -238,9 +241,7 @@ async def get_els_label(
     title_text: str = Query(..., alias="TitleText", min_length=1, max_length=500),
     description_text: str = Query("", alias="DescriptionText", max_length=2000),
     url: str = Query(..., alias="URL", min_length=1, max_length=2000),
-    additional_information: str | None = Query(
-        None, alias="AdditionalInformation", max_length=500
-    ),
+    additional_information: str | None = Query(None, alias="AdditionalInformation", max_length=500),
     # -- Fields HomeBox always sends but this endpoint ignores (see module
     # docstring) -- still typed so a non-numeric value 422s cleanly rather
     # than being silently accepted as a string.
@@ -290,7 +291,7 @@ async def get_els_label(
         # ValueErrors (unbundled font family, bad image mode) all surface
         # here the same readable way every other render_definition caller
         # in this app already gets (api/deps.py's error_message).
-        raise HTTPException(status_code=422, detail=error_message(exc)) from exc
+        raise ApiError(422, "validation_error", error_message(exc)) from exc
 
     return Response(content=png_bytes, media_type="image/png")
 

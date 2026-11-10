@@ -12,8 +12,8 @@ import type { GalleryItem, TapeInfo } from "../api/types";
 
 /** The Gallery page (task 2.14): every label type as a curated, really-
  * rendered example -- the visual-QA artifact for the whole catalogue. Each
- * card's PNG comes from GET /api/gallery, which renders through the exact
- * /api/render/preview pipeline server-side, so what a card shows is what
+ * card's PNG comes from GET /api/v1/gallery, which renders through the exact
+ * /api/v1/render/preview pipeline server-side, so what a card shows is what
  * the designer (and the printer) would produce for the same definition.
  * Deliberately minimal per the brief: no filters, no pagination, no
  * interactivity beyond "Open in designer". */

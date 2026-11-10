@@ -28,7 +28,7 @@ from labelmaker.main import create_app
 
 async def _wait_for_terminal_job(client, job_id: str, max_polls: int = 250, interval: float = 0.02):
     for _ in range(max_polls):
-        resp = await client.get(f"/api/print/jobs/{job_id}")
+        resp = await client.get(f"/api/v1/print/jobs/{job_id}")
         assert resp.status_code == 200
         body = resp.json()
         if body["status"] in ("done", "failed", "canceled"):
@@ -70,7 +70,7 @@ async def test_feed_cut_mock_mode_e2e_done_stream_and_kind(app_and_client):
     recorder = _RecordingSocket()
     app.state.bus.register(recorder)
 
-    resp = await client.post("/api/printer/cut")
+    resp = await client.post("/api/v1/printer/cut")
     assert resp.status_code == 202
     body = resp.json()
     job_id = body["job_id"]
@@ -91,7 +91,7 @@ async def test_feed_cut_mock_mode_e2e_done_stream_and_kind(app_and_client):
 
     await _wait_for_event(recorder, "job.done", job_id)
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
     # ZERO_LINE's PACKBITS shorthand ('Z' == 0x5A) immediately followed by
     # CTRL_Z (0x1a) -- the last two bytes of any feed-cut stream (see
@@ -100,13 +100,13 @@ async def test_feed_cut_mock_mode_e2e_done_stream_and_kind(app_and_client):
     # (MockPrinterTransport captured it) and this same .bin file.
     assert stream_resp.content.endswith(b"Z\x1a")
 
-    history_resp = await client.get(f"/api/history/{job_id}")
+    history_resp = await client.get(f"/api/v1/history/{job_id}")
     assert history_resp.status_code == 200
     history_body = history_resp.json()
     assert history_body["kind"] == "feed_cut"
     assert history_body["definition"]["labels"] == []
 
-    list_resp = await client.get("/api/history")
+    list_resp = await client.get("/api/v1/history")
     item = next(i for i in list_resp.json()["items"] if i["id"] == job_id)
     assert item["kind"] == "feed_cut"
     assert item["thumbnail_url"] is None
@@ -117,7 +117,7 @@ async def test_feed_cut_job_id_type_matches_post_print(app_and_client):
     # hex str (db.create_print_job's own id scheme, shared by both routes).
     app, client = app_and_client
     print_resp = await client.post(
-        "/api/print",
+        "/api/v1/print",
         json={
             "labels": [
                 {
@@ -130,7 +130,7 @@ async def test_feed_cut_job_id_type_matches_post_print(app_and_client):
     )
     print_job_id = print_resp.json()["job_id"]
 
-    cut_resp = await client.post("/api/printer/cut")
+    cut_resp = await client.post("/api/v1/printer/cut")
     cut_job_id = cut_resp.json()["job_id"]
 
     assert type(cut_job_id) is type(print_job_id)  # noqa: E721
@@ -159,7 +159,7 @@ async def test_feed_cut_usb_no_printer_job_fails_cleanly_with_error_surfaced(
             recorder = _RecordingSocket()
             app.state.bus.register(recorder)
 
-            resp = await client.post("/api/printer/cut")
+            resp = await client.post("/api/v1/printer/cut")
             assert resp.status_code == 202
             job_id = resp.json()["job_id"]
 
@@ -173,7 +173,7 @@ async def test_feed_cut_usb_no_printer_job_fails_cleanly_with_error_surfaced(
 
             # No stream was ever written -- the open() failure happens before
             # any bytes reach a transport.
-            stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+            stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
             assert stream_resp.status_code == 404
 
 
@@ -208,7 +208,7 @@ async def test_feed_cut_unknown_tape_width_falls_back_and_still_completes(
         lambda: MockPrinterTransport(status_reply=unknown_width_status),
     )
 
-    resp = await client.post("/api/printer/cut")
+    resp = await client.post("/api/v1/printer/cut")
     assert resp.status_code == 202
     job_id = resp.json()["job_id"]
 
@@ -221,7 +221,7 @@ async def test_feed_cut_unknown_tape_width_falls_back_and_still_completes(
     # tables, and the first such entry in iteration order).
     assert job["tape_width_mm"] == 24.0
 
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 200
     assert stream_resp.content.endswith(b"Z\x1a")
 
@@ -254,7 +254,7 @@ async def test_cancel_feed_cut_job_while_queued(app_and_client):
     )
     job_id = job["id"]  # created directly in the db -- deliberately NOT enqueued
 
-    resp = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    resp = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert resp.status_code == 200
     assert resp.json() == {"status": "canceled"}
 
@@ -264,9 +264,9 @@ async def test_cancel_feed_cut_job_while_queued(app_and_client):
 
     # A second cancel attempt is a 409 -- the CAS already moved the row off
     # 'queued', same contract print jobs get.
-    resp_again = await client.post(f"/api/print/jobs/{job_id}/cancel")
+    resp_again = await client.post(f"/api/v1/print/jobs/{job_id}/cancel")
     assert resp_again.status_code == 409
 
     # No worker ever touched this job -- no stream .bin was ever written.
-    stream_resp = await client.get(f"/api/print/jobs/{job_id}/stream")
+    stream_resp = await client.get(f"/api/v1/print/jobs/{job_id}/stream")
     assert stream_resp.status_code == 404

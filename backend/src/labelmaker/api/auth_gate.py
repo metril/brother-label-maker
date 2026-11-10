@@ -76,12 +76,23 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 _EXEMPT_EXACT = {"/api/health"}
 _EXEMPT_PREFIXES = ("/api/auth/", "/api/els/")
 
-_UNAUTHENTICATED_BODY = json.dumps({"detail": "authentication required"}).encode()
+_UNAUTHENTICATED_BODY = json.dumps(
+    {"error": {"code": "auth_required", "message": "authentication required", "details": None}}
+).encode()
+
+
+def _normalize(path: str) -> str:
+    """Map `/api/v1/...` onto `/api/...` so the exempt list applies
+    identically under both the canonical and the legacy prefix."""
+    if path == "/api/v1" or path.startswith("/api/v1/"):
+        return "/api" + path[len("/api/v1") :]
+    return path
 
 
 def requires_auth(path: str) -> bool:
     """True for every `/api/*` path except the exemptions documented in this
     module's own docstring; always False for anything outside `/api/*`."""
+    path = _normalize(path)
     if not path.startswith("/api/"):
         return False
     if path in _EXEMPT_EXACT or path.startswith(_EXEMPT_PREFIXES):

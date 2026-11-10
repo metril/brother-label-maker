@@ -3,7 +3,7 @@ import { getHealth } from "../api/client";
 
 const STALE_TIME_MS = 60_000;
 
-/** GET /api/health (task 4.2's Diagnostics page "App" section) -- also
+/** GET /api/v1/health (task 4.2's Diagnostics page "App" section) -- also
  * doubles as this app's own "is the backend reachable at all" probe:
  * `isError` here means the fetch itself failed, not just that some feature
  * is misconfigured (health has no failure modes of its own, see main.py's

@@ -34,7 +34,7 @@ interface DebouncedPreviewInput {
   index: number;
 }
 
-/** Debounces `definition` by 300ms before firing /api/render/preview, so a
+/** Debounces `definition` by 300ms before firing /api/v1/render/preview, so a
  * burst of keystrokes/param changes collapses into a single request instead
  * of one per change. The previous image is kept on screen while a new one
  * loads (a `placeholderData` function, not the built-in `keepPreviousData`
@@ -61,7 +61,7 @@ interface DebouncedPreviewInput {
  * `serialization`/`index` (task 2.11, both optional, default null/0): when
  * `serialization` is non-null, `definition` is treated as a TEMPLATE and
  * `index` selects which of its expanded labels to render (mirrors POST
- * /api/print's own template+serialization split -- see api/types.ts's
+ * /api/v1/print's own template+serialization split -- see api/types.ts's
  * PreviewRequest doc). Bundled into the SAME debounce as `definition`
  * (folded into one debounced object) rather than a separate un-debounced
  * fast path, so rapid index-stepper clicks collapse into one request just

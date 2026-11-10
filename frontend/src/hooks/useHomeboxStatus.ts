@@ -3,7 +3,7 @@ import { getHomeboxStatus } from "../api/client";
 
 const STALE_TIME_MS = 60_000;
 
-/** GET /api/homebox/status (task 3.4) -- always-200 show/hide signal for
+/** GET /api/v1/homebox/status (task 3.4) -- always-200 show/hide signal for
  * every HomeBox UI surface: AppShell's own nav item (a real NavLink vs the
  * disabled placeholder, see AppShell.tsx) and the /homebox page's own state
  * machine (unconfigured / unreachable-or-unhealthy / ready) both key off

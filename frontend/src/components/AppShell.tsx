@@ -21,7 +21,7 @@ interface AppShellProps {
 /** Task 4.1: rendered INSTEAD of the app's own shell whenever
  * `auth_mode === "oidc"` and the session probe (useAuth) reports
  * unauthenticated -- a plain browser navigation to the login route (an
- * `<a href>`, not an onClick handler calling fetch: `/api/auth/login` 302s
+ * `<a href>`, not an onClick handler calling fetch: `/api/v1/auth/login` 302s
  * the WHOLE PAGE to the IdP, which fetch() cannot do -- see api/client.ts's
  * own docstring on this). */
 function SignInPanel() {
@@ -31,7 +31,7 @@ function SignInPanel() {
         <p className={eyebrow}>Label Studio</p>
         <h1 className={`${typeHeading} mt-2`}>Sign in required</h1>
         <p className={helpText}>This deployment requires signing in before you can use it.</p>
-        <a href="/api/auth/login" className={`${primaryButtonClass} mt-6 inline-block`}>
+        <a href="/api/v1/auth/login" className={`${primaryButtonClass} mt-6 inline-block`}>
           Sign in
         </a>
       </div>
@@ -146,7 +146,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * Task 2.13: the app's own primary section nav lives here too --
  * Design/Presets/History, real routes (App.tsx wraps this in a
  * BrowserRouter). Task 3.4: `HomeBox` becomes a real NavLink to /homebox
- * once GET /api/homebox/status reports `configured` (useHomeboxStatus) --
+ * once GET /api/v1/homebox/status reports `configured` (useHomeboxStatus) --
  * until then (still loading, or genuinely unconfigured) it stays the
  * disabled, non-interactive placeholder pre-3.4 always was: deliberately
  * not a link at all, so it's never a tab stop that goes nowhere.
@@ -204,7 +204,7 @@ function navLinkClass({ isActive }: { isActive: boolean }): string {
  * the row from the middle column the deck lives in, so the deck opening or
  * closing never touches the rail's own size.
  *
- * Task 4.1: `useAuth`'s GET /api/auth/me is the ONE probe this gates on --
+ * Task 4.1: `useAuth`'s GET /api/v1/auth/me is the ONE probe this gates on --
  * `auth_mode === "none"` (the default) always reports `authenticated: true`
  * (see that route's own docstring), so this branch is a pure no-op in the
  * zero-auth default; only a REAL `oidc` deployment with no valid session
