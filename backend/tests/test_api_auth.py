@@ -270,21 +270,13 @@ def test_short_session_secret_is_rejected_at_config_time(tmp_path):
 
 
 @_OIDC_CONFIGURED
-async def test_docs_and_openapi_are_withheld_in_oidc_mode(client):
-    """The auth gate only covers /api/* -- FastAPI's own /docs and
-    /openapi.json must not hand an anonymous caller the API surface
-    (review). With docs_url=None these paths fall through to the SPA
-    catch-all (a 200 serving index.html is fine) -- the assertion is that
-    no schema/console CONTENT leaks, not any particular status code."""
+async def test_docs_and_openapi_are_gated_in_oidc_mode(client):
+    """/docs, /redoc and /openapi.json stay enabled but sit behind the auth
+    gate: anonymous callers get the 401 envelope, never the schema."""
     for path in ("/docs", "/redoc", "/openapi.json"):
         resp = await client.get(path)
-        # Without a built frontend/dist (CI) there is no SPA catch-all, so
-        # the path 404s with FastAPI's generic JSON {"detail": "Not Found"};
-        # with one it is index.html. Either is fine -- only a 200 JSON body
-        # (the schema itself) would be a leak.
-        assert not (
-            resp.status_code == 200 and "application/json" in resp.headers.get("content-type", "")
-        ), path
+        assert resp.status_code == 401, path
+        assert resp.json()["error"]["code"] == "auth_required"
         assert "swagger" not in resp.text.lower(), path
         assert '"openapi"' not in resp.text, path
 

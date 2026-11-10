@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from labelmaker.api import (
+    openapi_meta,
     router_api_keys,
     router_auth,
     router_els,
@@ -200,15 +201,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 await app.state.homebox.close()
             await db.close()
 
-    # In oidc mode the interactive API docs are withheld entirely (review):
-    # the gate only covers /api/*, and FastAPI's own /docs + /openapi.json
-    # would otherwise hand an unauthenticated caller the complete API
-    # surface in a locked-down deployment.
-    if cfg.auth_mode == "oidc":
-        app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    else:
-        app = FastAPI(lifespan=lifespan)
+    # /docs, /redoc and /openapi.json stay enabled in every mode; in oidc mode
+    # the auth gate covers them (auth_gate.requires_auth), so an anonymous
+    # caller cannot read the API surface.
+    app = FastAPI(
+        title="Label Maker API",
+        version=APP_VERSION,
+        description=openapi_meta.DESCRIPTION,
+        openapi_tags=openapi_meta.TAGS,
+        lifespan=lifespan,
+    )
     register_error_handlers(app)
+    openapi_meta.install(app)
 
     # Auth (task 4.1) -- ONLY added in oidc mode, so `auth_mode == "none"`
     # (the default) never runs a byte of this: no SessionMiddleware, no

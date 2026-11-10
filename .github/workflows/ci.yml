@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
+  backend-lint:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,18 +42,132 @@ jobs:
         run: uv sync --locked --dev
 
       - name: Lint
-        # No `ruff format --check` here: the codebase has never been
-        # ruff-format'ed, and introducing that gate now would mean a
-        # repo-wide formatting-churn commit for no functional benefit.
-        # Deliberate non-goal for this task.
+        # No `ruff format --check`: the codebase has never been ruff-format'ed
+        # and a repo-wide formatting-churn commit is a deliberate non-goal.
         run: uv run ruff check .
 
+  backend-tests:
+    name: backend-tests (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      COVERAGE_FILE: ${{ github.workspace }}/backend/cov-shard-${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        # Exact tag, not a floating major: astral-sh/setup-uv stopped
+        # publishing floating major tags after v7 (v8/v9 exist only as
+        # exact release tags, e.g. this one -- confirmed by both a 404 on
+        # the floating `v9` ref and a 200 on `v9.0.0`).
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          # No python-version(-file) here on purpose: setup-uv has no
+          # python-version-file input -- only python-version, which would
+          # re-create the two-places pin this step exists to kill. uv
+          # itself reads backend/.python-version at sync time (run steps
+          # below are cwd=backend via defaults.run.working-directory), so
+          # the pin lives in exactly one place.
+          enable-cache: true
+
+      - name: Install dependencies
+        # --locked: fail CI on a stale lock instead of silently
+        # re-resolving it (uv sync --dev alone would do the latter).
+        run: uv sync --locked --dev
+
       - name: Test
-        # Coverage is informational only -- no --cov-fail-under gate.
-        # A hard threshold on a still-young test suite would just be
-        # noise (blocking merges over incidental coverage dips) rather
-        # than a signal; revisit once the suite has matured.
-        run: uv run pytest --cov=labelmaker --cov-report=term
+        # Deterministic file partition: every 4th test file (sorted) per
+        # shard; xdist (`-n auto`, from pyproject addopts) parallelises
+        # inside each shard. Coverage is informational only (no fail-under);
+        # each shard saves its data file and the `backend` job combines them.
+        run: |
+          files=$(ls tests/test_*.py | sort | awk -v s=${{ matrix.shard }} 'NR % 4 == s % 4')
+          uv run pytest --cov=labelmaker --cov-report= $files
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: backend/cov-shard-${{ matrix.shard }}
+          if-no-files-found: error
+
+  # Aggregator: keeps the original required check name `backend`, so branch
+  # protection does not change. Passes only if lint and every shard passed.
+  backend:
+    needs: [backend-lint, backend-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Require lint and all test shards
+        working-directory: .
+        run: |
+          [ "${{ needs.backend-lint.result }}" = success ] && [ "${{ needs.backend-tests.result }}" = success ] || {
+            echo "backend-lint: ${{ needs.backend-lint.result }}, backend-tests: ${{ needs.backend-tests.result }}"
+            exit 1
+          }
+
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-*
+          path: backend/cov
+          merge-multiple: true
+
+      - name: Combined coverage (informational)
+        run: |
+          uv run coverage combine cov/cov-shard-*
+          uv run coverage report
+
+  api-docs:
+    # Drift gate: committed openapi.json, API.md reference and the generated
+    # TS types must match the code. Fix locally with `make api-docs`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          uv sync --locked --dev --project backend
+          npm ci --prefix frontend
+
+      - name: Check generated docs are current
+        run: uv run --project backend python backend/scripts/gen_api_docs.py --check
+
+      - name: Regenerate TS types and check for drift
+        run: |
+          npm run --prefix frontend gen:api
+          git diff --exit-code -- openapi.json API.md frontend/src/api/schema.d.ts
 
   frontend:
     runs-on: ubuntu-latest

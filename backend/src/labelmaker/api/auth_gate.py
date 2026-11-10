@@ -84,6 +84,8 @@ from labelmaker.api import api_keys
 
 _EXEMPT_EXACT = {"/api/health"}
 _EXEMPT_PREFIXES = ("/api/auth/", "/api/els/")
+# FastAPI's interactive docs and schema: gated in oidc mode like the API itself.
+_DOC_PATHS = frozenset({"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"})
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,8 @@ def _normalize(path: str) -> str:
 def requires_auth(path: str) -> bool:
     """True for every `/api/*` path except the exemptions documented in this
     module's own docstring; always False for anything outside `/api/*`."""
+    if path in _DOC_PATHS:
+        return True
     path = _normalize(path)
     if not path.startswith("/api/"):
         return False

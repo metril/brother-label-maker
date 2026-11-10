@@ -47,6 +47,12 @@ def binary(media_type: str, description: str) -> dict[int | str, dict[str, Any]]
 
 
 class HealthOut(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"status": "ok", "printer_mode": "mock", "version": "1.0.0"}]
+        }
+    )
+
     status: str = Field(description="Always 'ok' when the process is serving")
     printer_mode: PrinterMode = Field(description="Effective printer transport")
     version: str = Field(description="Installed application version")
@@ -295,9 +301,29 @@ class ApiKeyOut(BaseModel):
 
 
 class ApiKeyCreatedOut(ApiKeyOut):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "5f2c9a1e",
+                    "name": "home-automation",
+                    "prefix": "AbCd",
+                    "scope": "write",
+                    "created_at": "2026-01-01T12:00:00Z",
+                    "last_used_at": None,
+                    "key": "lm_AbCd...",
+                }
+            ]
+        }
+    )
+
     key: str = Field(description="Full plaintext key. Shown once, at creation only.")
 
 
 class WsTicketOut(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"ticket": "k3v...", "expires_in": 60}]}
+    )
+
     ticket: str = Field(description="Single-use WebSocket ticket; connect with `?ticket=`")
     expires_in: int = Field(description="Seconds until the ticket expires")

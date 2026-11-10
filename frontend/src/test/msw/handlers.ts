@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import type { components } from "../../api/schema";
 import type { SettingRow, SettingsResponse, SettingsSource } from "../../api/types";
 import fontsFixture from "../fixtures/fonts.json";
 import labelTypesFixture from "../fixtures/label-types.json";
@@ -11,7 +12,11 @@ export const TINY_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 export const healthHandler = http.get("/api/v1/health", () =>
-  HttpResponse.json({ status: "ok", printer_mode: "mock", version: "0.1.0" }),
+  HttpResponse.json({
+    status: "ok",
+    printer_mode: "mock",
+    version: "0.1.0",
+  } satisfies components["schemas"]["HealthOut"]),
 );
 
 /** Real params_schema JSON Schema for all 9 label types -- fixtured from a

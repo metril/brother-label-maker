@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,14 @@ class ErrorBody(BaseModel):
 
 
 class ErrorResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"error": {"code": "not_found", "message": "preset not found", "details": None}}
+            ]
+        }
+    )
+
     error: ErrorBody
 
 

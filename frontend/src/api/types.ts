@@ -1,7 +1,10 @@
 // Types mirroring the backend API contract (backend/src/labelmaker/api/*.py).
 // Keep in lockstep with that source, not with the task brief's summary of it.
 
+import type { components } from "./schema";
 import type { JsonSchemaObject } from "../schema/jsonSchema";
+
+type S = components["schemas"];
 
 export type TapeFamily = "tze" | "hse_2_1" | "hse_3_1";
 
@@ -66,20 +69,9 @@ export type PrinterMode = "mock" | "usb" | "remote";
 
 /** GET /api/v1/printer/bridge-identity: this app's PUBLIC bridge certificate
  * (paste it into the bridge's `pair`) and its SHA-256 fingerprint. */
-export interface BridgeIdentity {
-  cert_pem: string;
-  fingerprint: string;
-}
+export type BridgeIdentity = S["BridgeIdentityOut"];
 
-export interface HealthResponse {
-  status: string;
-  printer_mode: PrinterMode;
-  /** task 4.2: this app's own installed version (backend/main.py's
-   * APP_VERSION, read from pyproject.toml via importlib.metadata) -- the
-   * Diagnostics page's "App" section shows this next to backend
-   * reachability. */
-  version: string;
-}
+export type HealthResponse = S["HealthOut"];
 
 export interface LabelTypeInfo {
   type: string;
@@ -160,22 +152,11 @@ export interface ImageUploadResponse {
  * `mtime` is the file's own modification time, same ISO-8601-with-'Z'
  * textual shape as every other timestamp in this API (e.g. `HistoryItem`'s
  * `created_at`) even though it's filesystem-, not DB-, sourced. */
-export interface ImageListItem {
-  image_id: string;
-  width: number;
-  height: number;
-  size_bytes: number;
-  mtime: string;
-}
+export type ImageListItem = S["ImageListItem"];
 
 /** `GET /api/v1/images`' response -- same page/page_size/total pagination
  * shape as `HistoryListResponse`. */
-export interface ImageListResponse {
-  items: ImageListItem[];
-  page: number;
-  page_size: number;
-  total: number;
-}
+export type ImageListResponse = S["ImagePageOut"];
 
 export type WarningSeverity = "info" | "warning";
 
@@ -234,20 +215,12 @@ export interface ExpandRequest {
  * copies_per_value. `samples` is `sample` expanded against each distinct
  * value (first 24 max, for UI chips) -- present only when `sample` was
  * given in the request, null otherwise. */
-export interface ExpandResponse {
-  values: string[];
-  total_labels: number;
-  samples: string[] | null;
-}
+export type ExpandResponse = S["ExpandOut"];
 
 /** POST /api/v1/serialize/csv's response: a stateless echo of an uploaded
  * CSV file, parsed with columns/rows/row_count -- `rows` is directly
  * postable, unmodified, as a Sequence's `rows` field (kind: "csv"). */
-export interface CsvUploadResponse {
-  columns: string[];
-  rows: Record<string, string>[];
-  row_count: number;
-}
+export type CsvUploadResponse = S["CsvUploadOut"];
 
 export interface PreviewRequest {
   definition: LabelDefinition;
@@ -302,9 +275,7 @@ export interface PrintRequest {
   serialization?: Sequence | null;
 }
 
-export interface PrintJobResponse {
-  job_id: string;
-}
+export type PrintJobResponse = S["JobCreatedOut"];
 
 // --- Tape estimate (task 2.9) ------------------------------------------
 // Mirrors backend/render/estimate.py's TapeEstimate -- see that module's
@@ -417,21 +388,7 @@ export type JobStatus = "queued" | "printing" | "done" | "failed" | "canceled";
  * "feed_cut"` check, which is false for `undefined` too). */
 export type JobKind = "print" | "feed_cut";
 
-export interface PrintJob {
-  id: string;
-  created_at: string;
-  status: JobStatus;
-  error: string | null;
-  definition: unknown;
-  label_count: number;
-  chain_mode: string;
-  strategy: string | null;
-  tape_width_mm: number | null;
-  media_raw_byte: number | null;
-  tape_used_mm: number | null;
-  thumbnail_png_b64: string | null;
-  kind?: JobKind;
-}
+export type PrintJob = S["JobOut"];
 
 // --- Presets (task 2.8) -----------------------------------------------------
 // Mirrors backend/api/v1/router_presets.py + db/database.py's presets table.
@@ -448,17 +405,7 @@ export interface PrintJob {
 // wins -- the only way to print an "any tape" preset, or a different tape
 // than the one saved).
 
-export interface Preset {
-  id: string;
-  name: string;
-  label_type: string;
-  definition: Record<string, unknown>;
-  tape_width_mm: number | null;
-  tape_family: TapeFamily;
-  favorite: boolean;
-  created_at: string;
-  updated_at: string;
-}
+export type Preset = S["PresetOut"];
 
 /** POST /api/v1/presets' request body -- 201 with the created Preset. */
 export interface PresetCreateRequest {
@@ -507,28 +454,9 @@ export interface PresetPrintRequest {
  * up to 1000 expanded labels' worth for a serialized run) and no inline
  * base64 thumbnail bytes. `thumbnail_url`, when non-null, is a fetchable
  * GET /api/v1/history/{id}/thumbnail path (raw PNG bytes, not JSON). */
-export interface HistoryItem {
-  id: string;
-  created_at: string;
-  status: JobStatus;
-  error: string | null;
-  label_count: number;
-  chain_mode: string;
-  strategy: string | null;
-  tape_width_mm: number | null;
-  tape_used_mm: number | null;
-  thumbnail_url: string | null;
-  /** See PrintJob's own `kind` doc -- same field, same optional-tolerant
-   * default-to-"print" reading. */
-  kind?: JobKind;
-}
+export type HistoryItem = S["HistoryItemOut"];
 
-export interface HistoryListResponse {
-  items: HistoryItem[];
-  page: number;
-  page_size: number;
-  total: number;
-}
+export type HistoryListResponse = S["HistoryPageOut"];
 
 /** GET /api/v1/history's query params -- all optional. `q` is a raw,
  * case-insensitive substring match against the stored definition JSON (no
@@ -551,27 +479,7 @@ export type HistoryJob = PrintJob;
  * re-rendered from the original's stored snapshot. */
 export type ReprintResponse = PrintJobResponse;
 
-export interface PrinterStatusDetail {
-  model_code: number;
-  series_code: number;
-  country_code: number;
-  error_info1: number;
-  error_info2: number;
-  media_width_mm: number;
-  media_type_raw: number;
-  media_type: number | null;
-  number_of_colors: number;
-  status_type_raw: number;
-  status_type: number | null;
-  phase_type: number;
-  phase_number: number;
-  tape_color_raw: number;
-  text_color_raw: number;
-  raw_hex: string;
-  errors: string[];
-  has_error: boolean;
-  is_e720bt: boolean;
-}
+export type PrinterStatusDetail = S["PrinterStatusDetail"];
 
 /** commit 6: the optional keep-awake poller's own status (additive field on
  * GET /api/v1/printer/status) -- see backend/jobs/keepalive.py. `last_result`
@@ -579,12 +487,7 @@ export interface PrinterStatusDetail {
  * boot, or whenever it's never been enabled); once it has attempted at
  * least once, `last_attempt_at`/`last_result` keep the most recent
  * attempt's outcome even while currently disabled or inert (mock mode). */
-export interface KeepAliveStatus {
-  enabled: boolean;
-  last_attempt_at: string | null;
-  last_result: "ok" | "skipped_busy" | "error" | null;
-  last_error: string | null;
-}
+export type KeepAliveStatus = S["KeepAliveOut"];
 
 export interface PrinterStatusResponse {
   connected: boolean;
@@ -821,12 +724,7 @@ export interface HomeboxSettingsUpdate {
  * `oidc_scopes` the IdP honors), `exp` is the id_token's own expiry
  * (seconds since epoch), re-checked server-side on every request (see
  * `auth_gate.get_session_user`) -- this app never re-derives it client-side. */
-export interface AuthUser {
-  sub: string | null;
-  name: string | null;
-  email: string | null;
-  exp: number | null;
-}
+export type AuthUser = S["AuthUserOut"];
 
 /** GET /api/v1/auth/me's response -- the ONE probe hooks/useAuth.ts needs, in
  * EITHER auth mode: mode "none" always answers a CONSTANT
@@ -859,18 +757,10 @@ export type SettingsSource = "db" | "env" | "default";
  * `set`. `source` is `"db"` when a stored override is active, `"env"` when
  * AppConfig itself resolved the field from an explicitly-set env var,
  * `"default"` otherwise. */
-export interface SettingRow {
-  key: string;
-  value?: string | number | boolean | string[] | null;
-  set?: boolean;
-  source: SettingsSource;
-  editable: boolean;
-}
+export type SettingRow = S["SettingRow"];
 
 /** GET/PUT /api/v1/settings' response shape. */
-export interface SettingsResponse {
-  settings: SettingRow[];
-}
+export type SettingsResponse = S["SettingsOut"];
 
 /** PUT /api/v1/settings' request body: a partial map of `{field: value |
  * null}` -- an omitted field is left untouched server-side; `null` reverts
@@ -882,16 +772,7 @@ export interface SettingsResponse {
 export type SettingsUpdate = Record<string, string | number | boolean | null>;
 
 /** GET /api/v1/api-keys item; the plaintext is never listed. */
-export interface ApiKey {
-  id: string;
-  name: string;
-  prefix: string;
-  scope: "read" | "write";
-  created_at: string;
-  last_used_at: string | null;
-}
+export type ApiKey = S["ApiKeyOut"];
 
 /** POST /api/v1/api-keys (201): `key` is the plaintext, shown once. */
-export interface ApiKeyCreated extends ApiKey {
-  key: string;
-}
+export type ApiKeyCreated = S["ApiKeyCreatedOut"];

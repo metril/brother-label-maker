@@ -78,3 +78,26 @@ async def test_binary_routes_declare_media_types(spec):
         assert media in ops[name]["responses"]["200"]["content"], name
     assert "304" in ops["GET /api/v1/symbols/{symbol_id}"]["responses"]
     assert "304" in ops["GET /api/v1/symbols"]["responses"]
+
+
+_EXEMPT = ("/api/v1/health", "/api/v1/auth/", "/api/v1/els/")
+
+
+async def test_every_route_declares_security(spec):
+    for name, op in _operations(spec):
+        path = name.split(" ", 1)[1]
+        assert "security" in op, f"{name}: no security declared"
+        if path.startswith(_EXEMPT):
+            assert op["security"] == [], f"{name}: exempt route must declare security: []"
+        else:
+            assert op["security"], f"{name}: gated route must declare a security scheme"
+            assert op["x-required-scope"] in {"read", "write", "session"}, name
+    assert set(spec["components"]["securitySchemes"]) == {"bearerAuth", "cookieAuth"}
+
+
+async def test_every_tag_has_a_description(spec):
+    described = {t["name"]: t.get("description") for t in spec["tags"]}
+    used = {t for _, op in _operations(spec) for t in op["tags"]}
+    assert used <= set(described), f"tags without metadata: {used - set(described)}"
+    assert all(described[t] for t in used)
+    assert spec["info"]["title"] and spec["info"]["description"]

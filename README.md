@@ -5,6 +5,9 @@ PT-E720BT** label printer over USB. Everything runs as a single Docker
 container (amd64 + arm64): a FastAPI backend serving both the API and the
 built SPA, backed by SQLite for presets/history.
 
+**HTTP API:** see [API.md](API.md) (auth, errors, WebSocket events, endpoint
+reference); the schema is [openapi.json](openapi.json), live at `/docs`.
+
 The printer driver is a from-scratch implementation of the Brother P-touch
 raster protocol — the PT-E720BT has no existing open-source driver, so the
 whole raster pipeline (init handshake, packbits, chaining, cut behavior) was
@@ -296,13 +299,9 @@ a clear error naming which env var is missing.
 
 ### API keys
 
-For scripts and other machines under `AUTH_MODE=oidc`: create a key on the
-**Settings** page (name + `read` or `write` scope). The plaintext (`lm_...`) is
-shown once; only its SHA-256 is stored. Send it as `Authorization: Bearer lm_...`
-to `/api/v1/*`. `read` keys may only issue GET/HEAD/OPTIONS. Keys cannot manage
-keys (that needs a browser session). For the event WebSocket, send the bearer
-header or `POST /api/v1/ws-ticket` and connect to `/api/v1/ws?ticket=...` (60 s,
-single use) so keys never appear in URLs. Under `AUTH_MODE=none` keys are ignored.
+For scripts and other machines under `AUTH_MODE=oidc`, create a `read` or `write`
+key on the **Settings** page and send it as `Authorization: Bearer lm_...`. Scopes,
+curl examples and the WebSocket ticket flow are in [API.md](API.md).
 
 ## Security notes
 
