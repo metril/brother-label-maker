@@ -48,6 +48,7 @@ from pydantic import BaseModel, Field
 from labelmaker.api.deps import AppConfigDep, error_message
 from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_images import _read_capped
+from labelmaker.api.schemas import CsvUploadOut, ExpandOut, PreviewOut, binary
 from labelmaker.driver.geometry import MIN_FEED_MM, all_tapes, dots_to_mm
 from labelmaker.render import (
     FontInfo,
@@ -69,12 +70,14 @@ from labelmaker.render.serialize import (
     total_labels,
 )
 from labelmaker.render.symbols import (
+    SymbolInfo,
     get_symbol_info,
     list_symbols_json,
     resolve_symbol_path,
     symbols_etag,
     validate_symbol_svg,
 )
+from labelmaker.render.types.base import LabelTypeInfo
 
 # Shared cache-control policy for both symbol routes (H5): long enough to
 # skip most repeat transfers, short of `immutable`/a year -- the symbols
@@ -84,22 +87,34 @@ from labelmaker.render.symbols import (
 # weak ETag so that "checking back" is a cheap 304, not a re-download.
 _SYMBOLS_CACHE_CONTROL = "public, max-age=86400"
 
-router = APIRouter(tags=["labels"], responses=err(404, 413, 422))
+router = APIRouter(tags=["labels"])
 
 # /render/expand's `samples` cap ("first 24 max, for UI chips" -- brief).
 _MAX_SAMPLES = 24
 
 
-@router.get("/label-types")
+@router.get(
+    "/label-types",
+    response_model=list[LabelTypeInfo],
+    summary="List label types",
+    responses=err(500),
+)
 async def get_label_types() -> list[dict]:
+    """Every registered label type with its params JSON schema."""
     # Every LabelTypeInfo field (type/title/category/min_tape_mm/params_schema)
     # passes through as-is -- no per-field allowlist to keep in sync when
     # base.py's LabelTypeInfo shape grows (e.g. category/min_tape_mm, task 2.2).
     return [info.model_dump() for info in list_types()]
 
 
-@router.get("/fonts")
+@router.get(
+    "/fonts",
+    response_model=list[FontInfo],
+    summary="List bundled fonts",
+    responses=err(500),
+)
 async def get_fonts() -> list[FontInfo]:
+    """The font families available to text objects."""
     return list_fonts()
 
 
@@ -108,15 +123,21 @@ class TapeInfo(BaseModel):
     view of tape geometry, kept separate from TapeSpec itself (which also
     carries driver-only fields like status_width_mm that no client needs)."""
 
-    nominal_mm: float
-    family: str
-    print_dots: int
-    print_mm: float
-    max_length_mm: float
+    nominal_mm: float = Field(description="Nominal tape width in mm")
+    family: str = Field(description="Media family: tze, hse_2_1 or hse_3_1")
+    print_dots: int = Field(description="Printable height in dots")
+    print_mm: float = Field(description="Printable height in mm")
+    max_length_mm: float = Field(description="Maximum label length in mm")
 
 
-@router.get("/tapes")
+@router.get(
+    "/tapes",
+    response_model=list[TapeInfo],
+    summary="List supported tapes",
+    responses=err(500),
+)
 async def get_tapes() -> list[TapeInfo]:
+    """Geometry of every supported tape width/family."""
     return [
         TapeInfo(
             nominal_mm=tape.nominal_mm,
@@ -146,8 +167,21 @@ def _etag_matches(if_none_match: str | None, etag: str) -> bool:
     return etag in candidates
 
 
-@router.get("/symbols")
+@router.get(
+    "/symbols",
+    response_class=Response,
+    summary="List the symbol catalog",
+    responses={
+        200: {
+            "description": "Symbol catalog; carries ETag and Cache-Control",
+            "model": list[SymbolInfo],
+        },
+        304: {"description": "Not modified (If-None-Match matched the ETag)"},
+        **err(500),
+    },
+)
 async def get_symbols(request: Request) -> Response:
+    """The full symbol catalog. Conditional-GET aware (weak ETag)."""
     # H4: list_symbols_json() is the pre-encoded-bytes cache (see its
     # docstring) -- no per-request deep copy, no per-request
     # jsonable_encoder/response-model pass. H5: ETag + Cache-Control, with
@@ -160,8 +194,18 @@ async def get_symbols(request: Request) -> Response:
     return Response(content=list_symbols_json(), media_type="application/json", headers=headers)
 
 
-@router.get("/symbols/{symbol_id}")
+@router.get(
+    "/symbols/{symbol_id}",
+    response_class=Response,
+    summary="Download a symbol SVG",
+    responses={
+        **binary("image/svg+xml", "Raw SVG; carries ETag, Last-Modified and Cache-Control"),
+        304: {"description": "Not modified (If-None-Match matched the ETag)"},
+        **err(404),
+    },
+)
 async def get_symbol_svg(symbol_id: str, request: Request) -> Response:
+    """One symbol's SVG. Conditional-GET aware (weak ETag + Last-Modified)."""
     try:
         info = get_symbol_info(symbol_id)
     except ValueError as exc:
@@ -296,8 +340,17 @@ def _render_and_encode(
     }
 
 
-@router.post("/render/preview")
+@router.post(
+    "/render/preview",
+    response_model=PreviewOut,
+    summary="Render a label preview",
+    responses=err(422),
+)
 async def render_preview(body: PreviewRequest, config: AppConfigDep) -> dict:
+    """Render one label (or one instance of a serialized run) to a PNG.
+
+    Runs the same pipeline the print worker uses; nothing is persisted.
+    """
     try:
         return await anyio.to_thread.run_sync(
             _render_and_encode,
@@ -341,8 +394,14 @@ def _expand_preview(serialization: Sequence, sample: str | None) -> dict:
     return result
 
 
-@router.post("/render/expand")
+@router.post(
+    "/render/expand",
+    response_model=ExpandOut,
+    summary="Expand a serialization sequence",
+    responses=err(422),
+)
 async def expand_sequence(body: ExpandRequest) -> dict:
+    """The distinct values a sequence produces, plus optional sample strings."""
     try:
         return _expand_preview(body.serialization, body.sample)
     except (KeyError, ValueError) as exc:
@@ -357,7 +416,12 @@ async def expand_sequence(body: ExpandRequest) -> dict:
 MAX_CSV_UPLOAD_BYTES = 1024 * 1024  # 1 MiB
 
 
-@router.post("/serialize/csv")
+@router.post(
+    "/serialize/csv",
+    response_model=CsvUploadOut,
+    summary="Parse a CSV for serialization",
+    responses=err(413, 422),
+)
 async def upload_serialize_csv(request: Request, file: UploadFile) -> dict:
     """Stateless CSV echo for task 2.4's CSV-kind Sequence: parses an
     uploaded CSV with stdlib `csv`, into the same {columns, rows, row_count}

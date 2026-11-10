@@ -63,8 +63,11 @@ async def test_status_unconfigured_is_always_200(client):
     resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200
     assert resp.json() == {
-        "configured": False, "reachable": None, "healthy": None,
-        "version": None, "error": None,
+        "configured": False,
+        "reachable": None,
+        "healthy": None,
+        "version": None,
+        "error": None,
     }
 
 
@@ -197,7 +200,9 @@ async def test_entities_tree_passthrough(app_and_client, hb_mock):
             200,
             json=[
                 {
-                    "id": "l1", "name": "Garage", "type": "location",
+                    "id": "l1",
+                    "name": "Garage",
+                    "type": "location",
                     "children": [
                         {"id": "l2", "name": "Shelf B", "type": "location", "children": []}
                     ],
@@ -241,7 +246,9 @@ async def test_find_by_asset_id_many_matches(app_and_client, hb_mock):
             200,
             json={
                 "items": [_entity_summary(), _entity_summary(id="dup", name="Duplicate")],
-                "page": 1, "pageSize": 50, "total": 2,
+                "page": 1,
+                "pageSize": 50,
+                "total": 2,
             },
         )
     )
@@ -307,9 +314,7 @@ async def test_status_stays_200_when_upstream_answers_html(client, hb_mock):
     """An SSO login page / default vhost at the HomeBox URL: /v1/status answers
     200 but with HTML. The contract is ALWAYS 200 -- this must report
     reachable=False with a diagnostic, never a 500 (review finding #1)."""
-    hb_mock.get(f"{API}/status").mock(
-        return_value=httpx.Response(200, text="<html>Sign in</html>")
-    )
+    hb_mock.get(f"{API}/status").mock(return_value=httpx.Response(200, text="<html>Sign in</html>"))
     resp = await client.get("/api/v1/homebox/status")
     assert resp.status_code == 200
     body = resp.json()
@@ -401,7 +406,9 @@ async def test_bulk_create_in_order_with_partial_failure(app_and_client, hb_mock
     results = resp.json()["results"]
     assert [r["ok"] for r in results] == [True, False, True]
     assert results[0] == {
-        "index": 0, "ok": True, "error": None,
+        "index": 0,
+        "ok": True,
+        "error": None,
         "entity": {"id": "id-A", "name": "A", "asset_id": "000-001"},
     }
     assert results[1]["entity"] is None
@@ -431,7 +438,9 @@ async def test_bulk_create_aborts_on_upstream_auth_error(app_and_client, hb_mock
 )
 async def test_bulk_create_rejects_bad_names(app_and_client, names):
     _, client = app_and_client
-    resp = await client.post("/api/v1/homebox/entities/bulk", json={"parent_id": "p", "names": names})
+    resp = await client.post(
+        "/api/v1/homebox/entities/bulk", json={"parent_id": "p", "names": names}
+    )
     assert resp.status_code == 422
 
 

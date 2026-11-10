@@ -37,18 +37,17 @@ for this single-operator app.
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
 from labelmaker.api.deps import AppConfigDep, SettingsDep
 from labelmaker.api.errors import ApiError, err
+from labelmaker.api.schemas import SettingRow, SettingsOut
 from labelmaker.config import AppConfig
 from labelmaker.homebox import build_client
 from labelmaker.settings_overlay import SettingsConflictError, SettingsOverlay, SettingsOverrides
 
-router = APIRouter(prefix="/settings", tags=["settings"], responses=err(422))
+router = APIRouter(prefix="/settings", tags=["settings"])
 
 # Declaration order of SettingsOverrides' own fields (a plain dict, so this
 # is insertion-ordered and stable -- unlike the `OVERRIDABLE_FIELDS`
@@ -76,9 +75,9 @@ def _cfg_source(config: AppConfig, field: str) -> str:
     return "env" if field in config.model_fields_set else "default"
 
 
-def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> dict:
+def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> SettingsOut:
     effective = settings.effective()
-    rows: list[dict[str, Any]] = []
+    rows: list[SettingRow] = []
 
     for field in _FIELD_ORDER:
         source = settings.provenance(field)
@@ -88,43 +87,72 @@ def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> dict:
             # Settings page can render "Key set"/"Not set" without this
             # route ever echoing the secret itself back to the browser.
             rows.append(
-                {
-                    "key": field,
-                    "set": bool(effective.homebox_api_key),
-                    "source": source,
-                    "editable": True,
-                }
+                SettingRow(
+                    key=field,
+                    set=bool(effective.homebox_api_key),
+                    source=source,
+                    editable=True,
+                )
             )
         else:
             rows.append(
-                {
-                    "key": field,
-                    "value": getattr(effective, field),
-                    "source": source,
-                    "editable": True,
-                }
+                SettingRow(
+                    key=field,
+                    value=getattr(effective, field),
+                    source=source,
+                    editable=True,
+                )
             )
 
     for field in _READONLY_FIELDS:
         value = str(config.data_dir) if field == "data_dir" else getattr(config, field)
         rows.append(
-            {"key": field, "value": value, "source": _cfg_source(config, field), "editable": False}
+            SettingRow(
+                key=field, value=value, source=_cfg_source(config, field), editable=False
+            )
         )
 
-    return {"settings": rows}
+    return SettingsOut(settings=rows)
 
 
-@router.get("")
-async def get_settings(config: AppConfigDep, settings: SettingsDep) -> dict:
+# Rows omit keys that don't apply (`value` for the API key row, `set` for the
+# rest), so both routes serialize with exclude_unset to stay byte-compatible.
+@router.get(
+    "",
+    response_model=SettingsOut,
+    response_model_exclude_unset=True,
+    summary="List settings",
+    responses=err(500),
+)
+async def get_settings(config: AppConfigDep, settings: SettingsDep) -> SettingsOut:
+    """Every editable setting (value, provenance) plus read-only config rows.
+
+    The HomeBox API key is never returned; its row only reports `set`.
+    """
     return _settings_payload(config, settings)
 
 
-@router.put("")
+@router.put(
+    "",
+    response_model=SettingsOut,
+    response_model_exclude_unset=True,
+    summary="Update settings",
+    responses=err(422),
+)
 async def put_settings(
-    body: dict[str, Any], config: AppConfigDep, settings: SettingsDep, request: Request
-) -> dict:
+    body: SettingsOverrides, config: AppConfigDep, settings: SettingsDep, request: Request
+) -> SettingsOut:
+    """Partially update settings.
+
+    Send only the fields to change; an explicit `null` clears the override
+    (reverts to the env/default value), an omitted field is left alone.
+    Unknown keys and invalid values yield a 422 whose details never echo
+    the submitted values (the HomeBox API key is a secret).
+    """
+    # Only the fields the caller actually sent (explicit null = clear override).
+    sent = body.model_dump(exclude_unset=True)
     try:
-        await settings.set_many(body)
+        await settings.set_many(sent)
     except ValidationError as exc:
         # Built from `exc.errors()` (`e["msg"]` only) rather than the
         # shared `error_message()` helper -- that helper's str(exc) form
@@ -139,7 +167,7 @@ async def put_settings(
     except SettingsConflictError as exc:
         raise ApiError(422, "validation_error", str(exc)) from exc
 
-    if "homebox_url" in body or "homebox_api_key" in body:
+    if "homebox_url" in sent or "homebox_api_key" in sent:
         # Build the new client BEFORE closing the old one, so
         # `app.state.homebox` never observes a moment with no client at all
         # when one side of the pair is genuinely still configured. This

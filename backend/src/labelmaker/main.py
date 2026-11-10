@@ -35,8 +35,9 @@ from labelmaker.api import (
     ws,
 )
 from labelmaker.api.auth_gate import AuthGateMiddleware
-from labelmaker.api.errors import ApiError, register_error_handlers
+from labelmaker.api.errors import ApiError, err, register_error_handlers
 from labelmaker.api.legacy import LegacyDeprecationMiddleware
+from labelmaker.api.schemas import HealthOut
 from labelmaker.config import AppConfig, get_config
 from labelmaker.db.database import Database
 from labelmaker.homebox import build_client
@@ -259,8 +260,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     health_router = APIRouter()
 
-    @health_router.get("/health", tags=["health"])
-    async def health() -> dict:
+    @health_router.get(
+        "/health",
+        tags=["health"],
+        response_model=HealthOut,
+        summary="Health check",
+        responses=err(500),
+    )
+    async def health() -> HealthOut:
+        """Liveness probe: app version and the effective printer mode."""
         # `version` (task 4.2): additive field -- this app's own installed
         # version, so the diagnostics page can show it next to backend
         # reachability without a separate build-info endpoint.
@@ -271,7 +279,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # override set from the Settings page must be reflected here too,
         # not just in GET /api/printer/status, without a restart.
         printer_mode = app.state.settings.effective().printer_mode
-        return {"status": "ok", "printer_mode": printer_mode, "version": APP_VERSION}
+        return HealthOut(status="ok", printer_mode=printer_mode, version=APP_VERSION)
 
     # Registered in every mode -- /api/auth/me must answer 200 even in
     # "none" mode (see router_auth.py's own docstring), and the auth gate

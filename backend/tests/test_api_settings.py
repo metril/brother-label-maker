@@ -199,7 +199,8 @@ async def test_put_is_a_true_partial_update(client):
 async def test_put_unknown_key_is_422(client):
     resp = await client.put("/api/v1/settings", json={"bogus_field": 1})
     assert resp.status_code == 422
-    assert "bogus_field" in resp.json()["error"]["message"]
+    details = resp.json()["error"]["details"]
+    assert any("bogus_field" in item["loc"] for item in details)
 
 
 async def test_put_invalid_literal_is_422(client):

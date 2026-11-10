@@ -80,7 +80,37 @@ def envelope(
     )
 
 
+def _use_envelope_for_422(app: FastAPI) -> None:
+    """FastAPI documents its automatic 422 as `HTTPValidationError`, but the
+    validation handler below emits the envelope; point the schema at the
+    envelope and drop the unused built-in schemas."""
+    original = app.openapi
+
+    def openapi() -> dict[str, Any]:
+        if app.openapi_schema is None:
+            schema = original()
+            ref = {"$ref": "#/components/schemas/ErrorResponse"}
+            for item in schema.get("paths", {}).values():
+                for op in item.values():
+                    if not isinstance(op, dict):
+                        continue
+                    content = op.get("responses", {}).get("422", {}).get("content", {})
+                    body = content.get("application/json")
+                    if body and body.get("schema", {}).get("$ref", "").endswith(
+                        "/HTTPValidationError"
+                    ):
+                        body["schema"] = ref
+            components = schema.get("components", {}).get("schemas", {})
+            components.pop("HTTPValidationError", None)
+            components.pop("ValidationError", None)
+            app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = openapi  # type: ignore[method-assign]
+
+
 def register_error_handlers(app: FastAPI) -> None:
+    _use_envelope_for_422(app)
     @app.exception_handler(ApiError)
     async def _api_error(request: Request, exc: ApiError) -> JSONResponse:
         return envelope(exc.status_code, exc.code, exc.message, exc.details)

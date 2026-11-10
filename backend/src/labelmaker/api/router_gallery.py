@@ -29,7 +29,7 @@ from labelmaker.api.router_labels import _render_and_encode
 from labelmaker.render.document import LabelDefinition, Tape
 from labelmaker.render.gallery import GALLERY_SCALE, GalleryEntry, GalleryItem, gallery_entries
 
-router = APIRouter(tags=["gallery"], responses=err(404))
+router = APIRouter(tags=["gallery"])
 
 _cache: dict[str, GalleryItem] = {}
 
@@ -73,6 +73,12 @@ def _render_gallery(data_dir: Path) -> list[GalleryItem]:
     return items
 
 
-@router.get("/gallery")
+@router.get(
+    "/gallery",
+    response_model=list[GalleryItem],
+    summary="List gallery examples",
+    responses=err(500),
+)
 async def get_gallery(config: AppConfigDep) -> list[GalleryItem]:
+    """Pre-rendered example labels (cached after the first render)."""
     return await anyio.to_thread.run_sync(_render_gallery, config.data_dir)

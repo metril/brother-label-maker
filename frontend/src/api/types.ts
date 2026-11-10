@@ -591,6 +591,11 @@ export interface PrinterStatusResponse {
   printer_mode: PrinterMode;
   status: PrinterStatusDetail | null;
   error: string | null;
+  /** Structured classification of `error` (null when there is none):
+   * printer_busy, printer_disconnected, printer_io_error, status_timeout,
+   * bridge_not_configured, bridge_unreachable, bridge_cert_mismatch,
+   * bridge_unpaired, bridge_busy, bridge_error. */
+  error_code: string | null;
   keep_alive: KeepAliveStatus;
 }
 

@@ -466,3 +466,13 @@ async def test_startup_reconciliation_frees_a_job_stuck_at_printing_across_resta
 
             missing = await client.get(f"/api/v1/history/{job['id']}")
             assert missing.status_code == 404
+
+
+async def test_history_list_limit_offset(client):
+    resp = await client.get("/api/v1/history", params={"limit": 5, "offset": 10})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page_size"] == 5 and body["page"] == 3
+    assert body["items"] == [] and body["total"] == 0
+
+    assert (await client.get("/api/v1/history", params={"offset": -1})).status_code == 422

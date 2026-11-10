@@ -144,6 +144,7 @@ export const printerStatusConnectedHandler = http.get("/api/v1/printer/status", 
       is_e720bt: true,
     },
     error: null,
+    error_code: null,
   }),
 );
 
@@ -153,6 +154,7 @@ export const printerStatusDisconnectedHandler = http.get("/api/v1/printer/status
     printer_mode: "usb",
     status: null,
     error: "printer not found",
+    error_code: "printer_disconnected",
     keep_alive: inertKeepAliveStatus,
   }),
 );

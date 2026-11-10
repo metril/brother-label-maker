@@ -851,3 +851,12 @@ def test_generate_thumbnail_writes_via_temp_file_and_leaves_no_tmp(tmp_path, mon
     assert len(replaced) == 1 and replaced[0][1] == dest
     assert dest.is_file()
     assert [p.name for p in dest.parent.iterdir()] == ["t.png"]
+
+
+async def test_list_images_limit_offset(client):
+    resp = await client.get("/api/v1/images", params={"limit": 5, "offset": 10})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page_size"] == 5 and body["page"] == 3 and body["total"] == 0
+
+    assert (await client.get("/api/v1/images", params={"offset": -1})).status_code == 422

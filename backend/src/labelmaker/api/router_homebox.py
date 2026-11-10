@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field, StringConstraints, field_validator
 from labelmaker.api.deps import DbDep, HomeBoxDep, SettingsDep
 from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_images import _read_capped
+from labelmaker.api.schemas import HomeboxStatusOut
 from labelmaker.homebox import (
     Entity,
     EntityPage,
@@ -59,9 +60,14 @@ from labelmaker.homebox import (
     TreeItem,
 )
 
-router = APIRouter(tags=["homebox"], responses=err(403, 404, 422, 502, 503))
+router = APIRouter(tags=["homebox"])
 
 QR_BASE_URL_KEY = "homebox_qr_base_url"
+
+# Errors of the proxied read routes (see `_proxy`, `get_homebox`).
+_PROXY_ERRORS = err(404, 422, 502, 503)
+# Write-gated routes additionally 403 when homebox_writes_enabled is off.
+_WRITE_ERRORS = err(403, 404, 422, 502, 503)
 
 
 async def _proxy[T](call: Awaitable[T]) -> T:
@@ -93,7 +99,12 @@ async def _proxy[T](call: Awaitable[T]) -> T:
         ) from exc
 
 
-@router.get("/homebox/status")
+@router.get(
+    "/homebox/status",
+    response_model=HomeboxStatusOut,
+    summary="Get HomeBox integration status",
+    responses=err(500),
+)
 async def homebox_status(settings: SettingsDep) -> dict:
     """Always 200 -- the frontend's show-or-hide signal for HomeBox UI.
 
@@ -170,7 +181,12 @@ async def homebox_status(settings: SettingsDep) -> dict:
 # only, so FastAPI's response serialization AND the OpenAPI schema are
 # snake_case by construction -- no response_model_by_alias juggling needed
 # (see _ApiModel's docstring).
-@router.get("/homebox/entities")
+@router.get(
+    "/homebox/entities",
+    response_model=EntityPage,
+    summary="List HomeBox entities",
+    responses=_PROXY_ERRORS,
+)
 async def list_entities(
     homebox: HomeBoxDep,
     q: str | None = None,
@@ -188,22 +204,45 @@ async def list_entities(
     )
 
 
-@router.get("/homebox/entities/tree")
+@router.get(
+    "/homebox/entities/tree",
+    response_model=list[TreeItem],
+    summary="Get the HomeBox location tree",
+    responses=_PROXY_ERRORS,
+)
 async def entities_tree(homebox: HomeBoxDep, with_items: bool = False) -> list[TreeItem]:
+    """Locations as a nested tree; `with_items=true` includes items too."""
     return await _proxy(homebox.get_tree(with_items=with_items))
 
 
-@router.get("/homebox/entities/{entity_id}")
+@router.get(
+    "/homebox/entities/{entity_id}",
+    response_model=Entity,
+    summary="Get a HomeBox entity",
+    responses=_PROXY_ERRORS,
+)
 async def get_entity(homebox: HomeBoxDep, entity_id: str) -> Entity:
+    """One entity with its children."""
     return await _proxy(homebox.get_entity(entity_id))
 
 
-@router.get("/homebox/entities/{entity_id}/path")
+@router.get(
+    "/homebox/entities/{entity_id}/path",
+    response_model=list[PathSegment],
+    summary="Get an entity's location path",
+    responses=_PROXY_ERRORS,
+)
 async def get_entity_path(homebox: HomeBoxDep, entity_id: str) -> list[PathSegment]:
+    """Ancestors from the root down to the entity."""
     return await _proxy(homebox.get_path(entity_id))
 
 
-@router.get("/homebox/assets/{asset_id}")
+@router.get(
+    "/homebox/assets/{asset_id}",
+    response_model=list[EntitySummary],
+    summary="Find entities by asset id",
+    responses=_PROXY_ERRORS,
+)
 async def find_by_asset_id(homebox: HomeBoxDep, asset_id: str) -> list[EntitySummary]:
     """Zero, one, or many matches -- asset ids are not unique; the caller
     replicates HomeBox's own disambiguation on the length."""
@@ -285,7 +324,13 @@ def _sniff_image(head: bytes) -> tuple[str, str] | None:
     return None
 
 
-@router.post("/homebox/entities/bulk", dependencies=_WritesGate)
+@router.post(
+    "/homebox/entities/bulk",
+    dependencies=_WritesGate,
+    response_model=BulkCreateResponse,
+    summary="Bulk-create HomeBox entities",
+    responses=_WRITE_ERRORS,
+)
 async def bulk_create_entities(body: BulkCreateRequest, homebox: HomeBoxDep) -> BulkCreateResponse:
     """Sequential (so HomeBox assigns asset ids in name order); a row HomeBox
     rejects is reported and the rest still run, but an auth/version/
@@ -318,7 +363,13 @@ async def bulk_create_entities(body: BulkCreateRequest, homebox: HomeBoxDep) -> 
     return BulkCreateResponse(results=results)
 
 
-@router.post("/homebox/entities/{entity_id}/attachments", dependencies=_WritesGate)
+@router.post(
+    "/homebox/entities/{entity_id}/attachments",
+    dependencies=_WritesGate,
+    response_model=AttachmentResponse,
+    summary="Upload an entity photo",
+    responses={**_WRITE_ERRORS, **err(413, 415)},
+)
 async def upload_entity_photo(
     request: Request,
     homebox: HomeBoxDep,
@@ -346,19 +397,35 @@ async def upload_entity_photo(
     return AttachmentResponse(entity_id=entity_id, attachment_id=attachment_id, primary=primary)
 
 
-@router.get("/homebox/tags", dependencies=_WritesGate)
+@router.get(
+    "/homebox/tags",
+    dependencies=_WritesGate,
+    response_model=list[NamedRef],
+    summary="List HomeBox tags",
+    responses=_WRITE_ERRORS,
+)
 async def list_tags(homebox: HomeBoxDep) -> list[NamedRef]:
+    """Tags available when creating entities (requires writes enabled)."""
     return [NamedRef(id=t.id, name=t.name) for t in await _proxy(homebox.list_tags())]
 
 
-@router.get("/homebox/entity-types", dependencies=_WritesGate)
+@router.get(
+    "/homebox/entity-types",
+    dependencies=_WritesGate,
+    response_model=list[NamedRef],
+    summary="List HomeBox entity types",
+    responses=_WRITE_ERRORS,
+)
 async def list_entity_types(homebox: HomeBoxDep) -> list[NamedRef]:
+    """Entity types available when creating entities (requires writes enabled)."""
     return [NamedRef(id=t.id, name=t.name) for t in await _proxy(homebox.list_entity_types())]
 
 
 class HomeBoxSettings(BaseModel):
-    qr_base_url: str | None
-    effective_qr_base_url: str | None
+    qr_base_url: str | None = Field(description="Stored override, null if unset")
+    effective_qr_base_url: str | None = Field(
+        description="Override, else the configured HomeBox URL, else null"
+    )
 
 
 class HomeBoxSettingsUpdate(BaseModel):
@@ -396,12 +463,23 @@ async def _settings_response(db: DbDep, settings: SettingsDep) -> HomeBoxSetting
     )
 
 
-@router.get("/homebox/settings")
+@router.get(
+    "/homebox/settings",
+    response_model=HomeBoxSettings,
+    summary="Get HomeBox QR settings",
+    responses=err(500),
+)
 async def get_homebox_settings(db: DbDep, settings: SettingsDep) -> HomeBoxSettings:
+    """The stored and effective base URL encoded into QR codes."""
     return await _settings_response(db, settings)
 
 
-@router.put("/homebox/settings")
+@router.put(
+    "/homebox/settings",
+    response_model=HomeBoxSettings,
+    summary="Update HomeBox QR settings",
+    responses=err(422),
+)
 async def put_homebox_settings(
     body: HomeBoxSettingsUpdate, db: DbDep, settings: SettingsDep
 ) -> HomeBoxSettings:

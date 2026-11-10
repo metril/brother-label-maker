@@ -33,14 +33,34 @@ USB_LOCK = threading.Lock()
 class PrinterNotFoundError(Exception):
     """Raised when PyUsbTransport.open() finds no matching USB device, or when
     opening the device fails outright (a wrapped usb.core.USBError/NoBackendError).
+
+    `code` is a stable machine-readable classifier surfaced as
+    `error_code` by GET /printer/status: `printer_disconnected` (default),
+    `bridge_not_configured`, `bridge_unreachable`, `bridge_cert_mismatch`,
+    `bridge_unpaired`, `bridge_busy`, `bridge_error`.
     """
+
+    def __init__(self, *args: object, code: str = "printer_disconnected") -> None:
+        super().__init__(*args)
+        self.code = code
 
 
 class TransportError(Exception):
     """Raised when a USB read or write fails for a reason other than a timeout
     (timeouts are not errors -- read() returns b"" instead, per the Transport
     protocol).
+
+    `code` mirrors PrinterNotFoundError.code (`printer_io_error` by default,
+    `printer_disconnected` when the bridge connection is lost).
     """
+
+    def __init__(self, *args: object, code: str = "printer_io_error") -> None:
+        super().__init__(*args)
+        self.code = code
+
+
+# bridge_protocol.ERR_* reply code -> PrinterNotFoundError.code
+_BRIDGE_ERR_CODES = {1: "printer_disconnected", 2: "bridge_error", 3: "bridge_busy"}
 
 
 def _split_into_chunks(data: bytes, chunk_size: int | None) -> list[bytes]:
@@ -502,7 +522,9 @@ class RemoteTransport:
             host, port = bp.parse_address(address)
             pinned_der = cert_pem_to_der(pinned_cert_pem)
         except ValueError as err:
-            raise PrinterNotFoundError(f"invalid remote printer configuration: {err}") from err
+            raise PrinterNotFoundError(
+                f"invalid remote printer configuration: {err}", code="bridge_not_configured"
+            ) from err
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -517,7 +539,8 @@ class RemoteTransport:
                 raw = socket.create_connection((host, port), timeout=connect_timeout)
             except OSError as err:
                 raise PrinterNotFoundError(
-                    f"cannot reach printer bridge at {host}:{port}: {err}"
+                    f"cannot reach printer bridge at {host}:{port}: {err}",
+                    code="bridge_unreachable",
                 ) from err
             raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             try:
@@ -528,15 +551,19 @@ class RemoteTransport:
                 raw.close()
                 raise PrinterNotFoundError(
                     "bridge certificate does not match the pinned certificate "
-                    "(re-copy it from the bridge's `show-cert`)"
+                    "(re-copy it from the bridge's `show-cert`)",
+                    code="bridge_cert_mismatch",
                 ) from err
             except (ssl.SSLError, OSError) as err:
                 raw.close()
-                raise PrinterNotFoundError(f"TLS handshake with bridge failed: {err}") from err
+                raise PrinterNotFoundError(
+                    f"TLS handshake with bridge failed: {err}", code="bridge_unreachable"
+                ) from err
             peer = sock.getpeercert(binary_form=True)
             if not peer or fingerprint(peer) != fingerprint(pinned_der):
                 raise PrinterNotFoundError(
-                    "bridge certificate does not match the pinned certificate"
+                    "bridge certificate does not match the pinned certificate",
+                    code="bridge_cert_mismatch",
                 )
 
             transport = cls(sock, op_slack_s=op_slack_s)
@@ -547,7 +574,8 @@ class RemoteTransport:
             except (OSError, ssl.SSLError, bp.ProtocolError) as err:
                 raise PrinterNotFoundError(
                     "bridge closed the connection during setup -- this app is probably not "
-                    f"paired on the bridge (pair its certificate and restart the bridge): {err}"
+                    f"paired on the bridge (pair its certificate and restart the bridge): {err}",
+                    code="bridge_unpaired",
                 ) from err
             return transport
         except BaseException:
@@ -567,9 +595,14 @@ class RemoteTransport:
             kind, reply = bp.recv_frame(self._sock)
             if kind == bp.REPLY_ERR:
                 code, message = bp.parse_err(reply)
-                raise PrinterNotFoundError(f"printer bridge refused: {message} (code {code})")
+                raise PrinterNotFoundError(
+                    f"printer bridge refused: {message} (code {code})",
+                    code=_BRIDGE_ERR_CODES.get(code, "bridge_error"),
+                )
             if kind != bp.REPLY_OK:
-                raise PrinterNotFoundError("printer bridge sent an unexpected reply")
+                raise PrinterNotFoundError(
+                    "printer bridge sent an unexpected reply", code="bridge_error"
+                )
 
     def _call(self, op: int, payload: bytes, timeout_ms: int) -> bytes:
         import ssl
@@ -577,17 +610,21 @@ class RemoteTransport:
         from labelmaker.driver import bridge_protocol as bp
 
         if self._broken:
-            raise TransportError("connection to printer bridge was lost")
+            raise TransportError(
+                "connection to printer bridge was lost", code="printer_disconnected"
+            )
         try:
             self._sock.settimeout(timeout_ms / 1000 + self._slack)
             bp.send_frame(self._sock, op, payload)
             kind, reply = bp.recv_frame(self._sock)
         except (OSError, ssl.SSLError, bp.ProtocolError) as err:
             self._broken = True
-            raise TransportError(f"printer bridge connection error: {err}") from err
+            raise TransportError(
+                f"printer bridge connection error: {err}", code="printer_disconnected"
+            ) from err
         if kind == bp.REPLY_ERR:
             _code, message = bp.parse_err(reply)
-            raise TransportError(f"printer bridge error: {message}")
+            raise TransportError(f"printer bridge error: {message}", code="bridge_error")
         return reply
 
     def write(self, data: bytes, timeout_ms: int = 10000, chunk_size: int | None = None) -> None:
@@ -640,7 +677,8 @@ def open_real_transport(effective, data_dir) -> Transport:
     if not address or not cert:
         raise PrinterNotFoundError(
             "remote printer mode needs both the bridge address and the bridge "
-            "certificate (Settings -> Printer)"
+            "certificate (Settings -> Printer)",
+            code="bridge_not_configured",
         )
     from pathlib import Path
 
@@ -650,6 +688,7 @@ def open_real_transport(effective, data_dir) -> Transport:
         key_path, cert_path = ensure_identity(Path(data_dir) / "bridge", "client")
     except OSError as err:
         raise PrinterNotFoundError(
-            f"cannot read or create this app's bridge identity: {err}"
+            f"cannot read or create this app's bridge identity: {err}",
+            code="bridge_not_configured",
         ) from err
     return RemoteTransport.open(address, key_path, cert_path, cert)

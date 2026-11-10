@@ -112,6 +112,7 @@ async def test_status_in_remote_mode_with_incomplete_config_reports_not_connecte
     assert body["connected"] is False
     assert body["printer_mode"] == "remote"
     assert "bridge address" in body["error"]
+    assert body["error_code"] == "bridge_not_configured"
 
 
 async def test_status_in_remote_mode_over_a_real_bridge(app_and_client, bridge):
@@ -131,6 +132,7 @@ async def test_status_in_remote_mode_over_a_real_bridge(app_and_client, bridge):
     assert body["connected"] is True, body
     assert body["printer_mode"] == "remote"
     assert body["status"]["is_e720bt"] is True
+    assert body["error_code"] is None
 
 
 async def test_status_in_remote_mode_unreachable_bridge_is_not_connected(app_and_client, bridge):
@@ -146,3 +148,4 @@ async def test_status_in_remote_mode_unreachable_bridge_is_not_connected(app_and
     body = (await client.get("/api/v1/printer/status")).json()
     assert body["connected"] is False
     assert "cannot reach" in body["error"]
+    assert body["error_code"] == "bridge_unreachable"

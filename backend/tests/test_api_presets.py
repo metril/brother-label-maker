@@ -560,3 +560,23 @@ async def test_preset_print_hse_3_1_9mm_resolves_correct_dots_not_tze(app_and_cl
         _expected_job_options(config),
     )
     assert stream_resp.content == expected.data
+
+
+# --- pagination (limit/offset + X-Total-Count) ---------------------------------
+
+
+async def test_list_presets_limit_offset_and_total_header(client):
+    for i in range(3):
+        resp = await client.post(
+            "/api/v1/presets",
+            json={"name": f"p{i}", "label_type": "text", "definition": _text_definition()},
+        )
+        assert resp.status_code == 201
+
+    full = await client.get("/api/v1/presets")
+    assert isinstance(full.json(), list) and len(full.json()) == 3
+    assert full.headers["X-Total-Count"] == "3"
+
+    page = await client.get("/api/v1/presets", params={"limit": 2, "offset": 1})
+    assert [p["id"] for p in page.json()] == [p["id"] for p in full.json()[1:3]]
+    assert page.headers["X-Total-Count"] == "3"

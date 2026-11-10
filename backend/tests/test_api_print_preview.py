@@ -193,7 +193,10 @@ async def test_preview_rejects_mixed_tapes_with_422_matching_print_message(clien
     preview_resp = await client.post("/api/v1/print/preview", json={"labels": labels})
     assert preview_resp.status_code == 422
     assert preview_resp.json()["error"]["message"] == print_resp.json()["error"]["message"]
-    assert preview_resp.json()["error"]["message"] == "all labels in a print job must share the same tape"
+    assert (
+        preview_resp.json()["error"]["message"]
+        == "all labels in a print job must share the same tape"
+    )
 
 
 # --- (e) single label -> 1 segment, no gaps ---------------------------------
@@ -427,9 +430,7 @@ async def test_preview_warnings_are_index_prefixed_and_aligned_with_the_warning_
 @pytest.mark.parametrize("scale", [0, 9])
 async def test_preview_scale_out_of_range_is_422(client, scale):
     label = _text_label("SOLO", length_mm=20.0)
-    resp = await client.post(
-        "/api/v1/print/preview", json={"labels": [label], "scale": scale}
-    )
+    resp = await client.post("/api/v1/print/preview", json={"labels": [label], "scale": scale})
     assert resp.status_code == 422
 
 

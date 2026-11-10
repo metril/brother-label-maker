@@ -164,7 +164,8 @@ async def test_csv_upload_result_is_a_valid_serialization_csv_rows_payload(clien
     # postable as Sequence(kind=csv, rows=...) without transformation.
     csv_text = "a,b\n1,2\n"
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     rows = resp.json()["rows"]
     expand_resp = await client.post(
@@ -195,7 +196,8 @@ async def test_csv_upload_header_only_no_data_rows_returns_422(client):
 async def test_csv_upload_ragged_row_returns_422(client):
     csv_text = "a,b,c\n1,2,3\n4,5\n"  # row 2 (line 3) has only 2 fields, expected 3
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 422
     assert "3" in resp.json()["error"]["message"]
@@ -204,7 +206,8 @@ async def test_csv_upload_ragged_row_returns_422(client):
 async def test_csv_upload_duplicate_header_returns_422(client):
     csv_text = "a,b,a\n1,2,3\n"
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 422
     assert "a" in resp.json()["error"]["message"]
@@ -214,7 +217,8 @@ async def test_csv_upload_over_500_rows_returns_422(client):
     lines = ["a"] + [str(i) for i in range(501)]
     csv_text = "\n".join(lines) + "\n"
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 422
     assert "500" in resp.json()["error"]["message"]
@@ -231,7 +235,8 @@ async def test_csv_upload_502_rows_rejected_via_early_bail(client):
     lines = ["a"] + [str(i) for i in range(502)]
     csv_text = "\n".join(lines) + "\n"
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 422
     assert "500" in resp.json()["error"]["message"]
@@ -241,7 +246,8 @@ async def test_csv_upload_exactly_500_rows_accepted(client):
     lines = ["a"] + [str(i) for i in range(500)]
     csv_text = "\n".join(lines) + "\n"
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("big.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 200
     assert resp.json()["row_count"] == 500
@@ -250,7 +256,8 @@ async def test_csv_upload_exactly_500_rows_accepted(client):
 async def test_csv_upload_blank_trailing_line_is_not_treated_as_ragged(client):
     csv_text = "a,b\n1,2\n\n"  # trailing blank line after the last data row
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 200
     assert resp.json()["row_count"] == 1
@@ -263,7 +270,8 @@ async def test_csv_upload_strips_whitespace_from_row_values_like_headers(client)
     # whitespace through from an untrimmed cell.
     csv_text = "port,name\n 1 , Alice \n"
     resp = await client.post(
-        "/api/v1/serialize/csv", files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")}
+        "/api/v1/serialize/csv",
+        files={"file": ("t.csv", io.BytesIO(csv_text.encode()), "text/csv")},
     )
     assert resp.status_code == 200
     assert resp.json()["rows"] == [{"port": "1", "name": "Alice"}]

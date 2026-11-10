@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
 from labelmaker.api.errors import ApiError, err
+from labelmaker.api.schemas import CancelOut, EstimateOut, JobCreatedOut, JobOut, binary
 from labelmaker.driver.geometry import MARGIN_MAX_MM, MARGIN_MIN_MM, dots_to_mm
 from labelmaker.driver.protocol import ChainMode
 from labelmaker.jobs.chained_preview import (
@@ -33,7 +34,7 @@ from labelmaker.render.document import LabelDefinition, RenderedLabel
 from labelmaker.render.estimate import estimate
 from labelmaker.render.serialize import Sequence, expand_definition, ordered_values
 
-router = APIRouter(prefix="/print", tags=["print"], responses=err(404, 409, 422, 507))
+router = APIRouter(prefix="/print", tags=["print"])
 
 # H1 (the 2026-08 code review): POST /print/preview composites every
 # label into one PIL strip and then upscales it by `scale` (1..8) -- nothing
@@ -220,10 +221,21 @@ async def _validate_and_measure(body: PrintRequest, data_dir: Path) -> tuple[int
     return label_count, lengths_mm
 
 
-@router.post("", status_code=202)
+@router.post(
+    "",
+    status_code=202,
+    response_model=JobCreatedOut,
+    summary="Queue a print job",
+    responses=err(422),
+)
 async def create_print_job(
     body: PrintRequest, db: DbDep, queue: QueueDep, bus: BusDep, config: AppConfigDep
-) -> dict:
+) -> JobCreatedOut:
+    """Validate the labels, persist a job and queue it for the print worker.
+
+    Returns 202 with the new job id; progress is delivered over the
+    WebSocket and via GET /print/jobs/{id}.
+    """
     label_count, lengths_mm = await _validate_and_measure(body, config.data_dir)
     tape_estimate = estimate(
         lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
@@ -254,11 +266,16 @@ async def create_print_job(
     await bus.broadcast({"event": "job.queued", "job_id": job_id})
     await queue.put(job_id)
 
-    return {"job_id": job_id}
+    return JobCreatedOut(job_id=job_id)
 
 
-@router.post("/estimate")
-async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> dict:
+@router.post(
+    "/estimate",
+    response_model=EstimateOut,
+    summary="Estimate tape usage",
+    responses=err(422),
+)
+async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> EstimateOut:
     """Task 2.9: the SAME request body POST /api/print accepts (labels/
     options/serialization), returning a TapeEstimate + `label_count`
     WITHOUT creating a job -- no db.create_print_job call, no enqueue, no
@@ -269,7 +286,7 @@ async def estimate_print_job(body: PrintRequest, config: AppConfigDep) -> dict:
     tape_estimate = estimate(
         lengths_mm, chain_mode=body.options.chain_mode.value, margin_mm=body.options.margin_mm
     )
-    return {"label_count": label_count, **dataclasses.asdict(tape_estimate)}
+    return EstimateOut(label_count=label_count, **dataclasses.asdict(tape_estimate))
 
 
 class PrintPreviewRequest(PrintRequest):
@@ -342,7 +359,12 @@ class ChainedPreviewResponse(BaseModel):
     warnings: list[str]
 
 
-@router.post("/preview")
+@router.post(
+    "/preview",
+    response_model=ChainedPreviewResponse,
+    summary="Preview a chained print job",
+    responses=err(422, 507),
+)
 async def preview_print_job(
     body: PrintPreviewRequest, config: AppConfigDep
 ) -> ChainedPreviewResponse:
@@ -448,16 +470,27 @@ def _job_to_response(job: dict) -> dict:
     return body
 
 
-@router.get("/jobs/{job_id}")
+@router.get(
+    "/jobs/{job_id}",
+    response_model=JobOut,
+    summary="Get a print job",
+    responses=err(404),
+)
 async def get_print_job(job_id: str, db: DbDep) -> dict:
+    """Full job resource, including its stored definition and thumbnail."""
     job = await db.get_job(job_id)
     if job is None:
         raise ApiError(404, "not_found", "job not found")
     return _job_to_response(job)
 
 
-@router.post("/jobs/{job_id}/cancel")
-async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
+@router.post(
+    "/jobs/{job_id}/cancel",
+    response_model=CancelOut,
+    summary="Cancel a queued print job",
+    responses=err(404, 409),
+)
+async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> CancelOut:
     """Task 2.9 carry-forward: cancel via db.cancel_job_if_queued's atomic
     CAS (single `UPDATE ... WHERE status = 'queued'`) instead of a
     get-then-update pair -- closes the race where the worker dequeues and
@@ -477,7 +510,7 @@ async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
     canceled = await db.cancel_job_if_queued(job_id)
     if canceled:
         await bus.broadcast({"event": "job.canceled", "job_id": job_id})
-        return {"status": "canceled"}
+        return CancelOut(status="canceled")
 
     job = await db.get_job(job_id)
     if job is None:
@@ -485,7 +518,15 @@ async def cancel_print_job(job_id: str, db: DbDep, bus: BusDep) -> dict:
     raise ApiError(409, "conflict", f"cannot cancel job in status {job['status']!r}")
 
 
-@router.get("/jobs/{job_id}/stream")
+@router.get(
+    "/jobs/{job_id}/stream",
+    response_class=Response,
+    summary="Download a job's raster stream",
+    responses={
+        **binary("application/octet-stream", "Printer raster stream (.bin) sent for the job"),
+        **err(404),
+    },
+)
 async def stream_print_job(job_id: str, config: AppConfigDep) -> Response:
     path = config.data_dir / "jobs" / f"{job_id}.bin"
     if not await anyio.to_thread.run_sync(path.is_file):

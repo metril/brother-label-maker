@@ -71,9 +71,10 @@ from fastapi.responses import RedirectResponse, Response
 from labelmaker.api.auth_gate import get_session_user
 from labelmaker.api.deps import AppConfigDep
 from labelmaker.api.errors import ApiError, err
+from labelmaker.api.schemas import AuthMeOut, AuthUserOut
 from labelmaker.config import AppConfig
 
-router = APIRouter(tags=["auth"], responses=err(401, 404, 502))
+router = APIRouter(tags=["auth"])
 
 SESSION_USER_KEY = "user"
 
@@ -132,10 +133,20 @@ def safe_next_path(value: str | None) -> str:
     return value
 
 
-@router.get("/auth/login")
+@router.get(
+    "/auth/login",
+    status_code=302,
+    response_class=RedirectResponse,
+    summary="Start OIDC sign-in",
+    responses={
+        302: {"description": "Redirect to the identity provider"},
+        **err(404, 422, 502),
+    },
+)
 async def login(
     request: Request, config: AppConfigDep, next: str | None = None
 ) -> RedirectResponse:
+    """Redirect the browser to the IdP. `next` is a same-origin path to return to."""
     _require_oidc_mode(config)
     request.session[SESSION_NEXT_KEY] = safe_next_path(next)
     oauth: OAuth = request.app.state.oauth
@@ -156,8 +167,19 @@ async def login(
         ) from exc
 
 
-@router.get("/auth/callback", name="auth_callback")
+@router.get(
+    "/auth/callback",
+    name="auth_callback",
+    status_code=302,
+    response_class=RedirectResponse,
+    summary="Complete OIDC sign-in",
+    responses={
+        302: {"description": "Redirect to the originally requested page"},
+        **err(401, 404),
+    },
+)
 async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
+    """IdP redirect target: exchanges the code, stores the session, redirects on."""
     _require_oidc_mode(config)
     oauth: OAuth = request.app.state.oauth
     try:
@@ -199,16 +221,33 @@ async def callback(request: Request, config: AppConfigDep) -> RedirectResponse:
     return RedirectResponse(url=next_path, status_code=302)
 
 
-@router.post("/auth/logout", status_code=204)
+@router.post(
+    "/auth/logout",
+    status_code=204,
+    response_class=Response,
+    summary="Sign out",
+    responses=err(404),
+)
 async def logout(request: Request, config: AppConfigDep) -> Response:
+    """Clear the session cookie. OIDC mode only."""
     _require_oidc_mode(config)
     request.session.clear()
     return Response(status_code=204)
 
 
-@router.get("/auth/me")
-async def me(request: Request, config: AppConfigDep) -> dict:
+@router.get(
+    "/auth/me",
+    response_model=AuthMeOut,
+    summary="Get the current session",
+    responses=err(500),
+)
+async def me(request: Request, config: AppConfigDep) -> AuthMeOut:
+    """Auth mode and the signed-in user. Always 200, even when signed out."""
     if config.auth_mode == "none":
-        return {"auth_mode": "none", "authenticated": True, "user": None}
+        return AuthMeOut(auth_mode="none", authenticated=True, user=None)
     user = get_session_user(request.session)
-    return {"auth_mode": "oidc", "authenticated": user is not None, "user": user}
+    return AuthMeOut(
+        auth_mode="oidc",
+        authenticated=user is not None,
+        user=AuthUserOut.model_validate(user) if user is not None else None,
+    )

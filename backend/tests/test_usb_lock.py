@@ -82,6 +82,7 @@ async def test_status_reports_busy_while_worker_holds_usb_lock_then_recovers(
         "printer_mode": "mock",
         "status": None,
         "error": "printer busy (print job in progress)",
+        "error_code": "printer_busy",
     }
     assert keep_alive == {
         "enabled": False,

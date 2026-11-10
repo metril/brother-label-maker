@@ -350,7 +350,9 @@ async def test_login_redirects_to_authorize_url_with_state_and_nonce(app_and_cli
 async def test_callback_rejects_mismatched_state(client, idp_mock):
     """A `state` this app never issued (or already consumed) -- authlib's
     own MismatchingStateError, mapped to this route's 401."""
-    resp = await client.get("/api/v1/auth/callback", params={"code": "x", "state": "not-a-real-state"})
+    resp = await client.get(
+        "/api/v1/auth/callback", params={"code": "x", "state": "not-a-real-state"}
+    )
     assert resp.status_code == 401
 
 

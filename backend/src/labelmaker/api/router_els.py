@@ -182,6 +182,7 @@ from fastapi.responses import Response
 
 from labelmaker.api.deps import AppConfigDep, SettingsDep, error_message
 from labelmaker.api.errors import ApiError, err
+from labelmaker.api.schemas import binary
 from labelmaker.config import AppConfig
 from labelmaker.render import LabelDefinition, Tape, preview_png, rasterize, render_definition
 from labelmaker.render.types.homebox_location import HomeboxLocationParams
@@ -204,9 +205,7 @@ def _require_els_enabled(settings: SettingsDep) -> None:
         raise ApiError(404, "not_found", "not found")
 
 
-router = APIRouter(
-    tags=["els"], dependencies=[Depends(_require_els_enabled)], responses=err(404, 422)
-)
+router = APIRouter(tags=["els"], dependencies=[Depends(_require_els_enabled)])
 
 
 def _secondary_text(description_text: str, additional_information: str | None) -> str:
@@ -228,7 +227,15 @@ def _secondary_text(description_text: str, additional_information: str | None) -
     return joined if len(joined) <= 160 else joined[:159] + "…"
 
 
-@router.get("/els/label")
+@router.get(
+    "/els/label",
+    response_class=Response,
+    summary="Render an ELS label",
+    responses={
+        **binary("image/png", "Label bitmap at native device resolution"),
+        **err(404, 422),
+    },
+)
 async def get_els_label(
     config: AppConfigDep,
     settings: SettingsDep,
@@ -259,6 +266,11 @@ async def get_els_label(
     # "dynamic length" toggle to honor either way.
     dynamic_length: bool = Query(False, alias="DynamicLength"),
 ) -> Response:
+    """HomeBox Embedded Label Service endpoint: renders a location label PNG.
+
+    Unauthenticated by design (HomeBox calls it without credentials); 404
+    unless ELS is enabled in Settings. Query names follow HomeBox's ELS spec.
+    """
     # task 4.5 Track A: els_enabled is DB-editable (Settings page) now, so
     # main.py registers this route UNCONDITIONALLY -- the router-level
     # `_require_els_enabled` dependency (see its own docstring) is the only

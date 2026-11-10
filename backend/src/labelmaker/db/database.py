@@ -496,8 +496,11 @@ class Database:
         page_size: int = 20,
         status: str | None = None,
         q: str | None = None,
+        offset: int | None = None,
     ) -> dict:
-        """`status`/`q` (task 2.8, backing GET /api/history's own filters --
+        """`offset` (optional) selects the window by row offset instead of
+        `page`; the returned `page` is then `offset // page_size + 1`.
+        `status`/`q` (task 2.8, backing GET /api/history's own filters --
         see api/router_history.py) combine with AND when both are given.
         `q` is deliberately unfancy: a raw, case-insensitive substring
         match against the serialized `definition` JSON TEXT column, not a
@@ -524,7 +527,12 @@ class Database:
         # Rejecting a clearly-pathological offset here, before any SQL
         # runs, keeps this failure mode a ValueError like every other
         # malformed-pagination case above, well under sqlite3's real limit.
-        offset = (page - 1) * page_size
+        if offset is not None:
+            if offset < 0:
+                raise ValueError(f"offset must be >= 0, got {offset}")
+            page = offset // page_size + 1
+        else:
+            offset = (page - 1) * page_size
         if offset > 10**9:
             raise ValueError(
                 f"page {page} with page_size {page_size} is out of range "

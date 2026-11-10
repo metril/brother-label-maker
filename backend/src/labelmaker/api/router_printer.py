@@ -30,6 +30,13 @@ from labelmaker.api.deps import (
     SettingsDep,
 )
 from labelmaker.api.errors import err
+from labelmaker.api.schemas import (
+    BridgeIdentityOut,
+    JobCreatedOut,
+    KeepAliveOut,
+    PrinterStatusDetail,
+    PrinterStatusOut,
+)
 from labelmaker.driver.geometry import MARGIN_MIN_MM
 from labelmaker.driver.printer import get_status
 from labelmaker.driver.protocol import ChainMode
@@ -44,7 +51,7 @@ from labelmaker.driver.transport import (
 )
 from labelmaker.settings_overlay import EffectiveSettings
 
-router = APIRouter(prefix="/printer", tags=["printer"], responses=err(409, 503))
+router = APIRouter(prefix="/printer", tags=["printer"])
 
 # C1: how long a status check waits for USB_LOCK before giving up and
 # reporting "busy" instead of queuing up behind a print job that could take
@@ -91,10 +98,22 @@ def _fetch_usb_status(effective: EffectiveSettings, data_dir: Path) -> PrinterSt
     return _fetch_status(lambda: open_real_transport(effective, data_dir))
 
 
-@router.get("/status")
+@router.get(
+    "/status",
+    response_model=PrinterStatusOut,
+    summary="Get printer connection status",
+    responses=err(500),
+)
 async def printer_status(
     settings: SettingsDep, keepalive_status: KeepaliveStatusDep, config: AppConfigDep
-) -> dict:
+) -> PrinterStatusOut:
+    """Probe the printer (USB, mock, or remote bridge) and report its state.
+
+    Always 200: being unable to reach the printer is an expected state, so it
+    is reported in the body (`connected=false`, `error`, `error_code`) rather
+    than as an HTTP error. A running print job holding the USB lock yields
+    `connected=true` with `error_code="printer_busy"`.
+    """
     # Reads the settings overlay's EFFECTIVE printer_mode (override if one
     # is stored, else AppConfig/env), not `config.printer_mode` directly --
     # a DB override set via PUT /api/settings must be reflected here (both
@@ -114,47 +133,59 @@ async def printer_status(
     # keepalive.py), additive on every branch below -- a shallow copy so
     # the response body is a snapshot at request time, not the same live
     # dict `run_keepalive` keeps mutating in the background.
-    keep_alive = dict(keepalive_status)
+    keep_alive = KeepAliveOut.model_validate(dict(keepalive_status))
 
     try:
         status = await anyio.to_thread.run_sync(fetch)
     except _StatusLockTimeout:
-        return {
-            "connected": True,
-            "printer_mode": printer_mode,
-            "status": None,
-            "error": "printer busy (print job in progress)",
-            "keep_alive": keep_alive,
-        }
-    except (PrinterNotFoundError, StatusTimeoutError, TransportError) as exc:
-        return {
-            "connected": False,
-            "printer_mode": printer_mode,
-            "status": None,
-            "error": str(exc),
-            "keep_alive": keep_alive,
-        }
-    return {
-        "connected": True,
-        "printer_mode": printer_mode,
-        "status": status.to_dict(),
-        "error": None,
-        "keep_alive": keep_alive,
-    }
+        return PrinterStatusOut(
+            connected=True,
+            printer_mode=printer_mode,
+            error="printer busy (print job in progress)",
+            error_code="printer_busy",
+            keep_alive=keep_alive,
+        )
+    except (PrinterNotFoundError, TransportError) as exc:
+        return PrinterStatusOut(
+            connected=False,
+            printer_mode=printer_mode,
+            error=str(exc),
+            error_code=exc.code,
+            keep_alive=keep_alive,
+        )
+    except StatusTimeoutError as exc:
+        return PrinterStatusOut(
+            connected=False,
+            printer_mode=printer_mode,
+            error=str(exc),
+            error_code="status_timeout",
+            keep_alive=keep_alive,
+        )
+    return PrinterStatusOut(
+        connected=True,
+        printer_mode=printer_mode,
+        status=PrinterStatusDetail.model_validate(status.to_dict()),
+        keep_alive=keep_alive,
+    )
 
 
-@router.get("/bridge-identity")
-async def bridge_identity(config: AppConfigDep) -> dict:
+@router.get(
+    "/bridge-identity",
+    response_model=BridgeIdentityOut,
+    summary="Get this app's bridge certificate",
+    responses=err(500),
+)
+async def bridge_identity(config: AppConfigDep) -> BridgeIdentityOut:
     """This app's PUBLIC bridge certificate (PEM) and SHA-256 fingerprint,
     for pairing on the bridge. The key is generated on first request and
     never leaves <data_dir>/bridge/. Behind the same auth gate as every
     other /api route."""
     from labelmaker.driver.bridge_identity import cert_fingerprint, ensure_identity
 
-    def _load() -> dict:
+    def _load() -> BridgeIdentityOut:
         _key, cert = ensure_identity(config.data_dir / "bridge", "client")
         pem = cert.read_text()
-        return {"cert_pem": pem, "fingerprint": cert_fingerprint(pem)}
+        return BridgeIdentityOut(cert_pem=pem, fingerprint=cert_fingerprint(pem))
 
     return await anyio.to_thread.run_sync(_load)
 
@@ -212,13 +243,21 @@ async def create_feed_cut_job(db: DbDep, queue: QueueDep, bus: BusDep) -> dict:
     return job
 
 
-@router.post("/cut", status_code=202)
-async def feed_and_cut(db: DbDep, queue: QueueDep, bus: BusDep) -> dict:
-    """No request body. Same id type (a uuid4 hex str) POST /api/print
+@router.post(
+    "/cut",
+    status_code=202,
+    response_model=JobCreatedOut,
+    summary="Feed tape and cut",
+    responses=err(500),
+)
+async def feed_and_cut(db: DbDep, queue: QueueDep, bus: BusDep) -> JobCreatedOut:
+    """Queue a feed-and-cut job (advance tape past the cutter and cut).
+
+    No request body. Same id type (a uuid4 hex str) POST /api/print
     returns. Reuses the SAME db/queue/bus deps and the SAME single worker +
     USB_LOCK that serializes every other print job -- see
     create_feed_cut_job above for the actual create+persist+broadcast+
     enqueue sequence.
     """
     job = await create_feed_cut_job(db, queue, bus)
-    return {"job_id": job["id"]}
+    return JobCreatedOut(job_id=job["id"])

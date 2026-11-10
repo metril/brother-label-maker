@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -34,11 +34,12 @@ from labelmaker.api import router_print
 from labelmaker.api.deps import AppConfigDep, BusDep, DbDep, QueueDep, error_message
 from labelmaker.api.errors import ApiError, err
 from labelmaker.api.router_print import PrintOptions, PrintRequest
+from labelmaker.api.schemas import JobCreatedOut, PresetOut
 from labelmaker.render import get_renderer
 from labelmaker.render.document import LabelDefinition, Tape
 from labelmaker.render.serialize import Sequence
 
-router = APIRouter(prefix="/presets", tags=["presets"], responses=err(404, 422))
+router = APIRouter(prefix="/presets", tags=["presets"])
 
 _TapeFamily = Literal["tze", "hse_2_1", "hse_3_1"]
 
@@ -113,8 +114,15 @@ class PresetPrintRequest(BaseModel):
     tape: Tape | None = None
 
 
-@router.post("", status_code=201)
+@router.post(
+    "",
+    status_code=201,
+    response_model=PresetOut,
+    summary="Create a preset",
+    responses=err(422),
+)
 async def create_preset(body: PresetCreate, db: DbDep) -> dict:
+    """Save a label type + params combination for reuse."""
     try:
         _validate_definition(body.label_type, body.definition)
     except (KeyError, ValueError) as exc:
@@ -136,14 +144,42 @@ async def create_preset(body: PresetCreate, db: DbDep) -> dict:
     )
 
 
-@router.get("")
+@router.get(
+    "",
+    response_model=list[PresetOut],
+    summary="List presets",
+    responses={
+        200: {
+            "headers": {
+                "X-Total-Count": {
+                    "description": "Number of presets matching the filters, before limit/offset",
+                    "schema": {"type": "integer"},
+                }
+            }
+        },
+        **err(422),
+    },
+)
 async def list_presets(
-    db: DbDep, label_type: str | None = None, q: str | None = None
+    db: DbDep,
+    response: Response,
+    label_type: str | None = Query(None, description="Only presets of this label type"),
+    q: str | None = Query(None, description="Substring match on the preset name"),
+    limit: int | None = Query(None, ge=1, le=1000, description="Max rows (default: all)"),
+    offset: int = Query(0, ge=0, description="Rows to skip"),
 ) -> list[dict]:
-    return await db.list_presets(label_type=label_type, q=q)
+    """Favorites first, then most recently updated.
+
+    The body stays a plain array; the unpaginated match count is returned in
+    the `X-Total-Count` header. Without `limit`, every match is returned.
+    """
+    rows = await db.list_presets(label_type=label_type, q=q)
+    response.headers["X-Total-Count"] = str(len(rows))
+    end = None if limit is None else offset + limit
+    return rows[offset:end]
 
 
-@router.get("/{preset_id}")
+@router.get("/{preset_id}", response_model=PresetOut, summary="Get a preset", responses=err(404))
 async def get_preset(preset_id: str, db: DbDep) -> dict:
     preset = await db.get_preset(preset_id)
     if preset is None:
@@ -151,8 +187,14 @@ async def get_preset(preset_id: str, db: DbDep) -> dict:
     return preset
 
 
-@router.put("/{preset_id}")
+@router.put(
+    "/{preset_id}",
+    response_model=PresetOut,
+    summary="Update a preset",
+    responses=err(404, 422),
+)
 async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
+    """Partial update: omitted fields are left untouched."""
     existing = await db.get_preset(preset_id)
     if existing is None:
         raise ApiError(404, "not_found", "preset not found")
@@ -193,7 +235,13 @@ async def update_preset(preset_id: str, body: PresetUpdate, db: DbDep) -> dict:
     return await db.update_preset(preset_id, **fields)
 
 
-@router.delete("/{preset_id}", status_code=204)
+@router.delete(
+    "/{preset_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Delete a preset",
+    responses=err(404),
+)
 async def delete_preset(preset_id: str, db: DbDep) -> Response:
     deleted = await db.delete_preset(preset_id)
     if not deleted:
@@ -201,7 +249,13 @@ async def delete_preset(preset_id: str, db: DbDep) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/{preset_id}/print", status_code=202)
+@router.post(
+    "/{preset_id}/print",
+    status_code=202,
+    response_model=JobCreatedOut,
+    summary="Print a preset",
+    responses=err(404, 422),
+)
 async def print_preset(
     preset_id: str,
     db: DbDep,
@@ -214,7 +268,12 @@ async def print_preset(
     # body param optional (no body sent -> None), rather than the client
     # being forced to POST an empty `{}`.
     body: PresetPrintRequest | None = None,
-) -> dict:
+) -> JobCreatedOut:
+    """Queue a print job from a saved preset.
+
+    Uses the preset's own tape unless the body supplies an explicit `tape`
+    (required for "any tape" presets).
+    """
     preset = await db.get_preset(preset_id)
     if preset is None:
         raise ApiError(404, "not_found", "preset not found")
