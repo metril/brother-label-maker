@@ -112,8 +112,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
-    STATIC_DIR=/app/static \
-    DATA_DIR=/data \
     PATH=/app/backend/.venv/bin:$PATH
 
 # Non-root: uid 1000 has no meaningful relationship to host USB permissions
@@ -139,7 +137,7 @@ COPY --from=backend-build --chown=app:app /app/backend /app/backend
 
 # Built SPA from stage 1, served by main.py's catch-all SPA-fallback route
 # (deep links, e.g. /presets or /history, get index.html too -- not just
-# STATIC_DIR's root) at STATIC_DIR.
+# the root) from /app/static (paths.find_static_dir).
 COPY --from=frontend-build --chown=app:app /fe/dist /app/static
 
 USER app

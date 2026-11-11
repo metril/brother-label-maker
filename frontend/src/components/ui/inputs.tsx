@@ -145,6 +145,7 @@ export function NumberInput({ id, value, onChange, min, max, step, ariaLabel, cl
 interface SelectOption {
   value: string;
   label: string;
+  disabled?: boolean;
 }
 
 interface SelectProps {
@@ -186,7 +187,7 @@ export function Select({ id, value, onChange, options, ariaLabel, disabled, clas
       style={{ backgroundImage: "var(--select-chevron)", backgroundRepeat: "no-repeat", backgroundPosition: "right 0.7rem center" }}
     >
       {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
+        <option key={opt.value} value={opt.value} disabled={opt.disabled}>
           {opt.label}
         </option>
       ))}

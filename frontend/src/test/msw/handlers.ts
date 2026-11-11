@@ -569,10 +569,19 @@ export const defaultSettingsBody: SettingsResponse = {
     settingsRow("homebox_writes_enabled", false),
     settingsRow("keep_printer_awake", false),
     settingsRow("keep_awake_interval_min", 5),
-    settingsRow("auth_mode", "none", "default", false),
+    settingsRow("auth_mode", "none"),
+    settingsRow("oidc_issuer", null),
+    settingsRow("oidc_client_id", null),
+    settingsRow("oidc_scopes", "openid profile email"),
+    { key: "oidc_client_secret", set: false, source: "default", editable: true },
+    settingsRow("session_max_age_s", 86400),
+    settingsRow("session_cookie_secure", false),
+    settingsRow("oidc_verified", false, "default", false),
+    settingsRow("oidc_redirect_uri", "http://localhost:8000/api/auth/callback", "default", false),
+    settingsRow("static_dir", null, "default", false),
     settingsRow("els_enabled", false, "default", false),
     settingsRow("data_dir", "./data", "default", false),
-    settingsRow("cors_origins", ["http://localhost:5173"], "default", false),
+    settingsRow("cors_origins", ["http://localhost:5173"]),
   ],
 };
 
@@ -593,12 +602,12 @@ export const getSettingsHandler = http.get("/api/v1/settings", () => HttpRespons
  * it actually asserts on (captured request body, a 422, a specific
  * provenance readout). */
 export const putSettingsHandler = http.put("/api/v1/settings", async ({ request }) => {
-  const body = (await request.json()) as Record<string, string | number | boolean | null>;
+  const body = (await request.json()) as Record<string, string | number | boolean | string[] | null>;
   const rows: SettingRow[] = defaultSettingsBody.settings.map((row) => {
     if (!(row.key in body)) return row;
     const posted = body[row.key]!;
     const source: SettingsSource = posted === null ? "default" : "db";
-    if (row.key === "homebox_api_key") {
+    if (row.key === "homebox_api_key" || row.key === "oidc_client_secret") {
       return { key: row.key, set: posted !== null, source, editable: true };
     }
     return { ...row, value: posted, source };

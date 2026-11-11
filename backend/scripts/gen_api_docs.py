@@ -29,8 +29,8 @@ _AUTH = {
 
 def build_spec() -> dict:
     # Fixed config: the schema must not depend on the caller's environment.
-    cfg = AppConfig(_env_file=None, auth_mode="none", data_dir=Path("/nonexistent"))
-    spec = create_app(cfg).openapi()
+    cfg = AppConfig(auth_mode="none", data_dir=Path("/nonexistent"))
+    spec = create_app(cfg, static_dir=None).openapi()
     # The live /openapi.json reports the real package version; the committed
     # file pins a constant so a release bump does not trip the drift gate.
     spec["info"]["version"] = "0"

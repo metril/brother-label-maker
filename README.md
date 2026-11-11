@@ -37,7 +37,7 @@ manuals, then verified against real hardware (see
 
 - [Quick start (mock mode, no printer)](#quick-start-mock-mode-no-printer)
 - [Real printer setup](#real-printer-setup)
-- [Environment variable reference](#environment-variable-reference)
+- [Configuration](#configuration)
 - [Security notes](#security-notes)
 - [Container image](#container-image)
 - [Physical checkpoint status](#physical-checkpoint-status)
@@ -172,7 +172,7 @@ they do over local USB.
 Traffic uses mutual TLS 1.3 with pinned self-signed certificates. Each side
 generates its own key, only public certificates are exchanged, and each side
 accepts only the one certificate it was paired with. There is no plaintext
-mode. Private keys stay on their host (`<DATA_DIR>/bridge/client.key` on the
+mode. Private keys stay on their host (`<data dir>/bridge/client.key` on the
 app, `/data/bridge.key` on the bridge).
 
 Set `BRIDGE` to shorten the commands below, on the Pi, with this repo's
@@ -207,7 +207,7 @@ in `/data` and binds `0.0.0.0`. Outside Docker, the optional flags `--port`,
 - Prefer a wired connection for the Pi.
 
 **Replacing a certificate:** delete `bridge.key` and `bridge.crt` from the bridge
-volume, or `client.key` and `client.crt` from `<DATA_DIR>/bridge`, then pair
+volume, or `client.key` and `client.crt` from `<data dir>/bridge`, then pair
 again and restart the bridge. Pinning a new app certificate revokes the old one.
 
 | Symptom | Cause and fix |
@@ -218,28 +218,31 @@ again and restart the bridge. Pinning a new app certificate revokes the old one.
 | "bridge is serving another client" | Another app or CLI is connected. Wait or stop it. |
 | "no USB printer found" or permission errors on the Pi | See `docs/usb-setup.md`. If `usblp` can't be detached in the container, blacklist it on the Pi. |
 
-## Environment variable reference
+## Configuration
 
-Environment variables only cover what the app needs at startup. They have no
-prefix; the name is the field name, uppercased. Everything else (printer mode,
-bridge address and certificate, protocol knobs, HomeBox, the External Label
-Service) is set on the **Settings page** and stored in the database. Those
-settings are not read from the environment.
+The app reads **no environment variables**. Everything is configured on the
+**Settings page** and stored in the database: printer mode and bridge, HomeBox,
+the External Label Service, authentication (OIDC), session options and CORS
+origins. Paths are fixed: data lives in `/data` in the container (the
+`VOLUME`), the built SPA is served from `/app/static`. Outside Docker the data
+directory is `<repo>/data` unless `/data` exists and is writable.
 
-**Upgrading from older versions:** the old printer, HomeBox and ELS env vars
-(`PRINTER_*`, `HOMEBOX_*`, `ELS_*`) are imported once into the Settings page
-when the app first starts, with a warning in the log naming each var. After
-that you can delete them. An old value is only imported if it is still in the
-environment when the new version first starts, so upgrade the image first and
-remove them from your compose file afterwards.
+**BREAKING (upgrading from older versions):** old env vars (`DATA_DIR`,
+`STATIC_DIR`, `CORS_ORIGINS`, `AUTH_MODE`, `OIDC_*`, `SESSION_*`, and the earlier
+`PRINTER_*`, `HOMEBOX_*`, `ELS_*`) are now ignored and nothing is imported from
+them. Mount your existing data at `/data`, then re-enter CORS origins and
+authentication on the Settings page and remove the vars from your compose file.
+Until you do, the app runs with auth off and default CORS.
 
-### Core
+**Locked out?** Reset authentication to `none` from the host, then restart:
 
-| Env var | Default | Meaning |
-|---|---|---|
-| `DATA_DIR` | `./data` (image sets this to `/data`, matching the Dockerfile's `VOLUME /data`) | Where the SQLite db and print-job artifacts live. |
-| `STATIC_DIR` | unset (image sets `/app/static`) | Directory holding the built SPA. |
-| `CORS_ORIGINS` | `["http://localhost:5173"]` | JSON array (not a bare string) of allowed browser origins — see the [security warning](#security-notes) below before changing this. |
+```bash
+docker exec <container> labelmaker reset-auth && docker restart <container>
+# add --rotate-session-secret to also sign everyone out
+```
+
+The server assumes a **single worker** (the default `uvicorn` command): settings
+changes apply live in that process only.
 
 ### HomeBox and the External Label Service
 
@@ -274,7 +277,7 @@ configs need no change).
 **Security caveat:** HomeBox's ELS caller sends this endpoint a plain,
 unauthenticated `GET` — that's HomeBox's own design (`fetchLabelFromURL`),
 not a shortcut on our side, and there's no way to make it otherwise. `/api/v1/els/label`
-is therefore exempt from the OIDC gate below even in `AUTH_MODE=oidc`
+is therefore exempt from the OIDC gate below even with OIDC on
 (gating it would just break every HomeBox print button with no security
 benefit, since HomeBox has no browser session to present). Leave ELS off
 unless HomeBox can actually reach this app — don't expose it to the open
@@ -282,38 +285,42 @@ internet.
 
 ### Auth (optional — off by default)
 
-| Env var | Default | Meaning |
-|---|---|---|
-| `AUTH_MODE` | `none` | `none` = today's zero-auth LAN behavior, byte-for-byte (no session middleware is even added). `oidc` = gate every `/api/v1/*` route (except `/api/v1/health`, `/api/v1/auth/*`, `/api/v1/els/*`) behind a signed session cookie. |
-| `OIDC_ISSUER` | unset, **required if** `AUTH_MODE=oidc` | Your IdP's issuer URL, e.g. `https://auth.example.com/realms/labelmaker`. The rest of the endpoints are discovered from `{issuer}/.well-known/openid-configuration`. |
-| `OIDC_CLIENT_ID` | unset, **required if** `AUTH_MODE=oidc` | OIDC client id. |
-| `OIDC_CLIENT_SECRET` | unset, **required if** `AUTH_MODE=oidc` | Confidential client secret — stays server-side. |
-| `OIDC_SCOPES` | `openid profile email` | Space-separated scopes sent to the IdP's authorize endpoint. `openid` must stay in this list. |
-| `SESSION_SECRET` | unset, **required if** `AUTH_MODE=oidc`, min 32 chars | Signs the session cookie. Generate with `openssl rand -hex 32`. A weak secret lets anyone on the network forge a session and bypass auth entirely — the HMAC is the whole gate. |
-| `SESSION_MAX_AGE_S` | `28800` (8h), min `300` | This app's own session lifetime, in seconds. Deliberately independent of the IdP's `id_token` expiry (which most IdPs cap at a few minutes). Values under 300 fail validation at startup. |
-| `SESSION_COOKIE_SECURE` | `false` | Set `true` when serving over TLS, so the session cookie is marked `Secure` and never rides plain HTTP. Recommended `true` for any real (non-LAN-only) deployment. |
+Set on the Settings page (Authentication section).
 
-If `AUTH_MODE=oidc` is set but any of the four required fields above is
-missing, the app **fails at startup** (not on the first login attempt) with
-a clear error naming which env var is missing.
+- **Mode** `none` (default): zero-auth LAN behavior. `oidc`: gate every
+  `/api/v1/*` route (except `/api/v1/health`, `/api/v1/auth/*`, `/api/v1/els/*`)
+  behind a signed session cookie. Changing it needs no restart.
+- **Issuer / client id / client secret / scopes:** your IdP's issuer URL (the
+  rest is discovered from `{issuer}/.well-known/openid-configuration`), the
+  confidential client's id and secret (write-only, never shown again), and
+  space-separated scopes (`openid` required, default `openid profile email`).
+- **Test login:** register the redirect URI shown on the page
+  (`<app-url>/api/auth/callback`) with your IdP, then run **Test login**. OIDC
+  can only be enabled after a successful test, and any later change to the issuer,
+  client id, secret or scopes requires a new one.
+- **Session lifetime** (default 8h, min 5 min) and **Secure cookie** (turn on when
+  serving over HTTPS; leave off on plain HTTP or sign-in will fail).
+- **Session secret:** generated automatically and stored in the database; use
+  **Rotate session secret** to sign everyone out.
+- With OIDC on, only a signed-in browser session (not an API key) can change
+  authentication or CORS settings.
 
 ### API keys
 
-For scripts and other machines under `AUTH_MODE=oidc`, create a `read` or `write`
+For scripts and other machines under OIDC auth, create a `read` or `write`
 key on the **Settings** page and send it as `Authorization: Bearer lm_...`. Scopes,
 curl examples and the WebSocket ticket flow are in [API.md](API.md).
 
 ## Security notes
 
-- **LAN-first by default.** With `AUTH_MODE=none` (the default), there is no
+- **LAN-first by default.** With auth mode `none` (the default), there is no
   authentication at all — anyone who can reach the container's port 8000
   can design, print, and browse HomeBox data (if configured). This is meant
   for a trusted home/LAN network. Put it behind OIDC (or a reverse proxy
   with its own auth) before exposing it beyond that.
 - **Enabling OIDC** gates every API route except health, auth, and ELS
-  behind a signed session — see the [Auth table](#auth-optional--off-by-default) above for the four
-  required env vars.
-- **Never set `CORS_ORIGINS` to `'["*"]'`.** This app enables
+  behind a signed session — see the [Auth section](#auth-optional--off-by-default) above.
+- **Never allow `*` as a CORS origin** (the Settings page rejects it). This app enables
   `allow_credentials=True` on its CORS middleware (required for the session
   cookie to work cross-origin at all). Combined with a wildcard origin,
   browsers' CORS credentialed-request rules push most CORS libraries
@@ -393,7 +400,7 @@ cd backend && uv run uvicorn labelmaker.main:app --port 8000
 
 # or serve a built frontend from the backend on :8001
 cd frontend && npm run build
-cd backend && DATA_DIR=/tmp/lm-data STATIC_DIR=../frontend/dist uv run uvicorn labelmaker.main:app --port 8001
+cd backend && uv run uvicorn labelmaker.main:app --port 8001
 
 # frontend dev server (proxies /api, incl. /api/v1 and the WebSocket, to :8000)
 cd frontend && npm run dev          # http://localhost:5173

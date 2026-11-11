@@ -53,9 +53,8 @@ def _isolated_render_registry():
 
 # app_config pins the Settings-page fields explicitly on every AppConfig the
 # suite builds (they are plain defaults, not env-driven, but byte-parity
-# tests hand-derive streams assuming these exact values). Auth fields ARE
-# env-driven, so pinning them keeps the suite hermetic against an ambient
-# AUTH_MODE=oidc etc.
+# tests hand-derive streams assuming these exact values). Auth fields are
+# pinned too (defaults, no env involved).
 _DEFAULT_APP_CONFIG_KWARGS = {
     "printer_init_strategy": "classic",
     "printer_bit_order": "msb_first",
@@ -79,18 +78,7 @@ _DEFAULT_APP_CONFIG_KWARGS = {
     "oidc_client_id": None,
     "oidc_client_secret": None,
     "oidc_scopes": "openid profile email",
-    "session_secret": None,
 }
-
-
-@pytest.fixture(autouse=True)
-def _no_legacy_env(monkeypatch):
-    """Removed env vars are imported at app startup (legacy_env.py); an
-    ambient one in a dev shell must not leak into tests."""
-    from labelmaker.legacy_env import LEGACY_ENV_FIELDS
-
-    for name in LEGACY_ENV_FIELDS:
-        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

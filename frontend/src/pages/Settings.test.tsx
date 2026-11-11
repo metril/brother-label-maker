@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -383,7 +383,7 @@ describe("Settings page", () => {
       expect(input).toHaveValue("");
       const container = fieldContainer("HomeBox API key");
       expect(within(container).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
-      expect(screen.getByText("Not set.")).toBeInTheDocument();
+      expect(within(container.parentElement as HTMLElement).getByText("Not set.")).toBeInTheDocument();
     });
 
     it("shows Key set and a Clear button when the API key is set, still starting blank", async () => {
@@ -585,19 +585,149 @@ describe("Settings page", () => {
     });
   });
 
-  // -- Runtime section (read-only) --------------------------------------------
+  // -- Authentication section -------------------------------------------------
 
-  it("renders the read-only Runtime rows from GET /api/v1/settings", async () => {
+  describe("Authentication section", () => {
+    it("disables the OIDC mode option until a test login verified the settings", async () => {
+      renderWithProviders(<Settings />, { route: "/settings" });
+      const auth = await findSection("Authentication");
+      const option = within(auth).getByRole("option", { name: "OIDC" });
+      expect(option).toBeDisabled();
+      expect(within(auth).getByText(/stays disabled until a test login succeeds/)).toBeInTheDocument();
+    });
+
+    it("enables the OIDC option once oidc_verified is true", async () => {
+      server.use(http.get("/api/v1/settings", () => HttpResponse.json(settingsWith({ oidc_verified: { value: true } }))));
+      renderWithProviders(<Settings />, { route: "/settings" });
+      const auth = await findSection("Authentication");
+      await waitFor(() => expect(within(auth).getByRole("option", { name: "OIDC" })).not.toBeDisabled());
+    });
+
+    it("never shows the client secret; Replace sends it and clears the input, Clear sends null", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get("/api/v1/settings", () =>
+          HttpResponse.json(settingsWith({ oidc_client_secret: { set: true, source: "db" } as never })),
+        ),
+      );
+      const bodies: unknown[] = [];
+      server.use(
+        http.put("/api/v1/settings", async ({ request }) => {
+          bodies.push(await request.json());
+          return HttpResponse.json(settingsWith({ oidc_client_secret: { set: true, source: "db" } as never }));
+        }),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+      const auth = await findSection("Authentication");
+      const input = await within(auth).findByLabelText("Client secret");
+      expect(input).toHaveValue("");
+      expect(input).toHaveAttribute("type", "password");
+      expect(within(auth).getByText("Secret set.")).toBeInTheDocument();
+
+      await user.type(input, "s3cret");
+      await user.click(within(auth).getByRole("button", { name: "Replace" }));
+      await waitFor(() => expect(bodies[0]).toEqual({ oidc_client_secret: "s3cret" }));
+      await waitFor(() => expect(input).toHaveValue(""));
+
+      await user.click(within(auth).getByRole("button", { name: "Clear" }));
+      await waitFor(() => expect(bodies[1]).toEqual({ oidc_client_secret: null }));
+    });
+
+    it("Test login posts the form values then redirects to authorize_url", async () => {
+      const user = userEvent.setup();
+      let posted: unknown;
+      server.use(
+        http.post("/api/v1/auth/oidc-test", async ({ request }) => {
+          posted = await request.json();
+          return HttpResponse.json({ authorize_url: "https://idp.example.com/auth?x=1", redirect_uri: "r" });
+        }),
+      );
+      const assign = vi.fn();
+      const original = window.location;
+      Object.defineProperty(window, "location", { configurable: true, value: { ...original, assign, protocol: "https:" } });
+      try {
+        renderWithProviders(<Settings />, { route: "/settings" });
+        const auth = await findSection("Authentication");
+        await user.type(await within(auth).findByLabelText("Issuer URL"), "https://idp.example.com");
+        await user.type(within(auth).getByLabelText("Client ID"), "cid");
+        await user.click(within(auth).getByRole("button", { name: "Test login" }));
+        await waitFor(() => expect(assign).toHaveBeenCalledWith("https://idp.example.com/auth?x=1"));
+        expect(posted).toMatchObject({ oidc_issuer: "https://idp.example.com", oidc_client_id: "cid" });
+      } finally {
+        Object.defineProperty(window, "location", { configurable: true, value: original });
+      }
+    });
+
+    it("shows the 409 oidc_not_verified message from a failed mode change", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get("/api/v1/settings", () => HttpResponse.json(settingsWith({ oidc_verified: { value: true } }))),
+        http.put("/api/v1/settings", () =>
+          HttpResponse.json(
+            { error: { code: "oidc_not_verified", message: "Run a successful test login first." } },
+            { status: 409 },
+          ),
+        ),
+      );
+      renderWithProviders(<Settings />, { route: "/settings" });
+      const auth = await findSection("Authentication");
+      await waitFor(() => expect(within(auth).getByRole("option", { name: "OIDC" })).not.toBeDisabled());
+      await user.selectOptions(within(auth).getByLabelText("Auth mode"), "oidc");
+      expect(await within(auth).findByText(/successful test login first/)).toBeInTheDocument();
+    });
+
+    it("shows a banner on return from the test login and strips the query", async () => {
+      renderWithProviders(<Settings />, { route: "/settings?oidc_test=error&message=bad%20issuer" });
+      expect(await screen.findByText(/Test login failed: bad issuer/)).toBeInTheDocument();
+    });
+
+    it("rotate session secret needs an inline confirm", async () => {
+      const user = userEvent.setup();
+      let called = false;
+      server.use(
+        http.post("/api/v1/auth/rotate-session-secret", () => {
+          called = true;
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      const reload = vi.fn();
+      const original = window.location;
+      Object.defineProperty(window, "location", { configurable: true, value: { ...original, reload } });
+      try {
+        renderWithProviders(<Settings />, { route: "/settings" });
+        const auth = await findSection("Authentication");
+        await user.click(within(auth).getByRole("button", { name: "Rotate session secret" }));
+        expect(called).toBe(false);
+        await user.click(within(auth).getByRole("button", { name: "Confirm rotate" }));
+        await waitFor(() => expect(called).toBe(true));
+      } finally {
+        Object.defineProperty(window, "location", { configurable: true, value: original });
+      }
+    });
+  });
+
+  // -- Runtime section ---------------------------------------------------------
+
+  it("Runtime shows an editable CORS list and read-only data/static dirs, no env wording", async () => {
+    const user = userEvent.setup();
+    const bodies: unknown[] = [];
     server.use(
-      http.get("/api/v1/settings", () => HttpResponse.json(settingsWith({ auth_mode: { value: "oidc" } }))),
+      http.get("/api/v1/settings", () => HttpResponse.json(settingsWith({ static_dir: { value: "/app/static" } }))),
+      http.put("/api/v1/settings", async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json(defaultSettingsBody);
+      }),
     );
-
     renderWithProviders(<Settings />, { route: "/settings" });
-
     const runtime = await findSection("Runtime");
-    expect(await within(runtime).findByText("oidc")).toBeInTheDocument();
-    expect(within(runtime).getByText("http://localhost:5173")).toBeInTheDocument(); // cors_origins
-    expect(within(runtime).getByText("./data")).toBeInTheDocument(); // data_dir
+    expect(await within(runtime).findByText("./data")).toBeInTheDocument();
+    expect(within(runtime).getByText("/app/static")).toBeInTheDocument();
+    expect(within(runtime).queryByText(/environment/i)).not.toBeInTheDocument();
+    const box = within(runtime).getByLabelText("CORS origins");
+    expect(box).toHaveValue("http://localhost:5173");
+    await user.type(box, "{enter}https://a.example.com");
+    await user.click(within(runtime).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bodies[0]).toEqual({ cors_origins: ["http://localhost:5173", "https://a.example.com"] }));
   });
 
   it("ELS enabled no longer appears in the read-only Runtime section (task 4.5 Track A: it moved to ELS)", async () => {

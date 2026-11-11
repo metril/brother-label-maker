@@ -52,13 +52,12 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from labelmaker.api import auth_gate
-from labelmaker.config import AppConfig
-from labelmaker.main import create_app
+from labelmaker.config import AppConfig  # noqa: F401
+from labelmaker.main import create_app  # noqa: F401
 
 ISSUER = "https://idp.test"
 CLIENT_ID = "client-abc"
 CLIENT_SECRET = "client-secret-xyz"
-SESSION_SECRET = "unit-test-session-secret-do-not-reuse"
 
 DISCOVERY_URL = f"{ISSUER}/.well-known/openid-configuration"
 AUTHORIZE_URL = f"{ISSUER}/authorize"
@@ -74,7 +73,6 @@ _OIDC_APP_CONFIG_OVERRIDES = {
     "oidc_issuer": ISSUER,
     "oidc_client_id": CLIENT_ID,
     "oidc_client_secret": CLIENT_SECRET,
-    "session_secret": SESSION_SECRET,
 }
 
 _OIDC_CONFIGURED = pytest.mark.parametrize(
@@ -187,86 +185,6 @@ async def test_login_callback_logout_404_in_none_mode(client):
     assert (await client.get("/api/v1/auth/login")).status_code == 404
     assert (await client.get("/api/v1/auth/callback")).status_code == 404
     assert (await client.post("/api/v1/auth/logout")).status_code == 404
-
-
-# -- fast-fail config validation --------------------------------------------
-
-
-def _oidc_config(tmp_path, **overrides) -> AppConfig:
-    """AppConfig with EVERY env-read field explicit (the conftest
-    hermeticity rule -- a dev shell exporting OIDC_ISSUER must not leak in
-    here), oidc mode, missing-by-default credentials."""
-    kwargs = {
-        "printer_init_strategy": "classic",
-        "printer_bit_order": "msb_first",
-        "printer_flip_pins": False,
-        "homebox_url": None,
-        "homebox_api_key": None,
-        "els_enabled": False,
-        "els_tape_mm": 24.0,
-        "auth_mode": "oidc",
-        "oidc_issuer": None,
-        "oidc_client_id": None,
-        "oidc_client_secret": None,
-        "oidc_scopes": "openid profile email",
-        "session_secret": None,
-        **overrides,
-    }
-    return AppConfig(printer_mode="mock", data_dir=tmp_path / "data", **kwargs)
-
-
-def test_create_app_fails_fast_when_oidc_config_incomplete(tmp_path):
-    with pytest.raises(ValueError) as exc_info:
-        create_app(_oidc_config(tmp_path))
-    message = str(exc_info.value)
-    for missing_name in ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "SESSION_SECRET"):
-        assert missing_name in message
-
-
-@pytest.mark.parametrize(
-    "missing_field, env_name",
-    [
-        ("oidc_issuer", "OIDC_ISSUER"),
-        ("oidc_client_id", "OIDC_CLIENT_ID"),
-        ("oidc_client_secret", "OIDC_CLIENT_SECRET"),
-        ("session_secret", "SESSION_SECRET"),
-    ],
-)
-def test_fails_fast_names_each_individually_missing_field(tmp_path, missing_field, env_name):
-    """Review gap: all-four-missing never proves the per-field list is
-    right. One at a time, each absence must be named."""
-    complete = {
-        "oidc_issuer": ISSUER,
-        "oidc_client_id": CLIENT_ID,
-        "oidc_client_secret": CLIENT_SECRET,
-        "session_secret": SESSION_SECRET,
-    }
-    complete[missing_field] = None
-    with pytest.raises(ValueError, match=env_name):
-        create_app(_oidc_config(tmp_path, **complete))
-
-
-def test_fails_fast_when_scopes_lack_openid(tmp_path):
-    """Without "openid" authlib silently skips ALL id_token verification
-    (review) -- must be a startup error, not a mystery sign-in loop."""
-    with pytest.raises(ValueError, match="openid"):
-        create_app(
-            _oidc_config(
-                tmp_path,
-                oidc_issuer=ISSUER,
-                oidc_client_id=CLIENT_ID,
-                oidc_client_secret=CLIENT_SECRET,
-                session_secret=SESSION_SECRET,
-                oidc_scopes="profile email",
-            )
-        )
-
-
-def test_short_session_secret_is_rejected_at_config_time(tmp_path):
-    """A guessable SESSION_SECRET is a full auth bypass (the cookie HMAC is
-    the gate) -- the Field(min_length=32) bound must hold."""
-    with pytest.raises(Exception, match="session_secret"):
-        _oidc_config(tmp_path, session_secret="changeme")
 
 
 @_OIDC_CONFIGURED

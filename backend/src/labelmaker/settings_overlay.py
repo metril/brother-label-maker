@@ -35,7 +35,12 @@ never what a job already dispatched to a thread sees mid-print.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
+import secrets
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -77,6 +82,26 @@ class SettingsConflictError(ValueError):
     """The update is valid field by field but inconsistent as a whole
     (remote mode without a bridge address/certificate). The settings router
     maps it to a 422, like a ValidationError."""
+
+
+class OidcNotVerifiedError(SettingsConflictError):
+    """auth_mode=oidc requested (or kept) with an OIDC config that has not
+    passed a test login. The settings router maps it to a 409."""
+
+
+# Own DB keys (outside the `cfg.` overlay namespace; never exposed by GET).
+SESSION_SECRET_KEY = "auth.session_secret"
+OIDC_VERIFIED_KEY = "auth.oidc_verified"
+_OIDC_FIELDS = ("oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_scopes")
+# Fields that only a session user may change while oidc is active.
+PROTECTED_FIELDS = frozenset({"auth_mode", "cors_origins", *_OIDC_FIELDS})
+_ORIGIN_RE = re.compile(r"^https?://[^/\s?#]+$")
+
+
+def oidc_config_hash(issuer: object, client_id: object, secret: object, scopes: object) -> str:
+    """Digest of the OIDC config a test login verified (marker value)."""
+    raw = json.dumps([issuer, client_id, secret, scopes])
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 _REMOTE_FIELDS = frozenset({"printer_mode", "printer_bridge_address", "printer_bridge_cert"})
@@ -157,6 +182,31 @@ class SettingsOverrides(BaseModel):
         default=None,
         description="Allow creating HomeBox entities/attachments",
     )
+    auth_mode: Literal["none", "oidc"] | None = Field(
+        default=None,
+        description="Authentication: none, or oidc (requires a successful test login first)",
+    )
+    oidc_issuer: str | None = Field(
+        default=None, max_length=255, description="OIDC issuer URL (http/https)"
+    )
+    oidc_client_id: str | None = Field(default=None, max_length=255, description="OIDC client id")
+    oidc_client_secret: str | None = Field(
+        default=None,
+        max_length=500,
+        description="OIDC client secret (write-only; never returned)",
+    )
+    oidc_scopes: str | None = Field(
+        default=None, max_length=255, description="Space-separated OIDC scopes; must include openid"
+    )
+    session_max_age_s: int | None = Field(
+        default=None, ge=300, le=30 * 24 * 3600, description="Session lifetime in seconds"
+    )
+    session_cookie_secure: bool | None = Field(
+        default=None, description="Mark the session cookie Secure (serve over HTTPS)"
+    )
+    cors_origins: list[str] | None = Field(
+        default=None, max_length=50, description="Allowed browser origins (scheme://host[:port])"
+    )
     keep_printer_awake: bool | None = Field(
         default=None,
         description="Periodically poll the printer to keep it awake",
@@ -195,6 +245,46 @@ class SettingsOverrides(BaseModel):
 
         cert_pem_to_der(value)  # exactly one X.509 cert, never a private key
         return value.strip() + "\n"
+
+    @field_validator("oidc_issuer")
+    @classmethod
+    def _validate_oidc_issuer(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _http_url_no_trailing_slash(value, field_name="oidc_issuer")
+
+    @field_validator("oidc_client_id", "oidc_client_secret")
+    @classmethod
+    def _validate_oidc_nonempty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be empty")
+        return value
+
+    @field_validator("oidc_scopes")
+    @classmethod
+    def _validate_oidc_scopes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = " ".join(value.split())
+        if "openid" not in value.split():
+            raise ValueError("oidc_scopes must include 'openid'")
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _validate_cors_origins(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [v.strip().rstrip("/") for v in value]
+        for origin in cleaned:
+            if not _ORIGIN_RE.match(origin):
+                raise ValueError(
+                    "cors_origins entries must be http(s) origins like https://labels.example.com"
+                )
+        return list(dict.fromkeys(cleaned))
 
     @field_validator("homebox_api_key")
     @classmethod
@@ -235,6 +325,14 @@ class EffectiveSettings(BaseModel):
     homebox_url: str | None
     homebox_api_key: str | None
     homebox_writes_enabled: bool
+    auth_mode: Literal["none", "oidc"]
+    oidc_issuer: str | None
+    oidc_client_id: str | None
+    oidc_client_secret: str | None
+    oidc_scopes: str
+    session_max_age_s: int
+    session_cookie_secure: bool
+    cors_origins: list[str]
     keep_printer_awake: bool
     keep_awake_interval_min: int
 
@@ -250,12 +348,59 @@ class SettingsOverlay:
         self._cfg = cfg
         self._db = db
         self._overrides: dict[str, object] = {}
+        self.session_secret: str = ""
+        self._oidc_verified: str | None = None
+        # Awaited after every successful change (main.py rebuilds the
+        # runtime auth/CORS snapshot here).
+        self.on_change: Callable[[], Awaitable[None]] | None = None
 
     @classmethod
     async def create(cls, cfg: AppConfig, db: Database) -> SettingsOverlay:
         overlay = cls(cfg, db)
         await overlay._reload()
+        secret = await db.get_setting(SESSION_SECRET_KEY)
+        if not isinstance(secret, str) or len(secret) < 32:
+            secret = secrets.token_hex(32)
+            await db.set_setting(SESSION_SECRET_KEY, secret)
+        overlay.session_secret = secret
+        overlay._oidc_verified = await db.get_setting(OIDC_VERIFIED_KEY)
         return overlay
+
+    def oidc_verified(self) -> bool:
+        """True iff the marker matches the CURRENT effective OIDC config."""
+        e = self.effective()
+        return self._oidc_verified == oidc_config_hash(
+            e.oidc_issuer, e.oidc_client_id, e.oidc_client_secret, e.oidc_scopes
+        )
+
+    async def rotate_session_secret(self) -> None:
+        """New signing secret: every existing session cookie stops verifying."""
+        self.session_secret = secrets.token_hex(32)
+        await self._db.set_setting(SESSION_SECRET_KEY, self.session_secret)
+        if self.on_change:
+            await self.on_change()
+
+    async def save_verified_oidc(
+        self, issuer: str, client_id: str, secret: str, scopes: str
+    ) -> None:
+        """Persist an OIDC config that just passed a test login, plus its marker."""
+        validated = SettingsOverrides(
+            oidc_issuer=issuer,
+            oidc_client_id=client_id,
+            oidc_client_secret=secret,
+            oidc_scopes=scopes,
+        )
+        for field in _OIDC_FIELDS:
+            value = getattr(validated, field)
+            await self._db.set_setting(f"{_DB_KEY_PREFIX}{field}", value)
+            self._overrides[field] = value
+        e = self.effective()
+        self._oidc_verified = oidc_config_hash(
+            e.oidc_issuer, e.oidc_client_id, e.oidc_client_secret, e.oidc_scopes
+        )
+        await self._db.set_setting(OIDC_VERIFIED_KEY, self._oidc_verified)
+        if self.on_change:
+            await self.on_change()
 
     async def _reload(self) -> None:
         """Loads stored overrides from `db`, re-validating each row against
@@ -338,7 +483,32 @@ class SettingsOverlay:
                     "remote printer mode needs both printer_bridge_address and "
                     "printer_bridge_cert"
                 )
-        for field in validated.model_fields_set:
+        sent = validated.model_fields_set
+        if sent & (PROTECTED_FIELDS - {"cors_origins"}):
+            merged = self.effective().model_dump()
+            for field in sent & PROTECTED_FIELDS:
+                value = getattr(validated, field)
+                merged[field] = getattr(self._cfg, field) if value is None else value
+            if merged["auth_mode"] == "oidc":
+                if not (
+                    merged["oidc_issuer"]
+                    and merged["oidc_client_id"]
+                    and merged["oidc_client_secret"]
+                ):
+                    raise OidcNotVerifiedError(
+                        "oidc needs issuer, client id and client secret, then a test login"
+                    )
+                digest = oidc_config_hash(
+                    merged["oidc_issuer"],
+                    merged["oidc_client_id"],
+                    merged["oidc_client_secret"],
+                    merged["oidc_scopes"],
+                )
+                if digest != self._oidc_verified:
+                    raise OidcNotVerifiedError(
+                        "the OIDC settings have not passed a test login; run Test login first"
+                    )
+        for field in sent:
             value = getattr(validated, field)
             key = f"{_DB_KEY_PREFIX}{field}"
             if value is None:
@@ -347,6 +517,11 @@ class SettingsOverlay:
             else:
                 await self._db.set_setting(key, value)
                 self._overrides[field] = value
+        if sent & set(_OIDC_FIELDS) and not self.oidc_verified():
+            self._oidc_verified = None
+            await self._db.delete_setting(OIDC_VERIFIED_KEY)
+        if self.on_change:
+            await self.on_change()
 
     def provenance(self, field: str) -> Literal["db", "default"]:
         """`"db"` when an override is currently stored; else `"default"`.

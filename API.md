@@ -24,7 +24,7 @@ callback (`/api/auth/callback`, registered with your identity provider).
 
 ## Authentication
 
-Three modes, selected by the server's `AUTH_MODE`:
+Three modes, selected by the `auth_mode` setting (Settings page):
 
 - **`none`** (default): no authentication; every route is open. API keys are
   ignored. Intended for a trusted LAN.
@@ -185,6 +185,8 @@ OIDC login flow and current-session probe.
 | GET | `/api/v1/auth/callback` | Complete OIDC sign-in | none | 302 | 401, 404 |
 | POST | `/api/v1/auth/logout` | Sign out | none | 204 | 404 |
 | GET | `/api/v1/auth/me` | Get the current session | none | 200 | 500 |
+| POST | `/api/v1/auth/oidc-test` | Start an OIDC test login | none | 200 | 401, 403, 422, 502 |
+| POST | `/api/v1/auth/rotate-session-secret` | Rotate the session signing secret | none | 204 | 401, 403 |
 
 ### api-keys
 
@@ -203,7 +205,7 @@ Runtime settings stored in the database overlay.
 | Method | Path | Summary | Auth | Success | Errors |
 |---|---|---|---|---|---|
 | GET | `/api/v1/settings` | List settings | read key or session | 200 | 500 |
-| PUT | `/api/v1/settings` | Update settings | write key or session | 200 | 422 |
+| PUT | `/api/v1/settings` | Update settings | write key or session | 200 | 403, 409, 422 |
 
 ### labels
 

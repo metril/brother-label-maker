@@ -17,7 +17,6 @@ deviation from the plan's "text" test pattern, noted in the protocol notes.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -54,6 +53,7 @@ from labelmaker.driver.transport import (
     TransportError,
     open_real_transport,
 )
+from labelmaker.paths import default_data_dir
 
 # --- Test patterns -----------------------------------------------------------
 
@@ -564,8 +564,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--data-dir",
-        default=os.environ.get("DATA_DIR", "./data"),
-        help="holds this app's bridge identity under bridge/ (with --remote; default $DATA_DIR)",
+        default=str(default_data_dir()),
+        help="holds this app's bridge identity under bridge/ (with --remote)",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
