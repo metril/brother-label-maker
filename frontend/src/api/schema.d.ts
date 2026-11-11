@@ -55,6 +55,11 @@ export interface paths {
         /**
          * Complete OIDC sign-in
          * @description IdP redirect target: exchanges the code, stores the session, redirects on.
+         *
+         *     Also completes a Settings-page "test login" (a pending test id in the
+         *     session): verifies the id_token against the candidate config, saves it
+         *     with its verified marker, signs the browser in, and redirects to
+         *     `/settings?oidc_test=ok|error[&message=...]`.
          */
         get: operations["auth_callback_api_v1_auth_callback_get"];
         put?: never;
@@ -119,6 +124,50 @@ export interface paths {
         get: operations["me_api_v1_auth_me_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an OIDC test login
+         * @description Validate a candidate config and return the IdP authorize URL to open.
+         *
+         *     The browser then returns to `/api/auth/callback`, which verifies the
+         *     id_token, saves the config as verified, signs this browser in and
+         *     redirects to `/settings?oidc_test=ok` (or `error` with a `message`).
+         */
+        post: operations["oidc_test_api_v1_auth_oidc_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/rotate-session-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the session signing secret
+         * @description Invalidate every signed-in session (including the caller's, in oidc mode).
+         */
+        post: operations["rotate_session_secret_api_v1_auth_rotate_session_secret_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1061,7 +1110,7 @@ export interface paths {
          * @description Partially update settings.
          *
          *     Send only the fields to change; an explicit `null` clears the override
-         *     (reverts to the env/default value), an omitted field is left alone.
+         *     (reverts to the default), an omitted field is left alone.
          *     Unknown keys and invalid values yield a 422 whose details never echo
          *     the submitted values (the HomeBox API key is a secret).
          */
@@ -1996,6 +2045,34 @@ export interface components {
             name: string;
         };
         /**
+         * OidcTestIn
+         * @description Candidate OIDC config to verify. A omitted secret/scopes falls back to
+         *     the stored/default value, so re-testing needn't re-enter the secret.
+         */
+        OidcTestIn: {
+            /** Oidc Client Id */
+            oidc_client_id: string;
+            /** Oidc Client Secret */
+            oidc_client_secret?: string | null;
+            /** Oidc Issuer */
+            oidc_issuer: string;
+            /** Oidc Scopes */
+            oidc_scopes?: string | null;
+        };
+        /** OidcTestOut */
+        OidcTestOut: {
+            /**
+             * Authorize Url
+             * @description IdP URL to navigate the browser to
+             */
+            authorize_url: string;
+            /**
+             * Redirect Uri
+             * @description Callback URL to register with the IdP
+             */
+            redirect_uri: string;
+        };
+        /**
          * PathSegment
          * @description repo.EntityPath -- one ancestor in GET /v1/entities/{id}/path's
          *     root-first chain (the entity itself is the last segment).
@@ -2339,8 +2416,9 @@ export interface components {
         SequenceKind: "numeric" | "alpha" | "list" | "csv";
         /**
          * SettingRow
-         * @description One settings row. `value` is absent for `homebox_api_key` (never echoed;
-         *     `set` says whether one is configured); `set` is absent for every other row.
+         * @description One settings row. `value` is absent for the write-only secrets
+         *     (`homebox_api_key`, `oidc_client_secret`; `set` says whether one is
+         *     configured); `set` is absent for every other row.
          */
         SettingRow: {
             /** Editable */
@@ -2349,7 +2427,7 @@ export interface components {
             key: string;
             /**
              * Set
-             * @description homebox_api_key only: is a key set
+             * @description homebox_api_key / oidc_client_secret only: is a secret set
              */
             set?: boolean | null;
             /**
@@ -2383,6 +2461,16 @@ export interface components {
          *     counterpart at all.
          */
         SettingsOverrides: {
+            /**
+             * Auth Mode
+             * @description Authentication: none, or oidc (requires a successful test login first)
+             */
+            auth_mode?: ("none" | "oidc") | null;
+            /**
+             * Cors Origins
+             * @description Allowed browser origins (scheme://host[:port])
+             */
+            cors_origins?: string[] | null;
             /**
              * Els Enabled
              * @description Serve the unauthenticated ELS label endpoint
@@ -2419,6 +2507,26 @@ export interface components {
              */
             keep_printer_awake?: boolean | null;
             /**
+             * Oidc Client Id
+             * @description OIDC client id
+             */
+            oidc_client_id?: string | null;
+            /**
+             * Oidc Client Secret
+             * @description OIDC client secret (write-only; never returned)
+             */
+            oidc_client_secret?: string | null;
+            /**
+             * Oidc Issuer
+             * @description OIDC issuer URL (http/https)
+             */
+            oidc_issuer?: string | null;
+            /**
+             * Oidc Scopes
+             * @description Space-separated OIDC scopes; must include openid
+             */
+            oidc_scopes?: string | null;
+            /**
              * Printer Bit Order
              * @description Raster bit order: msb_first or lsb_first
              */
@@ -2448,6 +2556,16 @@ export interface components {
              * @description Transport: mock, usb, or remote (Raspberry Pi bridge)
              */
             printer_mode?: ("mock" | "usb" | "remote") | null;
+            /**
+             * Session Cookie Secure
+             * @description Mark the session cookie Secure (serve over HTTPS)
+             */
+            session_cookie_secure?: boolean | null;
+            /**
+             * Session Max Age S
+             * @description Session lifetime in seconds
+             */
+            session_max_age_s?: number | null;
         };
         /** SymbolInfo */
         SymbolInfo: {
@@ -2856,6 +2974,102 @@ export interface operations {
             };
             /** @description internal_error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    oidc_test_api_v1_auth_oidc_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OidcTestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OidcTestOut"];
+                };
+            };
+            /** @description auth_required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description upstream_error */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rotate_session_secret_api_v1_auth_rotate_session_secret_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description auth_required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4841,6 +5055,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description validation_error */

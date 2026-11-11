@@ -1879,6 +1879,68 @@
         "title": "NamedRef",
         "type": "object"
       },
+      "OidcTestIn": {
+        "additionalProperties": false,
+        "description": "Candidate OIDC config to verify. A omitted secret/scopes falls back to\nthe stored/default value, so re-testing needn't re-enter the secret.",
+        "properties": {
+          "oidc_client_id": {
+            "title": "Oidc Client Id",
+            "type": "string"
+          },
+          "oidc_client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oidc Client Secret"
+          },
+          "oidc_issuer": {
+            "title": "Oidc Issuer",
+            "type": "string"
+          },
+          "oidc_scopes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oidc Scopes"
+          }
+        },
+        "required": [
+          "oidc_issuer",
+          "oidc_client_id"
+        ],
+        "title": "OidcTestIn",
+        "type": "object"
+      },
+      "OidcTestOut": {
+        "properties": {
+          "authorize_url": {
+            "description": "IdP URL to navigate the browser to",
+            "title": "Authorize Url",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "description": "Callback URL to register with the IdP",
+            "title": "Redirect Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorize_url",
+          "redirect_uri"
+        ],
+        "title": "OidcTestOut",
+        "type": "object"
+      },
       "PathSegment": {
         "description": "repo.EntityPath -- one ancestor in GET /v1/entities/{id}/path's\nroot-first chain (the entity itself is the last segment).",
         "properties": {
@@ -2641,7 +2703,7 @@
         "type": "string"
       },
       "SettingRow": {
-        "description": "One settings row. `value` is absent for `homebox_api_key` (never echoed;\n`set` says whether one is configured); `set` is absent for every other row.",
+        "description": "One settings row. `value` is absent for the write-only secrets\n(`homebox_api_key`, `oidc_client_secret`; `set` says whether one is\nconfigured); `set` is absent for every other row.",
         "properties": {
           "editable": {
             "title": "Editable",
@@ -2660,7 +2722,7 @@
                 "type": "null"
               }
             ],
-            "description": "homebox_api_key only: is a key set",
+            "description": "homebox_api_key / oidc_client_secret only: is a secret set",
             "title": "Set"
           },
           "source": {
@@ -2727,6 +2789,38 @@
         "additionalProperties": false,
         "description": "PUT /api/settings' request body: a partial map of `{field: value}`\n(every field optional) plus, via `model_fields_set`, the record of\nWHICH fields a caller actually touched -- `SettingsOverlay.set_many`\nreads that (not `is not None`) to tell \"omitted, leave alone\" apart\nfrom \"explicitly sent null, clear the override\". `extra=\"forbid\"`\nturns an unknown key into a pydantic ValidationError (surfaced as a\n422 by the router) instead of being silently ignored.\n\nField types mirror `AppConfig`'s own Literals/constraints exactly,\nwith two deliberate additions: `els_tape_mm` gets real bounds here\n(AppConfig's own field has none) since this is the one place a human\ntypes the number directly, and the two DB-only fields\n(`keep_printer_awake`/`keep_awake_interval_min`) have no `AppConfig`\ncounterpart at all.",
         "properties": {
+          "auth_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "none",
+                  "oidc"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Authentication: none, or oidc (requires a successful test login first)",
+            "title": "Auth Mode"
+          },
+          "cors_origins": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Allowed browser origins (scheme://host[:port])",
+            "title": "Cors Origins"
+          },
           "els_enabled": {
             "anyOf": [
               {
@@ -2817,6 +2911,58 @@
             "description": "Periodically poll the printer to keep it awake",
             "title": "Keep Printer Awake"
           },
+          "oidc_client_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OIDC client id",
+            "title": "Oidc Client Id"
+          },
+          "oidc_client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OIDC client secret (write-only; never returned)",
+            "title": "Oidc Client Secret"
+          },
+          "oidc_issuer": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OIDC issuer URL (http/https)",
+            "title": "Oidc Issuer"
+          },
+          "oidc_scopes": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Space-separated OIDC scopes; must include openid",
+            "title": "Oidc Scopes"
+          },
           "printer_bit_order": {
             "anyOf": [
               {
@@ -2903,6 +3049,32 @@
             ],
             "description": "Transport: mock, usb, or remote (Raspberry Pi bridge)",
             "title": "Printer Mode"
+          },
+          "session_cookie_secure": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mark the session cookie Secure (serve over HTTPS)",
+            "title": "Session Cookie Secure"
+          },
+          "session_max_age_s": {
+            "anyOf": [
+              {
+                "maximum": 2592000.0,
+                "minimum": 300.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session lifetime in seconds",
+            "title": "Session Max Age S"
           }
         },
         "title": "SettingsOverrides",
@@ -3310,7 +3482,7 @@
     },
     "/api/v1/auth/callback": {
       "get": {
-        "description": "IdP redirect target: exchanges the code, stores the session, redirects on.",
+        "description": "IdP redirect target: exchanges the code, stores the session, redirects on.\n\nAlso completes a Settings-page \"test login\" (a pending test id in the\nsession): verifies the id_token against the candidate config, saves it\nwith its verified marker, signs the browser in, and redirects to\n`/settings?oidc_test=ok|error[&message=...]`.",
         "operationId": "auth_callback_api_v1_auth_callback_get",
         "responses": {
           "302": {
@@ -3465,6 +3637,117 @@
         },
         "security": [],
         "summary": "Get the current session",
+        "tags": [
+          "auth"
+        ],
+        "x-required-scope": "none"
+      }
+    },
+    "/api/v1/auth/oidc-test": {
+      "post": {
+        "description": "Validate a candidate config and return the IdP authorize URL to open.\n\nThe browser then returns to `/api/auth/callback`, which verifies the\nid_token, saves the config as verified, signs this browser in and\nredirects to `/settings?oidc_test=ok` (or `error` with a `message`).",
+        "operationId": "oidc_test_api_v1_auth_oidc_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcTestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "auth_required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "upstream_error"
+          }
+        },
+        "security": [],
+        "summary": "Start an OIDC test login",
+        "tags": [
+          "auth"
+        ],
+        "x-required-scope": "none"
+      }
+    },
+    "/api/v1/auth/rotate-session-secret": {
+      "post": {
+        "description": "Invalidate every signed-in session (including the caller's, in oidc mode).",
+        "operationId": "rotate_session_secret_api_v1_auth_rotate_session_secret_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "auth_required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden"
+          }
+        },
+        "security": [],
+        "summary": "Rotate the session signing secret",
         "tags": [
           "auth"
         ],
@@ -6714,7 +6997,7 @@
         "x-required-scope": "read"
       },
       "put": {
-        "description": "Partially update settings.\n\nSend only the fields to change; an explicit `null` clears the override\n(reverts to the env/default value), an omitted field is left alone.\nUnknown keys and invalid values yield a 422 whose details never echo\nthe submitted values (the HomeBox API key is a secret).",
+        "description": "Partially update settings.\n\nSend only the fields to change; an explicit `null` clears the override\n(reverts to the default), an omitted field is left alone.\nUnknown keys and invalid values yield a 422 whose details never echo\nthe submitted values (the HomeBox API key is a secret).",
         "operationId": "put_settings_api_v1_settings_put",
         "requestBody": {
           "content": {
@@ -6736,6 +7019,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "conflict"
           },
           "422": {
             "content": {

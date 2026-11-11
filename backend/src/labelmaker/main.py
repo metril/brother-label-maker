@@ -8,17 +8,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
-from starlette.middleware.sessions import SessionMiddleware
 
 from labelmaker.api import (
     openapi_meta,
@@ -38,6 +35,11 @@ from labelmaker.api import (
 )
 from labelmaker.api.api_keys import WsTicketStore
 from labelmaker.api.auth_gate import AuthGateMiddleware
+from labelmaker.api.auth_runtime import (
+    DynamicCORSMiddleware,
+    DynamicSessionMiddleware,
+    rebuild_runtime,
+)
 from labelmaker.api.errors import ApiError, err, register_error_handlers
 from labelmaker.api.legacy import LegacyDeprecationMiddleware
 from labelmaker.api.schemas import HealthOut
@@ -47,15 +49,10 @@ from labelmaker.homebox import build_client
 from labelmaker.jobs.events import EventBus
 from labelmaker.jobs.keepalive import initial_keepalive_status, run_keepalive
 from labelmaker.jobs.worker import run_worker
-from labelmaker.legacy_env import import_legacy_env
+from labelmaker.paths import find_static_dir
 from labelmaker.settings_overlay import SettingsOverlay
 
 logger = logging.getLogger(__name__)
-
-# The session cookie's own name -- distinct from Starlette's generic
-# "session" default so it reads unambiguously in browser devtools/a proxy
-# log as belonging to this app specifically.
-_SESSION_COOKIE_NAME = "lm_session"
 
 # Task 4.2 (diagnostics page's "App" section): the installed package
 # version, read from this project's own pyproject.toml via importlib
@@ -71,41 +68,6 @@ except PackageNotFoundError:
     APP_VERSION = "0.0.0-dev"
 
 
-def _require_oidc_config(cfg: AppConfig) -> None:
-    """Fails FAST -- at create_app time, i.e. at process startup for the
-    real server entry point below, never on the first browser hit to
-    `/api/auth/login` -- when `AUTH_MODE=oidc` is missing any setting the
-    flow cannot function without. See config.py's `AppConfig` for what each
-    of these actually configures.
-    """
-    missing = [
-        env_name
-        for env_name, value in (
-            ("OIDC_ISSUER", cfg.oidc_issuer),
-            ("OIDC_CLIENT_ID", cfg.oidc_client_id),
-            ("OIDC_CLIENT_SECRET", cfg.oidc_client_secret),
-            ("SESSION_SECRET", cfg.session_secret),
-        )
-        if not value
-    ]
-    if missing:
-        raise ValueError(
-            "AUTH_MODE=oidc requires the following environment variable(s) to be "
-            f"set: {', '.join(missing)} (see config.py's AppConfig for what each one "
-            "configures; SESSION_SECRET wants >=32 random chars, e.g. "
-            "`openssl rand -hex 32`)"
-        )
-    # Without "openid" authlib treats this as plain OAuth2: no nonce, and --
-    # far worse -- NO id_token signature/iss/aud/exp verification at all,
-    # while the callback still 302s like a success (review). Fail here, at
-    # startup, with the reason spelled out.
-    if "openid" not in (cfg.oidc_scopes or "").split():
-        raise ValueError(
-            f"OIDC_SCOPES must include 'openid' (got {cfg.oidc_scopes!r}) -- without "
-            "it the id_token is never verified and sign-in cannot complete"
-        )
-
-
 # Python's `mimetypes` table varies by platform/version (a minimal Docker
 # image may have no /etc/mime.types at all), and browsers refuse
 # `WebAssembly.instantiateStreaming` on anything but application/wasm (the
@@ -117,28 +79,15 @@ _STATIC_MEDIA_TYPES = {
 }
 
 
-def _resolve_static_dir() -> Path | None:
-    """`frontend/dist`, resolved relative to the repo root (not cwd) so
-    `uv run uvicorn ...` works the same from any directory -- overridable via
-    STATIC_DIR for deployment shapes where the built frontend doesn't sit
-    next to `backend/` (e.g. a Docker image). Returns None (no mount) if
-    neither exists, which is the expected state until the frontend task
-    ships a build -- the API must boot standalone either way.
-    """
-    override = os.environ.get("STATIC_DIR")
-    if override:
-        candidate = Path(override)
-    else:
-        # backend/src/labelmaker/main.py -> parents[3] == repo root.
-        repo_root = Path(__file__).resolve().parents[3]
-        candidate = repo_root / "frontend" / "dist"
-    return candidate if candidate.is_dir() else None
+_AUTO: Any = object()
 
 
-def create_app(config: AppConfig | None = None) -> FastAPI:
+def create_app(config: AppConfig | None = None, static_dir: Path | None = _AUTO) -> FastAPI:
+    """`static_dir` defaults to `paths.find_static_dir()` (the built SPA);
+    pass None to serve no SPA (tests, schema generation)."""
     cfg = config if config is not None else get_config()
-    if cfg.auth_mode == "oidc":
-        _require_oidc_config(cfg)
+    if static_dir is _AUTO:
+        static_dir = find_static_dir()
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -167,13 +116,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # a restart already reflects them (see settings_overlay.py's own
         # docstring for the full contract).
         settings = await SettingsOverlay.create(cfg, db)
-        await import_legacy_env(settings)
 
         app.state.config = cfg
         app.state.db = db
         app.state.bus = bus
         app.state.queue = queue
         app.state.settings = settings
+        app.state.static_dir = static_dir
+        rebuild_runtime(app)
+
+        async def _on_settings_change() -> None:
+            rebuild_runtime(app)
+
+        settings.on_change = _on_settings_change
         # None when unconfigured -- deps.get_homebox turns that into a 503
         # with a setup hint instead of a crash at startup. Built from the
         # settings overlay's EFFECTIVE url/key, not `cfg` directly, so a
@@ -214,40 +169,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     register_error_handlers(app)
     openapi_meta.install(app)
 
-    # Auth (task 4.1) -- ONLY added in oidc mode, so `auth_mode == "none"`
-    # (the default) never runs a byte of this: no SessionMiddleware, no
-    # gate, request/response behavior identical to every pre-4.1 release.
-    #
-    # Registration order matters: Starlette's `add_middleware` is LIFO (the
-    # LAST-added ends up OUTERMOST -- see Starlette.build_middleware_stack),
-    # so registering AuthGateMiddleware, then SessionMiddleware, then
-    # GZipMiddleware, THEN CORSMiddleware last produces this actual
-    # per-request order:
+    # Session, auth gate and CORS are always installed; each reads the
+    # runtime snapshot (app.state.auth_rt, rebuilt on every settings change)
+    # per request, so mode/origins switch without a restart. Registration
+    # order is LIFO: the per-request order is
     #
     #     CORS -> GZip -> Session -> AuthGate -> routing -> the endpoint
     #
-    # CORS outermost means a 401 the gate manufactures still gets
-    # Access-Control-* headers on the way back out (otherwise a
-    # cross-origin dev frontend couldn't even read the 401 body). Session
-    # running before AuthGate means `scope["session"]` is already decoded
-    # by the time the gate reads it, for both "http" and "websocket" scopes
-    # (see auth_gate.py's own docstring for the full reasoning).
+    # CORS outermost keeps Access-Control-* on a 401 the gate manufactures;
+    # Session before AuthGate means `scope["session"]` is decoded when the
+    # gate reads it (http and websocket alike).
     app.state.ws_tickets = WsTicketStore()
-    if cfg.auth_mode == "oidc":
-        app.state.oauth = router_auth.build_oauth_client(cfg)
-        app.add_middleware(AuthGateMiddleware)
-        app.add_middleware(
-            SessionMiddleware,
-            secret_key=cfg.session_secret,
-            session_cookie=_SESSION_COOKIE_NAME,
-            # Cookie max_age and the server-side deadline router_auth stores
-            # come from the SAME config field, so they can't disagree.
-            max_age=cfg.session_max_age_s,
-            https_only=cfg.session_cookie_secure,
-            # Explicit (also Starlette's default): blocks cross-site POST CSRF. The
-            # cookie is always HttpOnly; Secure follows SESSION_COOKIE_SECURE.
-            same_site="lax",
-        )
+    app.add_middleware(AuthGateMiddleware)
+    app.add_middleware(DynamicSessionMiddleware)
 
     # H5 (the 2026-08 code review): GET /api/symbols' ~1.5MB catalog (and
     # anything else this size or larger) went out uncompressed with no
@@ -260,13 +194,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(LegacyDeprecationMiddleware)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cfg.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app.add_middleware(DynamicCORSMiddleware)
 
     health_router = APIRouter()
 
@@ -337,7 +265,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # -- react-router's BrowserRouter routes these client-side, but only
     # once the SPA has actually booted). Those 404'd instead, meaning a
     # hard refresh (or a bookmarked/shared link, or the Dockerfile's
-    # shipped container shape -- STATIC_DIR=/app/static, docker/Dockerfile)
+    # shipped container shape -- /app/static, docker/Dockerfile)
     # landing anywhere but "/" was broken. A `Mount("/")` also can't be
     # "layered" with a route registered after it -- once a path matches a
     # mount's prefix (and "/" is a prefix of everything), Starlette
@@ -377,7 +305,6 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     # through to `index.html` -- rather than distinguishing the reason: the
     # SPA itself is the right place to render a "not found" for a path this
     # malformed, not a 500.
-    static_dir = _resolve_static_dir()
     if static_dir is not None:
         static_root = static_dir.resolve()
 

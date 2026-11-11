@@ -736,10 +736,14 @@ export type SettingsResponse = S["SettingsOut"];
  * -- an unknown key, or a value outside that field's own bounds/Literal
  * choices, 422s (parsed the same readable way as every other route, see
  * extractErrorDetail in client.ts). */
-export type SettingsUpdate = Record<string, string | number | boolean | null>;
+export type SettingsUpdate = Record<string, string | number | boolean | string[] | null>;
 
 /** GET /api/v1/api-keys item; the plaintext is never listed. */
 export type ApiKey = S["ApiKeyOut"];
 
 /** POST /api/v1/api-keys (201): `key` is the plaintext, shown once. */
 export type ApiKeyCreated = S["ApiKeyCreatedOut"];
+
+/** POST /api/v1/auth/oidc-test (and rotate-session-secret) shapes. */
+export type OidcTestRequest = S["OidcTestIn"];
+export type OidcTestResponse = S["OidcTestOut"];

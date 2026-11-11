@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ApiError, putHomeboxSettings } from "../api/client";
+import { useSearchParams } from "react-router-dom";
+import { ApiError, oidcTest, putHomeboxSettings, rotateSessionSecret } from "../api/client";
 import type { SettingRow, SettingsSource } from "../api/types";
 import { ApiKeysSection } from "../components/ApiKeysSection";
 import { Pending } from "../components/ui/Pending";
@@ -19,7 +20,7 @@ import {
 } from "../components/ui/styles";
 import { HOMEBOX_SETTINGS_QUERY_KEY, useHomeboxSettingsQuery } from "../hooks/useHomeboxSettings";
 import { useBridgeIdentity } from "../hooks/useBridgeIdentity";
-import { useSettingsQuery, useUpdateSettings } from "../hooks/useSettings";
+import { SETTINGS_QUERY_KEY, useSettingsQuery, useUpdateSettings } from "../hooks/useSettings";
 
 const SECONDARY_BUTTON_CLASS =
   "rounded-md border border-deck-600 bg-deck-800 px-4 py-2 text-[13px] font-medium text-deck-200 hover:border-deck-400 disabled:cursor-not-allowed disabled:opacity-60";
@@ -33,7 +34,7 @@ function findRow(rows: SettingRow[], key: string): SettingRow | undefined {
 
 /** A small mono tag naming WHERE a setting's current effective value comes
  * from -- `"db"` (saved from this page), `"default"` (the built-in default), or
- * `"env"` (read-only Runtime rows only, set via the environment). */
+ * `"env"` (legacy; no longer produced for editable rows). */
 function ProvenanceBadge({ source }: { source: SettingsSource }) {
   return (
     <span className="ml-1.5 rounded border border-deck-700 px-1 py-0.5 font-condensed text-[9px] uppercase tracking-wide text-deck-400">
@@ -761,24 +762,366 @@ function ElsSection({ rows }: { rows: SettingRow[] }) {
   );
 }
 
-// --- Runtime section: read-only, env-derived rows -------------------------
+// --- Auth section ----------------------------------------------------------
+
+const SESSION_MAX_AGE_MIN = 300;
+const SESSION_MAX_AGE_MAX = 2592000;
+
+function strValue(row: SettingRow | undefined): string {
+  return typeof row?.value === "string" ? row.value : "";
+}
+
+function AuthSection({ rows }: { rows: SettingRow[] }) {
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Return from the IdP test login: /settings?oidc_test=ok|error[&message=...]
+  useEffect(() => {
+    const result = searchParams.get("oidc_test");
+    if (!result) return;
+    if (result === "ok") {
+      setBanner({ ok: true, text: "Test login succeeded. OIDC can now be enabled." });
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY });
+    } else {
+      setBanner({ ok: false, text: `Test login failed: ${searchParams.get("message") ?? "unknown error"}` });
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("oidc_test");
+    next.delete("message");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, queryClient]);
+
+  const modeRow = findRow(rows, "auth_mode");
+  const mode = modeRow?.value === "oidc" ? "oidc" : "none";
+  const verified = findRow(rows, "oidc_verified")?.value === true;
+  const redirectUri = strValue(findRow(rows, "oidc_redirect_uri"));
+  const secretRow = findRow(rows, "oidc_client_secret");
+  const secretSet = secretRow?.set === true;
+
+  const modeMutation = useUpdateSettings();
+  const fieldsMutation = useUpdateSettings();
+  const secretMutation = useUpdateSettings();
+  const ageMutation = useUpdateSettings();
+
+  const serverIssuer = strValue(findRow(rows, "oidc_issuer"));
+  const serverClientId = strValue(findRow(rows, "oidc_client_id"));
+  const serverScopes = strValue(findRow(rows, "oidc_scopes"));
+  const serverAge = findRow(rows, "session_max_age_s")?.value;
+  const [issuer, setIssuer] = useState(serverIssuer);
+  const [clientId, setClientId] = useState(serverClientId);
+  const [scopes, setScopes] = useState(serverScopes);
+  const [secret, setSecret] = useState("");
+  const [age, setAge] = useState<number | undefined>(typeof serverAge === "number" ? serverAge : undefined);
+  const [copied, setCopied] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+
+  useEffect(() => setIssuer(serverIssuer), [serverIssuer]);
+  useEffect(() => setClientId(serverClientId), [serverClientId]);
+  useEffect(() => setScopes(serverScopes), [serverScopes]);
+  useEffect(() => setAge(typeof serverAge === "number" ? serverAge : undefined), [serverAge]);
+
+  const testMutation = useMutation({
+    mutationFn: () => {
+      const trimmedSecret = secret.trim();
+      return oidcTest({
+        oidc_issuer: issuer.trim(),
+        oidc_client_id: clientId.trim(),
+        oidc_scopes: scopes.trim() || null,
+        ...(trimmedSecret ? { oidc_client_secret: trimmedSecret } : {}),
+      });
+    },
+    onSuccess: (data) => window.location.assign(data.authorize_url),
+  });
+  const rotateMutation = useMutation({
+    mutationFn: rotateSessionSecret,
+    onSuccess: () => {
+      setConfirmRotate(false);
+      window.location.reload();
+    },
+  });
+
+  const oidcOn = mode === "oidc";
+  const ageOutOfRange = age === undefined || age < SESSION_MAX_AGE_MIN || age > SESSION_MAX_AGE_MAX;
+  const insecureHttp = window.location.protocol === "http:";
+  const secureOn = findRow(rows, "session_cookie_secure")?.value === true;
+
+  function saveFields() {
+    fieldsMutation.mutate({
+      oidc_issuer: issuer.trim() || null,
+      oidc_client_id: clientId.trim() || null,
+      oidc_scopes: scopes.trim() || null,
+    });
+  }
+
+  function copyRedirect() {
+    void navigator.clipboard?.writeText(redirectUri).then(() => setCopied(true));
+  }
+
+  return (
+    <section className={panel}>
+      <h2 className={panelHeading}>Authentication</h2>
+      {banner && (
+        <p role="status" className={banner.ok ? "mb-3 text-[13px] text-sage-400" : `mb-3 ${errorText}`}>
+          {banner.text}
+        </p>
+      )}
+      <div className="flex flex-col gap-4">
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center text-[13px] text-deck-200">
+              Mode
+              {modeRow && <ProvenanceBadge source={modeRow.source} />}
+            </span>
+            <Select
+              value={mode}
+              onChange={(next) => modeMutation.mutate({ auth_mode: next })}
+              options={[
+                { value: "none", label: "None (open access)" },
+                { value: "oidc", label: "OIDC", disabled: !verified && !oidcOn },
+              ]}
+              ariaLabel="Auth mode"
+              disabled={modeMutation.isPending}
+            />
+          </div>
+          {!verified && !oidcOn && (
+            <p className={helpText}>
+              OIDC stays disabled until a test login succeeds with the settings below (use Test login).
+            </p>
+          )}
+          {oidcOn && (
+            <p className={helpText}>
+              OIDC fields are locked while OIDC is on. Switch the mode to None first to edit them; editing clears the
+              verified state and you must test login again.
+            </p>
+          )}
+          <SettingErrorText mutation={modeMutation} />
+        </div>
+
+        <div>
+          <label htmlFor="oidc-issuer" className={`${fieldLabelText} mb-1 block`}>
+            Issuer URL
+          </label>
+          <TextInput id="oidc-issuer" value={issuer} onChange={setIssuer} placeholder="https://idp.example.com" maxLength={255} />
+        </div>
+        <div>
+          <label htmlFor="oidc-client-id" className={`${fieldLabelText} mb-1 block`}>
+            Client ID
+          </label>
+          <TextInput id="oidc-client-id" value={clientId} onChange={setClientId} maxLength={255} />
+        </div>
+        <div>
+          <label htmlFor="oidc-scopes" className={`${fieldLabelText} mb-1 block`}>
+            Scopes
+          </label>
+          <TextInput id="oidc-scopes" value={scopes} onChange={setScopes} placeholder="openid profile email" maxLength={255} />
+        </div>
+        <div className="flex gap-3">
+          <button type="button" onClick={saveFields} disabled={fieldsMutation.isPending} className={primaryButtonClass}>
+            Save OIDC settings
+          </button>
+        </div>
+        <SettingErrorText mutation={fieldsMutation} />
+
+        <div>
+          <label htmlFor="oidc-client-secret" className={`${fieldLabelText} mb-1 block`}>
+            Client secret
+          </label>
+          <p className={helpText}>
+            <strong className="text-deck-200">{secretSet ? "Secret set." : "Not set."}</strong> Never shown once saved --
+            type a new secret to replace it.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <TextInput
+              id="oidc-client-secret"
+              value={secret}
+              onChange={setSecret}
+              type="password"
+              autoComplete="off"
+              placeholder={secretSet ? "enter a new secret to replace it" : ""}
+              maxLength={500}
+            />
+            <button
+              type="button"
+              onClick={() => secretMutation.mutate({ oidc_client_secret: secret.trim() }, { onSuccess: () => setSecret("") })}
+              disabled={secret.trim() === "" || secretMutation.isPending}
+              className={primaryButtonClass}
+            >
+              {secretSet ? "Replace" : "Save"}
+            </button>
+            {secretSet && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSecret("");
+                  secretMutation.mutate({ oidc_client_secret: null });
+                }}
+                disabled={secretMutation.isPending}
+                className={SECONDARY_BUTTON_CLASS}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <SettingErrorText mutation={secretMutation} />
+        </div>
+
+        <div>
+          <span className={`${fieldLabelText} mb-1 block`}>Redirect URI</span>
+          <p className={helpText}>Register this exact URI with your identity provider.</p>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="break-all font-mono text-[12px] text-deck-200">{redirectUri || "unknown"}</code>
+            <button type="button" onClick={copyRedirect} disabled={!redirectUri} className={SECONDARY_BUTTON_CLASS}>
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => testMutation.mutate()}
+              disabled={testMutation.isPending || issuer.trim() === "" || clientId.trim() === ""}
+              className={SECONDARY_BUTTON_CLASS}
+            >
+              Test login
+            </button>
+            <span className="text-[12px] text-deck-400">
+              {verified ? "Verified." : "Not verified."} Saves nothing; signs in once at your IdP to confirm the settings.
+            </span>
+          </div>
+          {testMutation.isError && (
+            <p role="alert" className={errorText}>
+              {testMutation.error instanceof ApiError ? testMutation.error.message : "Could not start the test login."}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="session-max-age" className={`${fieldLabelText} mb-1 block`}>
+            Session max age (seconds)
+          </label>
+          <div className="flex items-center gap-2">
+            <NumberInput
+              id="session-max-age"
+              value={age}
+              onChange={setAge}
+              min={SESSION_MAX_AGE_MIN}
+              max={SESSION_MAX_AGE_MAX}
+              ariaLabel="Session max age (seconds)"
+            />
+            <button
+              type="button"
+              onClick={() => age !== undefined && ageMutation.mutate({ session_max_age_s: age })}
+              disabled={ageOutOfRange || ageMutation.isPending}
+              className={primaryButtonClass}
+            >
+              Save
+            </button>
+          </div>
+          {ageOutOfRange && (
+            <p role="alert" className={errorText}>
+              must be between {SESSION_MAX_AGE_MIN} and {SESSION_MAX_AGE_MAX}
+            </p>
+          )}
+          <SettingErrorText mutation={ageMutation} />
+        </div>
+
+        <SwitchSettingRow
+          label="Secure session cookie"
+          fieldKey="session_cookie_secure"
+          rows={rows}
+          help="Marks the session cookie HTTPS-only. Turn on when served over HTTPS."
+        />
+        {insecureHttp && secureOn && (
+          <p role="alert" className={errorText}>
+            You are on plain http: a secure cookie will not be sent back by the browser, so sign-in will fail. Use HTTPS
+            or turn this off.
+          </p>
+        )}
+
+        <div>
+          {confirmRotate ? (
+            <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Confirm rotate session secret">
+              <span className="text-[13px] text-deck-200">Sign out every session{oidcOn ? ", including yours" : ""}?</span>
+              <button
+                type="button"
+                onClick={() => rotateMutation.mutate()}
+                disabled={rotateMutation.isPending}
+                className={primaryButtonClass}
+              >
+                Confirm rotate
+              </button>
+              <button type="button" onClick={() => setConfirmRotate(false)} className={SECONDARY_BUTTON_CLASS}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setConfirmRotate(true)} className={SECONDARY_BUTTON_CLASS}>
+              Rotate session secret
+            </button>
+          )}
+          {rotateMutation.isError && (
+            <p role="alert" className={errorText}>
+              {rotateMutation.error instanceof ApiError ? rotateMutation.error.message : "Could not rotate the secret."}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// --- Runtime section: CORS origins editor + read-only paths ----------------
 
 function ReadOnlyRow({ label, row }: { label: string; row: SettingRow | undefined }) {
-  if (!row) return null;
-  const display = Array.isArray(row.value)
-    ? row.value.join(", ")
-    : typeof row.value === "boolean"
-      ? row.value
-        ? "yes"
-        : "no"
-      : String(row.value);
+  if (!row || row.value === null || row.value === undefined) return null;
   return (
     <div className="flex items-center justify-between gap-3 border-b border-deck-800 py-1.5 text-[13px] last:border-b-0">
-      <span className="flex items-center text-deck-400">
-        {label}
-        <ProvenanceBadge source={row.source} />
-      </span>
-      <span className="font-mono text-deck-200">{display}</span>
+      <span className="text-deck-400">{label}</span>
+      <span className="font-mono text-deck-200">{String(row.value)}</span>
+    </div>
+  );
+}
+
+function CorsOriginsField({ rows }: { rows: SettingRow[] }) {
+  const row = findRow(rows, "cors_origins");
+  const server = Array.isArray(row?.value) ? row.value : [];
+  const serverKey = server.join("\n");
+  const [text, setText] = useState(serverKey);
+  const mutation = useUpdateSettings();
+
+  useEffect(() => setText(serverKey), [serverKey]);
+
+  const origins = text
+    .split("\n")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label htmlFor="cors-origins" className={fieldLabelText}>
+          CORS origins
+        </label>
+        {row?.source === "db" && (
+          <ResetButton onClick={() => mutation.mutate({ cors_origins: null })} disabled={mutation.isPending} />
+        )}
+      </div>
+      <p className={helpText}>One origin per line (scheme://host[:port], no path, no *). Takes effect without a restart.</p>
+      <Textarea id="cors-origins" value={text} onChange={setText} rows={3} ariaLabel="CORS origins" />
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={() => mutation.mutate({ cors_origins: origins })}
+          disabled={mutation.isPending}
+          className={primaryButtonClass}
+        >
+          Save
+        </button>
+      </div>
+      <SettingErrorText mutation={mutation} />
     </div>
   );
 }
@@ -787,11 +1130,12 @@ function RuntimeSection({ rows }: { rows: SettingRow[] }) {
   return (
     <section className={panel}>
       <h2 className={panelHeading}>Runtime</h2>
-      <p className={helpText}>Every row below is set at startup via the environment (or the container) -- change it there and restart the app, not here.</p>
-      <div className="mt-3">
-        <ReadOnlyRow label="Auth mode" row={findRow(rows, "auth_mode")} />
-        <ReadOnlyRow label="CORS origins" row={findRow(rows, "cors_origins")} />
-        <ReadOnlyRow label="Data directory" row={findRow(rows, "data_dir")} />
+      <div className="flex flex-col gap-4">
+        <CorsOriginsField rows={rows} />
+        <div>
+          <ReadOnlyRow label="Data directory" row={findRow(rows, "data_dir")} />
+          <ReadOnlyRow label="Static directory" row={findRow(rows, "static_dir")} />
+        </div>
       </div>
     </section>
   );
@@ -801,8 +1145,7 @@ function RuntimeSection({ rows }: { rows: SettingRow[] }) {
  * unchanged from before this task) plus a DB-backed overlay over this
  * app's runtime config -- Printer/HomeBox/ELS are genuinely editable, no
  * restart required, each row showing WHERE its current value comes from
- * (db/env/default) and a way back to the env value when overridden;
- * Runtime is what's left that's still env-only. */
+ * (db/default) and a way back to the default when overridden. */
 export function Settings() {
   const settingsQuery = useSettingsQuery();
   const rows = settingsQuery.data?.settings ?? [];
@@ -837,6 +1180,7 @@ export function Settings() {
           <PrinterSection rows={rows} />
           <HomeboxSection rows={rows} />
           <ElsSection rows={rows} />
+          <AuthSection rows={rows} />
           <ApiKeysSection />
           <RuntimeSection rows={rows} />
         </>

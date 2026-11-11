@@ -40,12 +40,20 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
+from labelmaker.api.auth_gate import get_session_user
 from labelmaker.api.deps import AppConfigDep, SettingsDep
 from labelmaker.api.errors import ApiError, err
+from labelmaker.api.router_auth import oidc_redirect_uri
 from labelmaker.api.schemas import SettingRow, SettingsOut
 from labelmaker.config import AppConfig
 from labelmaker.homebox import build_client
-from labelmaker.settings_overlay import SettingsConflictError, SettingsOverlay, SettingsOverrides
+from labelmaker.settings_overlay import (
+    PROTECTED_FIELDS,
+    OidcNotVerifiedError,
+    SettingsConflictError,
+    SettingsOverlay,
+    SettingsOverrides,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -64,32 +72,28 @@ _FIELD_ORDER = tuple(SettingsOverrides.model_fields)
 # deliberately not here (task 4.5 Track A) -- it's a plain bool, not a
 # secret, and now flows through the normal editable-row path above like
 # `els_tape_mm` already did.
-_READONLY_FIELDS = ("auth_mode", "data_dir", "cors_origins")
+_READONLY_FIELDS = ("data_dir", "static_dir", "oidc_verified", "oidc_redirect_uri")
+
+# Secrets: never a `value`; the row only reports whether one is set.
+_WRITE_ONLY = {"homebox_api_key", "oidc_client_secret"}
 
 
-def _cfg_source(config: AppConfig, field: str) -> str:
-    """`"env"` when AppConfig itself resolved `field` from an explicitly
-    provided value (env var/dotenv/constructor kwarg -- see
-    `model_fields_set` on a pydantic-settings model); `"default"`
-    otherwise (the class's own hardcoded default)."""
-    return "env" if field in config.model_fields_set else "default"
-
-
-def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> SettingsOut:
+def _settings_payload(
+    config: AppConfig, settings: SettingsOverlay, request: Request
+) -> SettingsOut:
     effective = settings.effective()
     rows: list[SettingRow] = []
 
     for field in _FIELD_ORDER:
         source = settings.provenance(field)
-        if field == "homebox_api_key":
+        if field in _WRITE_ONLY:
             # NEVER a `value` key here, under any provenance -- only
-            # whether one is currently set (db override OR env), so the
-            # Settings page can render "Key set"/"Not set" without this
-            # route ever echoing the secret itself back to the browser.
+            # whether one is currently set, so the Settings page can render
+            # "Key set"/"Not set" without echoing the secret back.
             rows.append(
                 SettingRow(
                     key=field,
-                    set=bool(effective.homebox_api_key),
+                    set=bool(getattr(effective, field)),
                     source=source,
                     editable=True,
                 )
@@ -104,12 +108,16 @@ def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> SettingsO
                 )
             )
 
+    static_dir = getattr(request.app.state, "static_dir", None)
+    readonly: dict[str, str | bool | None] = {
+        "data_dir": str(config.data_dir),
+        "static_dir": str(static_dir) if static_dir else None,
+        "oidc_verified": settings.oidc_verified(),
+        "oidc_redirect_uri": oidc_redirect_uri(request),
+    }
     for field in _READONLY_FIELDS:
-        value = str(config.data_dir) if field == "data_dir" else getattr(config, field)
         rows.append(
-            SettingRow(
-                key=field, value=value, source=_cfg_source(config, field), editable=False
-            )
+            SettingRow(key=field, value=readonly[field], source="default", editable=False)
         )
 
     return SettingsOut(settings=rows)
@@ -124,12 +132,14 @@ def _settings_payload(config: AppConfig, settings: SettingsOverlay) -> SettingsO
     summary="List settings",
     responses=err(500),
 )
-async def get_settings(config: AppConfigDep, settings: SettingsDep) -> SettingsOut:
+async def get_settings(
+    config: AppConfigDep, settings: SettingsDep, request: Request
+) -> SettingsOut:
     """Every editable setting (value, provenance) plus read-only config rows.
 
     The HomeBox API key is never returned; its row only reports `set`.
     """
-    return _settings_payload(config, settings)
+    return _settings_payload(config, settings, request)
 
 
 @router.put(
@@ -137,7 +147,7 @@ async def get_settings(config: AppConfigDep, settings: SettingsDep) -> SettingsO
     response_model=SettingsOut,
     response_model_exclude_unset=True,
     summary="Update settings",
-    responses=err(422),
+    responses=err(403, 409, 422),
 )
 async def put_settings(
     body: SettingsOverrides, config: AppConfigDep, settings: SettingsDep, request: Request
@@ -145,12 +155,22 @@ async def put_settings(
     """Partially update settings.
 
     Send only the fields to change; an explicit `null` clears the override
-    (reverts to the env/default value), an omitted field is left alone.
+    (reverts to the default), an omitted field is left alone.
     Unknown keys and invalid values yield a 422 whose details never echo
     the submitted values (the HomeBox API key is a secret).
     """
     # Only the fields the caller actually sent (explicit null = clear override).
     sent = body.model_dump(exclude_unset=True)
+    if (
+        sent.keys() & PROTECTED_FIELDS
+        and settings.effective().auth_mode == "oidc"
+        and get_session_user(request.scope.get("session")) is None
+    ):
+        # In oidc mode auth/CORS settings are session-only (API keys, even
+        # write-scoped, may not change who can sign in).
+        raise ApiError(
+            403, "forbidden", "auth and CORS settings can only be changed from a signed-in session"
+        )
     try:
         await settings.set_many(sent)
     except ValidationError as exc:
@@ -164,6 +184,8 @@ async def put_settings(
             f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}" for e in exc.errors()
         )
         raise ApiError(422, "invalid_setting", detail) from exc
+    except OidcNotVerifiedError as exc:
+        raise ApiError(409, "oidc_not_verified", str(exc)) from exc
     except SettingsConflictError as exc:
         raise ApiError(422, "invalid_setting", str(exc)) from exc
 
@@ -186,4 +208,4 @@ async def put_settings(
         if old_client is not None:
             await old_client.close()
 
-    return _settings_payload(config, settings)
+    return _settings_payload(config, settings, request)

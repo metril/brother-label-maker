@@ -536,7 +536,6 @@ _OIDC_WRITES = pytest.mark.parametrize(
             "oidc_issuer": "https://idp.test",
             "oidc_client_id": "cid",
             "oidc_client_secret": "secret",
-            "session_secret": "unit-test-session-secret-do-not-reuse",
         }
     ],
     indirect=True,

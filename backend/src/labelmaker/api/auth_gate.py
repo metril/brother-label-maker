@@ -1,9 +1,8 @@
 """ASGI middleware enforcing the optional OIDC session gate (task 4.1).
 
-Only ever instantiated when `AppConfig.auth_mode == "oidc"` -- main.py adds
-this middleware (and `starlette.middleware.sessions.SessionMiddleware`,
-which it depends on) ONLY in that mode, so the default `auth_mode == "none"`
-zero-auth path never even imports/constructs this class, let alone runs it.
+Always installed, but a pass-through unless the runtime snapshot
+(`app.state.auth_rt`, api/auth_runtime.py) says auth_mode is "oidc"; the mode
+is edited on the Settings page and takes effect without a restart.
 
 -- Middleware ordering (why this matters) --
 
@@ -179,7 +178,12 @@ class AuthGateMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket") or not requires_auth(scope["path"]):
+        rt = getattr(scope["app"].state, "auth_rt", None) if scope["type"] in (
+            "http",
+            "websocket",
+        ) else None
+        # Re-read per request: the mode is switched from the Settings page.
+        if rt is None or rt.auth_mode != "oidc" or not requires_auth(scope["path"]):
             await self.app(scope, receive, send)
             return
 

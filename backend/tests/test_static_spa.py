@@ -3,7 +3,7 @@
 Verified LIVE against a real `frontend/dist` first (curl against a running
 uvicorn with the frontend actually built) -- these tests build their OWN
 tiny static directory instead of depending on `frontend/dist` existing at
-test time (STATIC_DIR is monkeypatched per test, same "isolated tmp_path,
+test time (the dir is passed to create_app per test, same "isolated tmp_path,
 not incidental repo state" convention as conftest.py's own `app_config`
 fixture), so the suite stays hermetic regardless of whether `npm run
 build` has been run in this checkout.
@@ -26,7 +26,7 @@ from labelmaker.main import create_app
 
 
 @pytest.fixture
-async def spa_client(tmp_path, monkeypatch):
+async def spa_client(tmp_path):
     static_dir = tmp_path / "static"
     static_dir.mkdir()
     (static_dir / "index.html").write_text("<!doctype html><title>Label Studio</title>")
@@ -35,8 +35,6 @@ async def spa_client(tmp_path, monkeypatch):
     (assets_dir / "app.js").write_text("console.log('hi');")
     (assets_dir / "zxing_reader-abc.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
     (static_dir / "manifest.webmanifest").write_text('{"start_url": "/capture"}')
-
-    monkeypatch.setenv("STATIC_DIR", str(static_dir))
 
     app_config = AppConfig(
         printer_mode="mock",
@@ -48,7 +46,7 @@ async def spa_client(tmp_path, monkeypatch):
         printer_bit_order="msb_first",
         printer_flip_pins=False,
     )
-    app = create_app(app_config)
+    app = create_app(app_config, static_dir=static_dir)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -152,12 +150,10 @@ async def test_head_root_and_head_real_asset_still_200(spa_client):
     assert asset.content == b""
 
 
-async def test_no_static_dir_leaves_app_bootable_and_unmatched_paths_404(tmp_path, monkeypatch):
-    """`_resolve_static_dir()`'s own contract: no dist yet (or STATIC_DIR
-    pointing nowhere) -- the API must still boot standalone, and since no
+async def test_no_static_dir_leaves_app_bootable_and_unmatched_paths_404(tmp_path):
+    """`static_dir=None` contract: no SPA -- the API boots standalone, and since no
     catch-all route is registered at all in that case, an arbitrary path
     404s the plain FastAPI way (not index.html, nothing to fall back to)."""
-    monkeypatch.setenv("STATIC_DIR", str(tmp_path / "does-not-exist"))
     app_config = AppConfig(
         printer_mode="mock",
         data_dir=tmp_path / "data",
@@ -165,7 +161,7 @@ async def test_no_static_dir_leaves_app_bootable_and_unmatched_paths_404(tmp_pat
         printer_bit_order="msb_first",
         printer_flip_pins=False,
     )
-    app = create_app(app_config)
+    app = create_app(app_config, static_dir=None)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

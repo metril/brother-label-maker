@@ -1,7 +1,7 @@
 """Settings-managed API keys (GET/POST /api-keys, DELETE /api-keys/{id}).
 
 Management requires a browser session, never a bearer key, so a leaked key
-cannot mint more keys. Under AUTH_MODE=none there is no session concept and
+cannot mint more keys. Under auth mode none there is no session concept and
 the whole API is open, so these routes are open too (keys are optional and
 ignored in that mode).
 """

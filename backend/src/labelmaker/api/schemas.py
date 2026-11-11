@@ -262,18 +262,26 @@ class AuthMeOut(Out):
     user: AuthUserOut | None = None
 
 
+class OidcTestOut(Out):
+    authorize_url: str = Field(description="IdP URL to navigate the browser to")
+    redirect_uri: str = Field(description="Callback URL to register with the IdP")
+
+
 # -- settings --------------------------------------------------------------------------
 
 
 class SettingRow(Out):
-    """One settings row. `value` is absent for `homebox_api_key` (never echoed;
-    `set` says whether one is configured); `set` is absent for every other row."""
+    """One settings row. `value` is absent for the write-only secrets
+    (`homebox_api_key`, `oidc_client_secret`; `set` says whether one is
+    configured); `set` is absent for every other row."""
 
     model_config = ConfigDict(json_schema_serialization_defaults_required=False)
 
     key: str
     value: str | int | float | bool | list[str] | None = None
-    set: bool | None = Field(default=None, description="homebox_api_key only: is a key set")
+    set: bool | None = Field(
+        default=None, description="homebox_api_key / oidc_client_secret only: is a secret set"
+    )
     source: Literal["db", "env", "default"]
     editable: bool
 

@@ -40,6 +40,8 @@ import type {
   PrintRequest,
   PrinterStatusResponse,
   ReprintResponse,
+  OidcTestRequest,
+  OidcTestResponse,
   SettingsResponse,
   SettingsUpdate,
   SymbolInfo,
@@ -583,6 +585,16 @@ export function getSettings(): Promise<SettingsResponse> {
  * than refetching. */
 export function putSettings(partial: SettingsUpdate): Promise<SettingsResponse> {
   return request<SettingsResponse>("/settings", { method: "PUT", body: JSON.stringify(partial) });
+}
+
+/** POST /api/v1/auth/oidc-test -- returns the IdP authorize URL to navigate to. */
+export function oidcTest(body: OidcTestRequest): Promise<OidcTestResponse> {
+  return request<OidcTestResponse>("/auth/oidc-test", { method: "POST", body: JSON.stringify(body) });
+}
+
+/** POST /api/v1/auth/rotate-session-secret -- 204; signs everyone out. */
+export async function rotateSessionSecret(): Promise<void> {
+  await request<void>("/auth/rotate-session-secret", { method: "POST" });
 }
 
 /** GET /api/v1/api-keys -- active keys (no plaintext). */

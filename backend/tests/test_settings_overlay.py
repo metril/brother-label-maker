@@ -160,14 +160,14 @@ async def test_set_many_rejects_unknown_key_and_applies_nothing(db, cfg):
 
     # Nothing applied -- not even the valid field in the same invalid batch.
     assert overlay.provenance("printer_bit_order") == "default"
-    assert await db.all_settings() == {}
+    assert [k for k in await db.all_settings() if k.startswith("cfg.")] == []
 
 
 async def test_set_many_rejects_invalid_value_and_applies_nothing(db, cfg):
     overlay = await SettingsOverlay.create(cfg, db)
     with pytest.raises(ValidationError):
         await overlay.set_many({"printer_mode": "not-a-mode"})
-    assert await db.all_settings() == {}
+    assert [k for k in await db.all_settings() if k.startswith("cfg.")] == []
 
 
 # -- OVERRIDABLE_FIELDS is the single source of truth -----------------------

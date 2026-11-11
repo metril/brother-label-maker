@@ -27,17 +27,27 @@ _EXPECTED_ROW_KEYS = {
     "keep_printer_awake",
     "keep_awake_interval_min",
     "auth_mode",
+    "oidc_issuer",
+    "oidc_client_id",
+    "oidc_client_secret",
+    "oidc_scopes",
+    "session_max_age_s",
+    "session_cookie_secure",
+    "cors_origins",
     "els_enabled",
     "data_dir",
-    "cors_origins",
+    "static_dir",
+    "oidc_verified",
+    "oidc_redirect_uri",
 }
+_READONLY = {"data_dir", "static_dir", "oidc_verified", "oidc_redirect_uri"}
 
 # Nothing shaped like a secret (or OIDC/session config) may ever appear in
 # the raw response text -- catches a future accidental
 # `**cfg.model_dump()`-style shortcut even if it slipped past
 # _EXPECTED_ROW_KEYS above (e.g. by renaming a secret field to something
 # innocuous-looking).
-_FORBIDDEN_SUBSTRINGS = ("oidc", "session_secret", "client_secret")
+_FORBIDDEN_SUBSTRINGS = ("session_secret", "auth.session")
 
 
 def _rows_by_key(body: dict) -> dict[str, dict]:
@@ -77,13 +87,14 @@ async def test_get_settings_reflects_app_config_defaults(client):
     # constructor kwarg) is a hardcoded default, never reported as "env".
     assert rows["printer_flip_pins"]["source"] == "default"
     assert rows["data_dir"]["editable"] is False
-    assert rows["cors_origins"]["editable"] is False
-    assert rows["auth_mode"]["editable"] is False
+    assert rows["cors_origins"]["editable"] is True
+    assert rows["auth_mode"]["editable"] is True
+    assert rows["data_dir"]["editable"] is False
     # els_enabled (task 4.5 Track A): a plain bool, not a secret -- flows
     # through the normal editable-row path like every other overridable
     # field, unlike the three genuinely read-only rows above.
     assert rows["els_enabled"]["editable"] is True
-    for field in _EXPECTED_ROW_KEYS - {"auth_mode", "data_dir", "cors_origins"}:
+    for field in _EXPECTED_ROW_KEYS - _READONLY:
         assert rows[field]["editable"] is True
 
 

@@ -1,76 +1,26 @@
-"""App configuration: a pydantic-settings model. Only the startup-time
-fields in `ENV_FIELDS` are read from the process environment (no prefix, the
-env var is the upper-cased field name). Everything else (printer, HomeBox,
-ELS) is edited on the Settings page and stored in the DB overlay
-(settings_overlay.py); those fields here are just hardcoded defaults, which
-tests may still pass as constructor kwargs. A removed env var is ignored by
-`AppConfig` and imported once by `legacy_env.import_legacy_env`.
+"""App configuration: a plain pydantic model of hardcoded defaults. The app
+reads NO environment variables; every operator-facing setting is edited on the
+Settings page and stored in the DB overlay (settings_overlay.py). Tests pass
+constructor kwargs to override defaults.
 
 `get_config()` is a process-wide cached accessor for the real server entry
 point (`main.app = create_app()`); tests never use it -- they build their own
-`AppConfig(...)` with a tmp `data_dir` and pass it straight to `create_app()`,
-so cached env-derived state never leaks between tests.
+`AppConfig(...)` with a tmp `data_dir` and pass it straight to `create_app()`.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-# The only AppConfig fields an operator can set from the environment (needed at
-# startup). STATIC_DIR is read straight from os.environ by main.py.
-ENV_FIELDS = frozenset(
-    {
-        "data_dir",
-        "cors_origins",
-        "auth_mode",
-        "oidc_issuer",
-        "oidc_client_id",
-        "oidc_client_secret",
-        "oidc_scopes",
-        "session_secret",
-        "session_max_age_s",
-        "session_cookie_secure",
-    }
-)
+from labelmaker.paths import default_data_dir
 
 
-class _AllowlistSource(PydanticBaseSettingsSource):
-    """Wraps an env/dotenv source, dropping every field outside ENV_FIELDS."""
-
-    def __init__(self, inner: PydanticBaseSettingsSource) -> None:
-        super().__init__(inner.settings_cls)
-        self._inner = inner
-
-    def get_field_value(self, field: Any, field_name: str) -> Any:  # pragma: no cover
-        return self._inner.get_field_value(field, field_name)
-
-    def __call__(self) -> dict[str, Any]:
-        return {k: v for k, v in self._inner().items() if k in ENV_FIELDS}
-
-
-class AppConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (
-            init_settings,
-            _AllowlistSource(env_settings),
-            _AllowlistSource(dotenv_settings),
-            _AllowlistSource(file_secret_settings),
-        )
+class AppConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
     # printer_* , homebox_* and els_* below are Settings-page fields: plain
     # defaults here (not read from the environment), overridden by the DB overlay.
@@ -81,7 +31,7 @@ class AppConfig(BaseSettings):
     # only under <data_dir>/bridge/, never in the DB.
     printer_bridge_address: str | None = None
     printer_bridge_cert: str | None = None
-    data_dir: Path = Path("./data")
+    data_dir: Path = Field(default_factory=default_data_dir)
     # Verified 2026-07-28 (first physical print, browser path, 24mm TZe):
     # classic printed successfully; e310bt remains untested.
     printer_init_strategy: Literal["classic", "e310bt"] = "classic"
@@ -104,11 +54,6 @@ class AppConfig(BaseSettings):
     # (router_homebox.py's write routes answer 403 while this is False).
     # The API key must ALSO have write access on HomeBox's side.
     homebox_writes_enabled: bool = False
-    # M3: pydantic-settings parses list-typed fields as JSON, not a bare
-    # comma-separated string -- the env var value must be a JSON array,
-    # quoted so the shell/compose file passes the brackets/quotes through
-    # literally, e.g.: CORS_ORIGINS='["https://labels.example.com"]'
-    # (multiple origins: '["https://a.example.com","https://b.example.com"]').
     cors_origins: list[str] = ["http://localhost:5173"]
     # HomeBox External Label Service (ELS, task 3.5) -- HomeBox's
     # HBOX_LABEL_MAKER_LABEL_SERVICE_URL delegates its own label PNG
@@ -142,10 +87,8 @@ class AppConfig(BaseSettings):
     # /api/auth/*, and /api/els/* -- see api/auth_gate.py's own docstring
     # for why each is exempt) behind a signed session cookie, populated via
     # a standard authorization-code round trip through the IdP named below
-    # (api/router_auth.py). main.create_app fails FAST (raises, at startup,
-    # not a 500 on the first login attempt) if auth_mode is "oidc" but any
-    # of the four fields below is left unset -- see main.py's
-    # `_require_oidc_config`.
+    # (api/router_auth.py). the settings overlay refuses to switch
+    # to "oidc" until the fields below have passed a test login.
     auth_mode: Literal["none", "oidc"] = "none"
     # The IdP's issuer URL, e.g. https://auth.example.com/realms/labelmaker
     # -- authlib discovers the rest (authorize/token/jwks endpoints) from
@@ -164,14 +107,7 @@ class AppConfig(BaseSettings):
     # OIDC at all, e.g. generating+checking the nonce; see
     # authlib.integrations.base_client.sync_app._create_oauth2_authorization_url).
     oidc_scopes: str = "openid profile email"
-    # Signs/verifies the session cookie (starlette.middleware.sessions.
-    # SessionMiddleware, itsdangerous under the hood) -- a long random
-    # string (e.g. `openssl rand -hex 32`), operator-supplied so restarting
-    # the container doesn't silently invalidate every signed-in session
-    # against a freshly-generated one. min_length is a hard floor (review):
-    # a guessable secret lets anyone on the network FORGE the cookie and
-    # bypass auth entirely -- the HMAC is the whole gate.
-    session_secret: str | None = Field(default=None, min_length=32)
+    # (The session-signing secret is auto-generated and kept in the DB.)
     # THIS APP'S OWN session lifetime, seconds (default 8h). Deliberately
     # NOT the id_token's `exp` claim (review): that is an authentication-
     # freshness claim most IdPs cap at minutes (Keycloak: 5m), and reusing
